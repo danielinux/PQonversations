@@ -1,0 +1,1 @@
+* Fixa att "q" felaktigt identifieras som kyrillisk tecken
