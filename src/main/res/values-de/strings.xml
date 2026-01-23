@@ -1152,6 +1152,6 @@
     <string name="mobile_ticket">Mobiles Ticket</string>
     <string name="emoji_reactions">Emoji-Reaktionen</string>
     <string name="open_keyboard">Tastatur öffnen</string>
-    <string name="server_invite">Server-Einladung</string>
-    <string name="qr_code_actions">QR-Code scannen QR-Code anzeigen, Server-Einladung</string>
+    <string name="server_invite">Auf Server einladen</string>
+    <string name="qr_code_actions">QR-Code scannen, QR-Code anzeigen, Servereinladung</string>
 </resources>
