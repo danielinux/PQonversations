@@ -1,2 +1,2 @@
-* Åtgärdat sökfunktionen på Android 5 och äldre versioner
-* Optimerat minnesförbrukningen
+* fixade sökning i Android <= 5
+* optimera minneskonsumtion
