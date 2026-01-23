@@ -1,1 +1,1 @@
-* Fixa att "q" felaktigt identifieras som kyrillisk tecken
+* Åtgärdat att "q" felaktigt identifieras som kyrillisk tecken

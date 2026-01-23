@@ -1,1 +1,1 @@
-* Åtgärdat regression (krasch vid anslutning) som introducerades i föregående version
+* Åtgärdat återinfört fel (krasch vid anslutning) som introducerades i föregående version
