@@ -596,9 +596,9 @@
     <string name="copy_fingerprint">Copiază amprenta</string>
     <string name="all_omemo_keys_have_been_verified">Ați verificat toate cheile OMEMO pe care le aveți</string>
     <string name="verified_fingerprints">Amprente verificate</string>
-    <string name="use_camera_icon_to_scan_barcode">Folosește camera pentru a scana codul de bare al contactului</string>
+    <string name="use_camera_icon_to_scan_barcode">Folosește camera pentru a scana codul QR al contactului</string>
     <string name="please_wait_for_keys_to_be_fetched">Vă rugăm să așteptați până se preiau cheile</string>
-    <string name="share_as_barcode">Partajează un cod de bare</string>
+    <string name="share_as_barcode">Partajează un cod QR</string>
     <string name="share_as_uri">Partajează ca adresă XMPP</string>
     <string name="share_as_http">Partajează ca legatură HTTP</string>
     <string name="pref_blind_trust_before_verification">Încredere Oarbă Înainte de Verificare</string>
@@ -1033,7 +1033,7 @@
     <string name="no_certificate_selected">Nu a fost selectat un certificat client!</string>
     <string name="start_chat">Începe discuție</string>
     <string name="corresponding_chats_closed">Discuțiile aferente au fost arhivate.</string>
-    <string name="barcode_does_not_contain_fingerprints_for_this_chat">Codul de bare nu conține o amprentă pentru această discuție.</string>
+    <string name="barcode_does_not_contain_fingerprints_for_this_chat">Codul QR nu conține o amprentă pentru această discuție.</string>
     <string name="welcome_header">Alăturați-vă conversației</string>
     <string name="title_activity_new_chat">Discuție nouă</string>
     <string name="pref_title_interface">Interfață</string>
@@ -1172,4 +1172,6 @@
     <string name="mobile_ticket">Bilet mobil</string>
     <string name="emoji_reactions">Reacții cu emoticoane</string>
     <string name="open_keyboard">Deschide tastatura</string>
+    <string name="server_invite">Invită pe server</string>
+    <string name="qr_code_actions">Scanează QR, Arată QR, Invitație server</string>
 </resources>
