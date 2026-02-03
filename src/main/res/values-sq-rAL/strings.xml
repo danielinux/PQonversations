@@ -1157,4 +1157,9 @@
     <string name="open_keyboard">Hap tastierën</string>
     <string name="pref_use_relays">Përdor rele përherë</string>
     <string name="pref_use_relays_summary">Kalojini krejt lidhjet P2P (thirrje dhe shpërngulje kartelash) përmes shërbyesit tuaj, për të shmangur lënien zbuluar të adresës tuaj IP.</string>
+    <string name="open_browser">Hap Shfletuesin</string>
+    <string name="qr_code_contains_link_text">Ky kod QR shpie te një sajt. Ju lutemi, verifikoni adresën më poshtë, para se ta hapni në shfletuesin tuaj:</string>
+    <string name="qr_code_contains_link">Të hapet Lidhja Web?</string>
+    <string name="server_invite">Ftojeni në shërbyes</string>
+    <string name="qr_code_actions">Skanoni QR, Shfaqni QR, Ftesë për në shërbyes</string>
 </resources>
