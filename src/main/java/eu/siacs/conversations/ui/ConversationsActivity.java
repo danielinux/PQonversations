@@ -86,7 +86,7 @@ import java.util.Arrays;
 import java.util.List;
 import org.openintents.openpgp.util.OpenPgpApi;
 
-public class ConversationsActivity extends QrCodeScanningXmppActivity
+public class ConversationsActivity extends QrCodeProcessingActivity
         implements OnConversationSelected,
                 OnConversationArchived,
                 OnConversationsListItemUpdated,

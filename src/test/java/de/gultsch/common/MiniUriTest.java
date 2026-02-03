@@ -1,12 +1,19 @@
 package de.gultsch.common;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import eu.siacs.conversations.xmpp.Jid;
+import java.util.Collections;
 import java.util.Objects;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.ConscryptMode;
 
+@RunWith(RobolectricTestRunner.class)
+@ConscryptMode(ConscryptMode.Mode.OFF)
 public class MiniUriTest {
 
     @Test
@@ -158,5 +165,18 @@ public class MiniUriTest {
     @Test(expected = IllegalArgumentException.class)
     public void xmppUriEmpty() {
         MiniUri.tryParse("xmpp:?");
+    }
+
+    @Test
+    public void invitationUri() {
+        final var uri =
+                new MiniUri.Xmpp(
+                        Jid.of("test@conference.example.com"),
+                        ImmutableMap.of(
+                                MiniUri.Xmpp.ACTION_JOIN,
+                                Collections.singleton(MiniUri.EMPTY_STRING)));
+        Assert.assertEquals(
+                "https://invite.joinjabber.org/#test%40conference.example.com%3Fjoin",
+                uri.asInvitationUri().asUri().toString());
     }
 }

@@ -41,7 +41,7 @@ public class XmppUriLauncher {
         final Intent intent;
         final var jid = uri.asJid();
         if (SignupUtils.isSupportTokenRegistry() && uri.isAddress() && jid != null) {
-            final String preAuth = uri.getParameter(XmppUri.PARAMETER_PRE_AUTH);
+            final String preAuth = uri.getParameter(MiniUri.Xmpp.PARAMETER_PRE_AUTH);
             if (uri.isAction(MiniUri.Xmpp.ACTION_REGISTER)) {
                 if (jid.getLocal() != null && accounts.contains(jid.asBareJid())) {
                     showError(R.string.account_already_exists);
@@ -55,7 +55,8 @@ public class XmppUriLauncher {
                     && uri.isAction(MiniUri.Xmpp.ACTION_ROSTER)
                     && "y"
                             .equalsIgnoreCase(
-                                    Strings.nullToEmpty(uri.getParameter(XmppUri.PARAMETER_IBR))
+                                    Strings.nullToEmpty(
+                                                    uri.getParameter(MiniUri.Xmpp.PARAMETER_IBR))
                                             .trim())) {
                 intent = SignupUtils.getTokenRegistrationIntent(context, jid.getDomain(), preAuth);
                 intent.putExtra(StartConversationActivity.EXTRA_INVITE_URI, uri.toString());
@@ -78,7 +79,7 @@ public class XmppUriLauncher {
             return;
         }
 
-        if (uri.isAction(XmppUri.ACTION_MESSAGE)) {
+        if (uri.isAction(MiniUri.Xmpp.ACTION_MESSAGE)) {
             final String body = uri.getParameter("body");
 
             if (jid != null) {

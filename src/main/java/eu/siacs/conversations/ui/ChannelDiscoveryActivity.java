@@ -251,6 +251,7 @@ public class ChannelDiscoveryActivity extends XmppActivity
 
     @Override
     public void onChannelSearchResult(final Room result) {
+        // TODO refactor to use AccountPickerDialog
         final List<String> accounts = AccountUtils.getEnabledAccounts(xmppConnectionService);
         if (accounts.size() == 1) {
             joinChannelSearchResult(accounts.get(0), result);

@@ -104,7 +104,6 @@ import eu.siacs.conversations.utils.Resolver;
 import eu.siacs.conversations.utils.SerialSingleThreadExecutor;
 import eu.siacs.conversations.utils.TorServiceUtils;
 import eu.siacs.conversations.utils.WakeLockHelper;
-import eu.siacs.conversations.utils.XmppUri;
 import eu.siacs.conversations.xml.Element;
 import eu.siacs.conversations.xml.LocalizedContent;
 import eu.siacs.conversations.xml.Namespace;
@@ -3560,7 +3559,7 @@ public class XmppConnectionService extends Service {
             if (c.getAccount().isEnabled()
                     && c.getAddress().asBareJid().equals(xmppUri.asJid())
                     && ((c.getMode() == Conversational.MODE_MULTI)
-                            == xmppUri.isAction(XmppUri.ACTION_JOIN))) {
+                            == xmppUri.isAction(MiniUri.Xmpp.ACTION_JOIN))) {
                 findings.add(c);
             }
         }
@@ -3901,50 +3900,44 @@ public class XmppConnectionService extends Service {
         return templates;
     }
 
-    public boolean verifyFingerprints(Contact contact, List<XmppUri.Fingerprint> fingerprints) {
-        boolean performedVerification = false;
+    public boolean verifyFingerprints(
+            final Contact contact, final Collection<String> fingerprints) {
+        final var performedVerification = new AtomicBoolean(false);
         final AxolotlService axolotlService = contact.getAccount().getAxolotlService();
-        for (XmppUri.Fingerprint fp : fingerprints) {
-            if (fp.type == XmppUri.FingerprintType.OMEMO) {
-                String fingerprint = "05" + fp.fingerprint.replaceAll("\\s", "");
-                FingerprintStatus fingerprintStatus =
-                        axolotlService.getFingerprintTrust(fingerprint);
-                if (fingerprintStatus != null) {
-                    if (!fingerprintStatus.isVerified()) {
-                        performedVerification = true;
-                        axolotlService.setFingerprintTrust(
-                                fingerprint, fingerprintStatus.toVerified());
-                    }
-                } else {
-                    axolotlService.preVerifyFingerprint(contact, fingerprint);
+        for (final var fp : fingerprints) {
+            final String fingerprint = "05" + fp.replaceAll("\\s", "");
+            FingerprintStatus fingerprintStatus = axolotlService.getFingerprintTrust(fingerprint);
+            if (fingerprintStatus != null) {
+                if (!fingerprintStatus.isVerified()) {
+                    performedVerification.set(true);
+                    axolotlService.setFingerprintTrust(fingerprint, fingerprintStatus.toVerified());
                 }
+            } else {
+                axolotlService.preVerifyFingerprint(contact, fingerprint);
             }
         }
-        return performedVerification;
+        return performedVerification.get();
     }
 
-    public boolean verifyFingerprints(Account account, List<XmppUri.Fingerprint> fingerprints) {
+    public boolean verifyFingerprints(
+            final Account account, final Collection<String> fingerprints) {
         final AxolotlService axolotlService = account.getAxolotlService();
-        boolean verifiedSomething = false;
-        for (XmppUri.Fingerprint fp : fingerprints) {
-            if (fp.type == XmppUri.FingerprintType.OMEMO) {
-                String fingerprint = "05" + fp.fingerprint.replaceAll("\\s", "");
-                Log.d(Config.LOGTAG, "trying to verify own fp=" + fingerprint);
-                FingerprintStatus fingerprintStatus =
-                        axolotlService.getFingerprintTrust(fingerprint);
-                if (fingerprintStatus != null) {
-                    if (!fingerprintStatus.isVerified()) {
-                        axolotlService.setFingerprintTrust(
-                                fingerprint, fingerprintStatus.toVerified());
-                        verifiedSomething = true;
-                    }
-                } else {
-                    axolotlService.preVerifyFingerprint(account, fingerprint);
-                    verifiedSomething = true;
+        final var verifiedSomething = new AtomicBoolean(false);
+        for (final var fp : fingerprints) {
+            final String fingerprint = "05" + fp.replaceAll("\\s", "");
+            Log.d(Config.LOGTAG, "trying to verify own fp=" + fingerprint);
+            FingerprintStatus fingerprintStatus = axolotlService.getFingerprintTrust(fingerprint);
+            if (fingerprintStatus != null) {
+                if (!fingerprintStatus.isVerified()) {
+                    axolotlService.setFingerprintTrust(fingerprint, fingerprintStatus.toVerified());
+                    verifiedSomething.set(true);
                 }
+            } else {
+                axolotlService.preVerifyFingerprint(account, fingerprint);
+                verifiedSomething.set(true);
             }
         }
-        return verifiedSomething;
+        return verifiedSomething.get();
     }
 
     public ShortcutService getShortcutService() {

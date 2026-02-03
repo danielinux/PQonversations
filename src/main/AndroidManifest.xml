@@ -201,7 +201,7 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="stateUnchanged" />
         <activity
-            android:name=".ui.ScanActivity"
+            android:name=".ui.ScanQrCodeActivity"
             android:enableOnBackInvokedCallback="false"
             android:theme="@style/Theme.Conversations3.FullScreen"
             android:windowSoftInputMode="stateAlwaysHidden" />

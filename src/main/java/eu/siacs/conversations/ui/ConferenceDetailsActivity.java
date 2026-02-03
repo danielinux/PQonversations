@@ -28,6 +28,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import de.gultsch.common.Linkify;
+import de.gultsch.common.MiniUri;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.databinding.ActivityMucDetailsBinding;
@@ -52,13 +53,13 @@ import eu.siacs.conversations.ui.util.SoftKeyboardUtils;
 import eu.siacs.conversations.utils.AccountUtils;
 import eu.siacs.conversations.utils.Compatibility;
 import eu.siacs.conversations.utils.StylingHelper;
-import eu.siacs.conversations.utils.XmppUri;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.manager.BookmarkManager;
 import eu.siacs.conversations.xmpp.manager.MultiUserChatManager;
 import im.conversations.android.model.Bookmark;
 import im.conversations.android.xmpp.model.muc.Affiliation;
 import im.conversations.android.xmpp.model.muc.Role;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import me.drakeet.support.toast.ToastCompat;
@@ -451,17 +452,17 @@ public class ConferenceDetailsActivity extends XmppActivity
     }
 
     @Override
-    protected String getShareableUri(boolean http) {
-        if (mConversation != null) {
-            if (http) {
-                return "https://conversations.im/j/"
-                        + XmppUri.lameUrlEncode(mConversation.getAddress().asBareJid().toString());
-            } else {
-                return "xmpp:" + mConversation.getAddress().asBareJid() + "?join";
-            }
-        } else {
+    protected MiniUri getShareableUri(final boolean http) {
+        if (mConversation == null) {
             return null;
         }
+        final var uri =
+                new MiniUri.Xmpp(
+                        mConversation.getAddress().asBareJid(),
+                        ImmutableMap.of(
+                                MiniUri.Xmpp.ACTION_JOIN,
+                                Collections.singleton(MiniUri.EMPTY_STRING)));
+        return http ? uri.asInvitationUri() : uri;
     }
 
     @Override

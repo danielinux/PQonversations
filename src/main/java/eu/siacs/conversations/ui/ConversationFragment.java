@@ -74,6 +74,7 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.MoreExecutors;
 import de.gultsch.common.Linkify;
+import de.gultsch.common.MiniUri;
 import de.gultsch.common.Patterns;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
@@ -3662,13 +3663,9 @@ public class ConversationFragment extends XmppFragment
                                                     message.getContact(), fingerprint);
                                     break;
                                 case R.id.action_show_qr_code:
-                                    requireXmppActivity()
-                                            .showQrCode(
-                                                    "xmpp:"
-                                                            + message.getContact()
-                                                                    .getAddress()
-                                                                    .asBareJid()
-                                                                    .toString());
+                                    final var uri =
+                                            new MiniUri.Xmpp(message.getContact().getAddress());
+                                    requireXmppActivity().showQrCode(uri);
                                     break;
                             }
                             return true;

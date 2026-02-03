@@ -157,7 +157,7 @@ public class BarcodeProvider extends ContentProvider implements ServiceConnectio
                 try {
                     Account account = mXmppConnectionService.findAccountByJid(Jid.of(jid));
                     if (account != null) {
-                        String shareableUri = account.getShareableUri();
+                        final var shareableUri = account.getShareableUri().asUri().toString();
                         String hash = CryptoHelper.getFingerprint(shareableUri);
                         File file =
                                 new File(
@@ -170,7 +170,7 @@ public class BarcodeProvider extends ContentProvider implements ServiceConnectio
                         }
                         file.getParentFile().mkdirs();
                         file.createNewFile();
-                        Bitmap bitmap = create2dBarcodeBitmap(account.getShareableUri(), 1024);
+                        Bitmap bitmap = create2dBarcodeBitmap(shareableUri, 1024);
                         OutputStream outputStream = new FileOutputStream(file);
                         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
                         outputStream.close();

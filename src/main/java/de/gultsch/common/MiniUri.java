@@ -31,7 +31,7 @@ import okhttp3.HttpUrl;
 
 public class MiniUri {
 
-    private static final String EMPTY_STRING = "";
+    public static final String EMPTY_STRING = "";
 
     private final String raw;
     private final String scheme;
@@ -188,6 +188,14 @@ public class MiniUri {
     }
 
     @Nullable
+    public static MiniUri getOrNull(final Uri uri) {
+        if (uri == null) {
+            return null;
+        }
+        return getOrNull(uri.toString());
+    }
+
+    @Nullable
     public static MiniUri getOrNull(final String uri) {
         if (Strings.isNullOrEmpty(uri)) {
             return null;
@@ -197,6 +205,18 @@ public class MiniUri {
         } catch (final IllegalArgumentException e) {
             return null;
         }
+    }
+
+    public static Xmpp getXmppUriOrNull(final String uri) {
+        final var miniUri = getOrNull(uri);
+        if (miniUri instanceof Xmpp xmpp) {
+            return xmpp;
+        } else if (miniUri instanceof Transformable transformable) {
+            if (transformable.transform() instanceof Xmpp xmpp) {
+                return xmpp;
+            }
+        }
+        return null;
     }
 
     public static MiniUri tryInternalParse(final String uri) {
@@ -264,6 +284,8 @@ public class MiniUri {
         public static final String ACTION_MESSAGE = "message";
         public static final String ACTION_REGISTER = "register";
         public static final String ACTION_ROSTER = "roster";
+        public static final String PARAMETER_PRE_AUTH = "preauth";
+        public static final String PARAMETER_IBR = "ibr";
 
         private final Jid jid;
 
@@ -299,8 +321,13 @@ public class MiniUri {
             final var builder = new ImmutableList.Builder<String>();
             for (var entry : parameter.entrySet()) {
                 for (final var value : entry.getValue()) {
-                    builder.add(
-                            String.format("%s=%s", urlEncode(entry.getKey()), urlEncode(value)));
+                    if (EMPTY_STRING.equals(value)) {
+                        builder.add(urlEncode(entry.getKey()));
+                    } else {
+                        builder.add(
+                                String.format(
+                                        "%s=%s", urlEncode(entry.getKey()), urlEncode(value)));
+                    }
                 }
             }
             return "?" + Joiner.on(';').join(builder.build());
@@ -336,6 +363,26 @@ public class MiniUri {
                                     this.getParameterFlat(),
                                     k -> k != null && PARAMETER_OMEMO.matcher(k).matches())
                             .values());
+        }
+
+        public boolean hasOmemoFingerprints() {
+            return !getOmemoFingerprints().isEmpty();
+        }
+
+        public String getBody() {
+            return getParameterFlat().get("body");
+        }
+
+        public String getName() {
+            return getParameterFlat().get("name");
+        }
+
+        public Http asInvitationUri() {
+            return new Http(
+                    String.format(
+                            "https://%s/#%s",
+                            Http.INVITATION_AUTHORITY_DEFAULT,
+                            urlEncode(asUri().toString().substring(5))));
         }
     }
 
