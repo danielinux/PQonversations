@@ -1164,4 +1164,7 @@
     <string name="open_keyboard">Abrir teclado</string>
     <string name="server_invite">Invitar al servidor</string>
     <string name="qr_code_actions">Escanear QR, Mostrar QR, Invitación al servidor</string>
+    <string name="qr_code_contains_link">¿Abrir enlace web?</string>
+    <string name="qr_code_contains_link_text">Este código QR apunta a un sitio web. Por favor, revisa la siguiente dirección antes de abrirla en tu navegador:</string>
+    <string name="open_browser">Abrir navegador</string>
 </resources>
