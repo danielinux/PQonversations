@@ -58,6 +58,7 @@ import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.common.collect.Iterables;
 import de.gultsch.common.MiniUri;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
@@ -448,6 +449,7 @@ public class ConversationsActivity extends QrCodeProcessingActivity
         executePendingTransactions(fragmentManager);
         final boolean mainNeedsRefresh;
         if (binding.secondaryFragment != null) {
+            fragmentManager.popBackStackImmediate();
             final var secondaryFragment = fragmentManager.findFragmentById(R.id.secondary_fragment);
             if (conversation == null) {
                 if (secondaryFragment != null) {
@@ -573,7 +575,7 @@ public class ConversationsActivity extends QrCodeProcessingActivity
     }
 
     @Override
-    public void onSaveInstanceState(final Bundle savedInstanceState) {
+    public void onSaveInstanceState(@NonNull final Bundle savedInstanceState) {
         final Intent pendingIntent = pendingViewIntent.peek();
         savedInstanceState.putParcelable(
                 "intent", pendingIntent != null ? pendingIntent : getIntent());
@@ -608,8 +610,24 @@ public class ConversationsActivity extends QrCodeProcessingActivity
 
     private void initializeFragments() {
         final var fragmentManager = getSupportFragmentManager();
+        final var fragments = fragmentManager.getFragments();
+        final var optional = Iterables.tryFind(fragments, f -> f instanceof ConversationFragment);
         final var existing = fragmentManager.findFragmentById(R.id.main_fragment);
-        if (existing != null) {
+        if (existing instanceof ConversationsOverviewFragment
+                && binding.secondaryFragment == null
+                && optional.isPresent()) {
+            Log.d(Config.LOGTAG, "moving ConversationFragment from secondary to main");
+            fragmentManager.popBackStackImmediate();
+            final var remove = fragmentManager.beginTransaction();
+            remove.remove(optional.get());
+            remove.commitNow();
+            final var transaction = fragmentManager.beginTransaction();
+            transaction.replace(R.id.main_fragment, optional.get());
+            transaction.addToBackStack(null);
+            transaction.commitAllowingStateLoss();
+            return;
+        }
+        if (existing != null && binding.secondaryFragment == null) {
             return;
         }
         final var transaction = fragmentManager.beginTransaction();
