@@ -1162,4 +1162,9 @@
     <string name="qr_code_contains_link">Të hapet Lidhja Web?</string>
     <string name="server_invite">Ftojeni në shërbyes</string>
     <string name="qr_code_actions">Skanoni QR, Shfaqni QR, Ftesë për në shërbyes</string>
+    <plurals name="delete_n_messages">
+        <item quantity="one">Fshini %d mesazh</item>
+        <item quantity="other">Fshini %d mesazhe</item>
+    </plurals>
+    <string name="muc_user_ban_explainer">Ky përdorues s’do të jetë më në gjendje të shohë mesazhe të reja, ose të marrë pjesë te biseda.</string>
 </resources>
