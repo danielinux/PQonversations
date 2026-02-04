@@ -647,9 +647,9 @@
     <string name="retry_decryption">Entschlüsseln wiederholen</string>
     <string name="session_failure">Sitzungsfehler</string>
     <string name="sasl_downgrade">SASL-Mechanismus zurückgestuft</string>
-    <string name="account_status_regis_web">Der Server benötigt eine Registrierung auf einer Website</string>
-    <string name="open_website">Website öffnen</string>
-    <string name="application_found_to_open_website">Keine App zum Öffnen der Website gefunden</string>
+    <string name="account_status_regis_web">Der Server benötigt eine Registrierung auf einer Webseite</string>
+    <string name="open_website">Webseite öffnen</string>
+    <string name="application_found_to_open_website">Keine App zum Öffnen der Webseite gefunden</string>
     <string name="pref_headsup_notifications">Benachrichtigungsvorschau</string>
     <string name="pref_headsup_notifications_summary">Benachrichtigungsvorschau anzeigen</string>
     <string name="today">Heute</string>
@@ -1151,4 +1151,7 @@
     <string name="open_keyboard">Tastatur öffnen</string>
     <string name="server_invite">Auf Server einladen</string>
     <string name="qr_code_actions">QR-Code scannen, QR-Code anzeigen, Servereinladung</string>
+    <string name="qr_code_contains_link">Link öffnen?</string>
+    <string name="qr_code_contains_link_text">Dieser QR-Code verweist auf eine Webseite. Bitte überprüfe die unten angegebene Adresse, bevor du sie in deinem Browser öffnest:</string>
+    <string name="open_browser">Browser öffnen</string>
 </resources>
