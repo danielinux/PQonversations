@@ -1171,4 +1171,12 @@
     <string name="emoji_reactions">Emojiga reageerimine</string>
     <string name="server_invite">Kutse kasutama serverit</string>
     <string name="qr_code_actions">Skaneeri QR-koodi, näita QR-koodi serveri kutse</string>
+    <string name="qr_code_contains_link">Kas avad veebilingi?</string>
+    <plurals name="delete_n_messages">
+        <item quantity="one">Kustuta %d sõnum</item>
+        <item quantity="other">Kustuta %d sõnumit</item>
+    </plurals>
+    <string name="muc_user_ban_explainer">See kasutaja ei näe enam uusi sõnumeid ega saa osaleda vestlustes.</string>
+    <string name="open_browser">Ava veebibrauseris</string>
+    <string name="qr_code_contains_link_text">See QR-kood viitab veebisaidile. Enne veebibrauseris avamist palun kontrolli, kas see aadress on ikka loogiline ja õige:</string>
 </resources>
