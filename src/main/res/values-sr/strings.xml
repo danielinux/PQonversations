@@ -1195,4 +1195,6 @@
         <item quantity="few">Обриши %d поруке</item>
         <item quantity="other">Обриши %d порука</item>
     </plurals>
+    <string name="server_info_stanzas_rx_tx">Станце (rx/tx)</string>
+    <string name="server_info_stanzas_rx_tx_push">Станце (rx/tx/push)</string>
 </resources>
