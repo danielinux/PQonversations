@@ -70,7 +70,7 @@ public class Patterns {
                                                     return Pattern.quote(s);
                                                 }))
                         + "):[\\p{L}\\p{M}\\p{N}\\-._~:/?#\\[\\]@!$&'*+,;=%]+(\\([\\p{L}\\p{M}\\p{N}\\-._~:/?#\\[\\]@!$&'*+,;=%]+\\))*[\\p{L}\\p{M}\\p{N}\\-._~:/?#\\[\\]@!$&'*+,;=%]*"
-                        + (negativeLookbehind ? "(?<![.?!])" : ""));
+                        + (negativeLookbehind ? "(?<![.,?!])" : ""));
     }
 
     private Patterns() {

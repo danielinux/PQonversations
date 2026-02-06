@@ -13,7 +13,7 @@ public class PatternTest {
     public void shortImMessage() {
         final var message =
                 "Hi. I'm refactoring how URIs are linked in Conversations. We now support more URI"
-                    + " schemes like mailto:user@example.com and tel:+1-269-555-0107 and obviously"
+                    + " schemes like mailto:user@example.com and tel:+1-269-555-0107, and obviously"
                     + " maintain support for things like"
                     + " xmpp:conversations@conference.siacs.eu?join and https://example.com."
                     + " However we no longer link domains that aren't actual URIs like example.com"
