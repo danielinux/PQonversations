@@ -1180,4 +1180,6 @@
         <item quantity="few">Șterge %d mesaje</item>
         <item quantity="other">Șterge %d de mesaje</item>
     </plurals>
+    <string name="server_info_stanzas_rx_tx">Stanțe (pr/tr)</string>
+    <string name="server_info_stanzas_rx_tx_push">Stanțe (pr/tr/push)</string>
 </resources>
