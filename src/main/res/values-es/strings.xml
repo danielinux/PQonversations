@@ -1167,4 +1167,10 @@
     <string name="qr_code_contains_link">¿Abrir enlace web?</string>
     <string name="qr_code_contains_link_text">Este código QR apunta a un sitio web. Por favor, revisa la siguiente dirección antes de abrirla en tu navegador:</string>
     <string name="open_browser">Abrir navegador</string>
+    <string name="muc_user_ban_explainer">Este usuario ya no podrá ver los mensajes nuevos ni participar en la conversación.</string>
+    <plurals name="delete_n_messages">
+        <item quantity="one">Eliminar %d mensaje</item>
+        <item quantity="many">Eliminar %d mensajes</item>
+        <item quantity="other">Eliminar %d mensajes</item>
+    </plurals>
 </resources>
