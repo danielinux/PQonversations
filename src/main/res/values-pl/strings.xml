@@ -1187,4 +1187,6 @@
         <item quantity="many">Usuń %d wiadomości</item>
         <item quantity="other">Usuń %d wiadomości</item>
     </plurals>
+    <string name="server_info_stanzas_rx_tx">Stanze (wysyłanie/odbieranie)</string>
+    <string name="server_info_stanzas_rx_tx_push">Stanze (wysyłanie/odbieranie/wypychanie)</string>
 </resources>
