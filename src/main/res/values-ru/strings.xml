@@ -1199,4 +1199,16 @@
     <string name="open_keyboard">Открыть клавиатуру</string>
     <string name="server_invite">Пригласить на сервер</string>
     <string name="qr_code_actions">Сканировать QR-код, показать QR-код, пригласить на сервер</string>
+    <plurals name="delete_n_messages">
+        <item quantity="one">Удалить %d сообщение</item>
+        <item quantity="few">Удалить %d сообщения</item>
+        <item quantity="many">Удалить %d сообщений</item>
+        <item quantity="other">Удалить %d сообщений</item>
+    </plurals>
+    <string name="qr_code_contains_link">Открыть ссылку?</string>
+    <string name="qr_code_contains_link_text">QR-код указывает на сайт. Проверьте адрес ниже, прежде чем открывать его в браузере:</string>
+    <string name="open_browser">Открыть браузер</string>
+    <string name="muc_user_ban_explainer">Пользователь не будет видеть новые сообщения и не сможет участвовать в беседе.</string>
+    <string name="server_info_stanzas_rx_tx_push">Секции (↓/↑/push)</string>
+    <string name="server_info_stanzas_rx_tx">Секции (↓/↑)</string>
 </resources>
