@@ -1166,4 +1166,9 @@
     <string name="open_keyboard">Apri la tastiera</string>
     <string name="server_invite">Invita sul server</string>
     <string name="qr_code_actions">Scansionare QR, mostrare QR, invitare al server</string>
+    <string name="server_info_stanzas_rx_tx">Stanze (rx/tx)</string>
+    <string name="server_info_stanzas_rx_tx_push">Stanze (rx/tx/push)</string>
+    <string name="qr_code_contains_link">Aprire il link web?</string>
+    <string name="qr_code_contains_link_text">Questo codice QR punta ad un sito web. Verifica l\'indirizzo sottostante prima di aprirlo nel browser:</string>
+    <string name="open_browser">Apri browser</string>
 </resources>
