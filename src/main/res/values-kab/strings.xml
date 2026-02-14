@@ -312,4 +312,25 @@
     <string name="pref_led">Alɣu LED</string>
     <string name="pref_notification_sound">Imesli n ulɣu</string>
     <string name="pref_notification_sound_summary">Imesli n ulɣu i yiznan imaynuten</string>
+    <string name="error_security_exception_during_image_copy">Asnas yettwasqedcen i wefran n tugna-agi ur d-yefki ara ddeqs n tisirag i tɣuri n ufaylu.\n\n<small>Seqdec amsefrak n yifuyla yemgaraden akken ad tferneḍ tugna</small>.</string>
+    <string name="error_security_exception">Asnas yettwasqedcen i beṭṭu n ufaylu-agi ur d-yefki ara ddeqs n tsirag.</string>
+    <string name="account_status_disabled">Yensa s wudem askudan</string>
+    <string name="account_status_not_found">Aqeddac ur yettwaf ara</string>
+    <string name="account_status_connection_timeout">Akud n tuqqna yezri</string>
+    <string name="account_status_regis_fail">Ajerred ur yeddi ara</string>
+    <string name="account_status_regis_conflict">Isem n useqdac yettuseqdac yakan</string>
+    <string name="account_status_regis_success">Ajerred yemmed</string>
+    <string name="account_status_regis_not_sup">Ajerred ur itteddu ara akked uqeddac</string>
+    <string name="account_status_regis_invalid_token">Tiddest n ujerred d arameɣtu</string>
+    <string name="account_status_tls_error">Astag n TLS ur yeddi ara</string>
+    <string name="account_status_tls_error_domain">Taɣult ur tettwaselken ara</string>
+    <string name="account_status_tls_error_protocol">Taɣellist n umesni ur teǧhed ara (Ulac TLS 1.3)</string>
+    <string name="account_status_policy_violation">Taṛuzi n tsertit</string>
+    <string name="account_status_incompatible_server">Aqeddac ur imṣada ara</string>
+    <string name="account_status_incompatible_client">Amsaɣ ur imṣada ara</string>
+    <string name="account_status_stream_error">Tuccḍa n usuddem</string>
+    <string name="account_status_stream_opening_error">Tuccḍa deg ulday n usuddem</string>
+    <string name="account_status_channel_binding">Ulac abrid n tuqqna n ubadu</string>
+    <string name="encryption_choice_unencrypted">Aḍris war awgelhen</string>
+    <string name="mgmt_account_disable">Sexsi s wudem askudan</string>
 </resources>
