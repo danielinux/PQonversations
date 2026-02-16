@@ -718,7 +718,7 @@
     <string name="action_fix_to_location">Закрепить позицию</string>
     <string name="action_unfix_from_location">Открепить позицию</string>
     <string name="action_copy_location">Копировать местоположение</string>
-    <string name="action_share_location">Поделиться местоположением</string>
+    <string name="action_share_location">Отправить местоположение</string>
     <string name="action_directions">Направления</string>
     <string name="title_activity_share_location">Поделиться местоположением</string>
     <string name="title_activity_show_location">Показать местоположение</string>
@@ -874,7 +874,7 @@
     <string name="this_looks_like_a_domain">Это похоже на имя домена</string>
     <string name="add_anway">Добавить всё равно</string>
     <string name="this_looks_like_channel">Это похоже на адрес канала</string>
-    <string name="share_backup_files">Поделиться резервными копиями</string>
+    <string name="share_backup_files">Отправить резервные копии</string>
     <string name="conversations_backup">Резервная копия Conversations</string>
     <string name="event">Событие</string>
     <string name="open_backup">Открыть резервную копию</string>
@@ -1202,4 +1202,6 @@
     <string name="muc_user_ban_explainer">Пользователь не будет видеть новые сообщения и не сможет участвовать в беседе.</string>
     <string name="server_info_stanzas_rx_tx_push">Секции (↓/↑/push)</string>
     <string name="server_info_stanzas_rx_tx">Секции (↓/↑)</string>
+    <string name="share_invitation">Отправить приглашение</string>
+    <string name="publish_qr_code">Опубликовать QR-код</string>
 </resources>
