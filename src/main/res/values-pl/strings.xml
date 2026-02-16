@@ -583,7 +583,7 @@
     <string name="verified_fingerprints">Zaufane odciski</string>
     <string name="use_camera_icon_to_scan_barcode">Użyj aparatu, aby zeskanować kod QR kontaktu</string>
     <string name="please_wait_for_keys_to_be_fetched">Proszę czekać na ściągnięcie kluczy</string>
-    <string name="share_as_uri">Udostępnij przez URI XMPP</string>
+    <string name="share_as_uri">Udostępnij URI XMPP</string>
     <string name="pref_blind_trust_before_verification">Ślepo Ufaj Przed Weryfikacją</string>
     <string name="pref_blind_trust_before_verification_summary">Automatycznie ufaj wszystkim nowym urządzeniom kontaktów, którzy nie zostali zweryfikowani wcześniej i poproś o ręczne potwierdzenie za każdym razem, kiedy zweryfikowany kontakt dodaje nowe urządzenie.</string>
     <string name="blindly_trusted_omemo_keys">Ślepo zaufane klucze OMEMO, to jest mogą należeć do kogoś innego lub ktoś może się podszywać.</string>
@@ -1180,4 +1180,6 @@
     </plurals>
     <string name="server_info_stanzas_rx_tx">Stanze (wysyłanie/odbieranie)</string>
     <string name="server_info_stanzas_rx_tx_push">Stanze (wysyłanie/odbieranie/wypychanie)</string>
+    <string name="share_invitation">Udostępnij zaproszenie</string>
+    <string name="publish_qr_code">Publikuj kod QR</string>
 </resources>
