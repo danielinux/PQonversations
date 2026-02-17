@@ -1204,4 +1204,10 @@
     <string name="publish_qr_code">Опублікувати QR-код</string>
     <string name="server_info_stanzas_rx_tx">Станси (rx/tx)</string>
     <string name="server_info_stanzas_rx_tx_push">Станси (rx/tx/push)</string>
+    <string name="give_membership">Надати право участі</string>
+    <string name="remove_membership">Відкликати право участі</string>
+    <string name="make_admin">Призначити адміністратором</string>
+    <string name="make_owner">Призначити власником</string>
+    <string name="dismiss_as_admin">Вилучити з адміністраторів</string>
+    <string name="dismiss_as_owner">Вилучити з власників</string>
 </resources>
