@@ -1154,4 +1154,10 @@
     <string name="server_info_stanzas_rx_tx_push">Stanzas (rx/tx/push)</string>
     <string name="share_invitation">Compartir invitación</string>
     <string name="publish_qr_code">Publicar código QR</string>
+    <string name="give_membership">Outorgar membresía</string>
+    <string name="remove_membership">Retirar membresía</string>
+    <string name="make_admin">Facer Admin</string>
+    <string name="make_owner">Conceder propiedade</string>
+    <string name="dismiss_as_owner">Retirar propiedade</string>
+    <string name="dismiss_as_admin">Degradar Admin</string>
 </resources>
