@@ -248,6 +248,8 @@ public class ConferenceDetailsActivity extends XmppActivity
                                             ContextCompat.getMainExecutor(this));
                                     return null;
                                 }));
+        this.binding.jidWarning.setOnClickListener(
+                v -> this.binding.mucInfoMore.setVisibility(View.VISIBLE));
         this.binding.mucInfoMore.setVisibility(showMore ? View.VISIBLE : View.GONE);
         this.binding.notificationStatusButton.setOnClickListener(this.mNotifyStatusClickListener);
         this.binding.yourPhoto.setOnClickListener(
@@ -640,6 +642,8 @@ public class ConferenceDetailsActivity extends XmppActivity
         }
         this.binding.mucYourNick.setText(mucOptions.getActualNick());
         if (mucOptions.online()) {
+            this.binding.jidWarning.setVisibility(
+                    mucOptions.isCompliant() ? View.INVISIBLE : View.VISIBLE);
             this.binding.usersWrapper.setVisibility(View.VISIBLE);
             this.binding.mucRole.setVisibility(View.VISIBLE);
             this.binding.mucRole.setText(getStatus(this, self));
@@ -681,8 +685,8 @@ public class ConferenceDetailsActivity extends XmppActivity
                 this.binding.changeConferenceButton.setVisibility(View.INVISIBLE);
             }
         } else {
+            this.binding.jidWarning.setVisibility(View.INVISIBLE);
             this.binding.usersWrapper.setVisibility(View.GONE);
-            this.binding.mucInfoMore.setVisibility(View.GONE);
             this.binding.mucSettings.setVisibility(View.GONE);
         }
 

@@ -364,6 +364,14 @@ public class MucOptions {
         return features.contains(Namespace.MODERATION);
     }
 
+    public boolean isCompliant() {
+        if (isPrivateAndNonAnonymous()) {
+            return occupantId() && mamSupport();
+        } else {
+            return occupantId() && mamSupport() && moderation();
+        }
+    }
+
     public User deleteUser(final Jid jid) {
         synchronized (this.users) {
             final var user = this.users.remove(Id.resource(jid));
