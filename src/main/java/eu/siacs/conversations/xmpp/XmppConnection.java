@@ -56,6 +56,7 @@ import eu.siacs.conversations.services.XmppConnectionService;
 import eu.siacs.conversations.ui.util.PendingItem;
 import eu.siacs.conversations.utils.AccountUtils;
 import eu.siacs.conversations.utils.CryptoHelper;
+import eu.siacs.conversations.utils.NetworkManager;
 import eu.siacs.conversations.utils.Resolver;
 import eu.siacs.conversations.utils.SSLSockets;
 import eu.siacs.conversations.utils.SocksSocketFactory;
@@ -549,8 +550,15 @@ public class XmppConnection implements Runnable {
         } catch (final UnknownHostException
                 | ConnectException
                 | SocksSocketFactory.HostNotFoundException e) {
-            // TODO run NetworkManager.getHint() here
-            this.changeState(Account.State.SERVER_NOT_FOUND);
+            final var hint =
+                    new NetworkManager(mXmppConnectionService.getApplicationContext()).getHint();
+            final Account.State target =
+                    switch (hint) {
+                        case ACTIVE -> Account.State.SERVER_NOT_FOUND;
+                        case NO_INTERNET -> Account.State.NO_INTERNET;
+                        case AIRPLANE_MODE -> Account.State.AIRPLANE_MODE;
+                    };
+            this.changeState(target);
         } catch (final SocksSocketFactory.SocksProxyNotFoundException e) {
             this.changeState(Account.State.TOR_NOT_AVAILABLE);
         } catch (final IOException | XmlPullParserException e) {
@@ -1612,8 +1620,7 @@ public class XmppConnection implements Runnable {
             prepareForResume(streamId);
             this.tagWriter.writeStanzaAsync(resume);
         } else if (needsBinding) {
-            if (this.streamFeatures.hasChild("bind", Namespace.BIND)
-                    && LoginInfo.isSuccess(loginInfo)) {
+            if (this.streamFeatures.bind() && LoginInfo.isSuccess(loginInfo)) {
                 sendBindRequest();
             } else {
                 Log.d(
@@ -2012,7 +2019,7 @@ public class XmppConnection implements Runnable {
     }
 
     public void resetEverything() {
-        resetAttemptCount(true);
+        resetAttemptCount();
         resetStreamId();
         clearIqCallbacks();
         synchronized (this.mStanzaQueue) {
@@ -2046,16 +2053,20 @@ public class XmppConnection implements Runnable {
                         ? CryptoHelper.random(9)
                         : account.getResource();
         iq.addExtension(new im.conversations.android.xmpp.model.bind.Bind()).setResource(resource);
-        this.sendUnmodifiedIqPacket(
-                iq,
-                (packet) -> {
-                    if (packet.getType() == Iq.Type.TIMEOUT) {
-                        return;
-                    }
-                    final var bind =
-                            packet.getExtension(
-                                    im.conversations.android.xmpp.model.bind.Bind.class);
-                    if (bind != null && packet.getType() == Iq.Type.RESULT) {
+        final var future = this.sendIqPacket(iq, true);
+        Futures.addCallback(
+                future,
+                new FutureCallback<>() {
+                    @Override
+                    public void onSuccess(final Iq result) {
+                        final var bind =
+                                result.getExtension(
+                                        im.conversations.android.xmpp.model.bind.Bind.class);
+                        if (bind == null) {
+                            Log.d(Config.LOGTAG, "bind was null in bind result");
+                            changeStateTerminal(Account.State.BIND_FAILURE);
+                            return;
+                        }
                         isBound = true;
                         final Jid assignedJid = bind.getJid();
                         checkAssignedDomain(assignedJid);
@@ -2072,23 +2083,26 @@ public class XmppConnection implements Runnable {
                             final boolean waitForDisco = enableStreamManagement();
                             sendPostBindInitialization(waitForDisco, false);
                         }
-                    } else {
-                        Log.d(
-                                Config.LOGTAG,
-                                account.getJid()
-                                        + ": disconnecting because of bind failure ("
-                                        + packet);
-                        final var error = packet.getError();
-                        // TODO error.is(Condition)
-                        if (packet.getType() == Iq.Type.ERROR
-                                && error != null
-                                && error.hasChild("conflict")) {
-                            account.setResource(createNewResource());
+                    }
+
+                    @Override
+                    public void onFailure(@NonNull Throwable t) {
+                        if (t instanceof TimeoutException) {
+                            return;
                         }
-                        throw new StateChangingError(Account.State.BIND_FAILURE);
+                        if (t instanceof IqErrorException iqErrorException) {
+                            final var error = iqErrorException.getError();
+                            if (error != null
+                                    && error.getCondition() instanceof Condition.Conflict) {
+                                account.setResource(createNewResource());
+                            }
+                            throw new StateChangingError(Account.State.BIND_FAILURE);
+                        }
+                        Log.d(Config.LOGTAG, "disconnecting because of bind failure", t);
+                        changeStateTerminal(Account.State.BIND_FAILURE);
                     }
                 },
-                true);
+                MoreExecutors.directExecutor());
     }
 
     private void clearIqCallbacks() {
@@ -2147,17 +2161,26 @@ public class XmppConnection implements Runnable {
                 account.getJid().asBareJid() + ": sending legacy session to outdated server");
         final Iq startSession = new Iq(Iq.Type.SET);
         startSession.addExtension(new Session());
-        this.sendUnmodifiedIqPacket(
-                startSession,
-                (packet) -> {
-                    if (packet.getType() == Iq.Type.RESULT) {
+        final var future = this.sendIqPacket(startSession, true);
+        Futures.addCallback(
+                future,
+                new FutureCallback<>() {
+                    @Override
+                    public void onSuccess(Iq result) {
                         final boolean waitForDisco = enableStreamManagement();
                         sendPostBindInitialization(waitForDisco, false);
-                    } else if (packet.getType() != Iq.Type.TIMEOUT) {
-                        throw new StateChangingError(Account.State.SESSION_FAILURE);
+                    }
+
+                    @Override
+                    public void onFailure(@NonNull Throwable t) {
+                        if (t instanceof TimeoutException) {
+                            return;
+                        }
+                        Log.d(Config.LOGTAG, "failing to establish session", t);
+                        changeStateTerminal(Account.State.SESSION_FAILURE);
                     }
                 },
-                true);
+                MoreExecutors.directExecutor());
     }
 
     private boolean enableStreamManagement() {
@@ -2482,7 +2505,7 @@ public class XmppConnection implements Runnable {
 
     public ListenableFuture<Iq> sendIqPacket(final Iq request, final boolean allowUnbound) {
         final SettableFuture<Iq> settable = SettableFuture.create();
-        this.sendUnmodifiedIqPacket(
+        this.sendIqPacket(
                 request,
                 response -> {
                     final var type = response.getType();
@@ -2496,13 +2519,8 @@ public class XmppConnection implements Runnable {
         return settable;
     }
 
-    public String sendIqPacket(final Iq packet, final Consumer<Iq> callback) {
-        packet.setFrom(account.getJid());
-        return this.sendUnmodifiedIqPacket(packet, callback, false);
-    }
-
-    public synchronized String sendUnmodifiedIqPacket(
-            final Iq packet, final Consumer<Iq> callback, boolean force) {
+    public synchronized void sendIqPacket(
+            final Iq packet, final Consumer<Iq> callback, final boolean force) {
         // TODO if callback != null verify that type is get or set
         if (packet.getId() == null) {
             packet.setId(CryptoHelper.random(9));
@@ -2513,7 +2531,6 @@ public class XmppConnection implements Runnable {
             }
         }
         this.sendPacket(packet, force);
-        return packet.getId();
     }
 
     public void sendResultFor(final Iq request, final Extension... extensions) {
@@ -2785,9 +2802,9 @@ public class XmppConnection implements Runnable {
         this.sendPacket(new Inactive());
     }
 
-    public void resetAttemptCount(boolean resetConnectTime) {
+    public void resetAttemptCount() {
         this.attempt = 0;
-        if (resetConnectTime) {
+        if (account.getStatus() != Account.State.CONNECTING) {
             this.lastConnectionStarted = 0;
         }
     }

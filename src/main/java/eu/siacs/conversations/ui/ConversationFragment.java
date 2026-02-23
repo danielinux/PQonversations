@@ -1986,11 +1986,6 @@ public class ConversationFragment extends XmppFragment
     }
 
     private void createNewConnection(final Message message) {
-        if (!requireXmppActivity().xmppConnectionService.hasInternetConnection()) {
-            Toast.makeText(getActivity(), R.string.not_connected_try_again, Toast.LENGTH_SHORT)
-                    .show();
-            return;
-        }
         requireXmppActivity()
                 .xmppConnectionService
                 .getHttpConnectionManager()

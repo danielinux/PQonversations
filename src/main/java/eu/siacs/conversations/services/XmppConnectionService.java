@@ -21,9 +21,6 @@ import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
-import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
@@ -96,6 +93,7 @@ import eu.siacs.conversations.utils.Compatibility;
 import eu.siacs.conversations.utils.ConversationsFileObserver;
 import eu.siacs.conversations.utils.CryptoHelper;
 import eu.siacs.conversations.utils.MimeUtils;
+import eu.siacs.conversations.utils.NetworkManager;
 import eu.siacs.conversations.utils.PhoneHelper;
 import eu.siacs.conversations.utils.QuickLoader;
 import eu.siacs.conversations.utils.ReplacingSerialSingleThreadExecutor;
@@ -469,12 +467,12 @@ public class XmppConnectionService extends Service {
                 mQuickConversationsService.handleSmsReceived(intent);
                 break;
             case ConnectivityManager.CONNECTIVITY_ACTION:
-                if (hasInternetConnection()) {
+                if (new NetworkManager(this).getHint() == NetworkManager.Hint.ACTIVE) {
                     if (Config.POST_CONNECTIVITY_CHANGE_PING_INTERVAL > 0) {
                         schedulePostConnectivityChange();
                     }
                     if (Config.RESET_ATTEMPT_COUNT_ON_NETWORK_CHANGE) {
-                        resetAllAttemptCounts(true, false);
+                        resetAllAttemptCounts(true);
                     }
                     Resolver.clearCache();
                 }
@@ -551,7 +549,7 @@ public class XmppConnectionService extends Service {
                 dismissErrorNotifications();
                 break;
             case ACTION_TRY_AGAIN:
-                resetAllAttemptCounts(false, true);
+                resetAllAttemptCounts(false);
                 break;
             case ACTION_REPLY_TO_CONVERSATION:
                 final Bundle remoteInput =
@@ -818,82 +816,73 @@ public class XmppConnectionService extends Service {
             return false;
         }
         final var requestCode = account.getUuid().hashCode();
-        if (!hasInternetConnection()) {
-            connection.setStatusAndTriggerProcessor(Account.State.NO_INTERNET);
-        } else {
-            if (account.getStatus() == Account.State.NO_INTERNET) {
-                connection.setStatusAndTriggerProcessor(Account.State.OFFLINE);
-            }
-            if (account.getStatus() == Account.State.ONLINE) {
-                synchronized (mLowPingTimeoutMode) {
-                    long lastReceived = account.getXmppConnection().getLastPacketReceived();
-                    long lastSent = account.getXmppConnection().getLastPingSent();
-                    long pingInterval =
-                            isUiAction
-                                    ? Config.PING_MIN_INTERVAL * 1000
-                                    : Config.PING_MAX_INTERVAL * 1000;
-                    long msToNextPing =
-                            (Math.max(lastReceived, lastSent) + pingInterval)
-                                    - SystemClock.elapsedRealtime();
-                    int pingTimeout =
-                            mLowPingTimeoutMode.contains(account.getJid().asBareJid())
-                                    ? Config.LOW_PING_TIMEOUT * 1000
-                                    : Config.PING_TIMEOUT * 1000;
-                    long pingTimeoutIn = (lastSent + pingTimeout) - SystemClock.elapsedRealtime();
-                    if (lastSent > lastReceived) {
-                        if (pingTimeoutIn < 0) {
-                            Log.d(Config.LOGTAG, account.getJid().asBareJid() + ": ping timeout");
-                            this.reconnectAccount(account, true, interactive);
-                        } else {
-                            this.scheduleWakeUpCall(pingTimeoutIn, requestCode);
-                        }
+        if (account.getStatus() == Account.State.ONLINE) {
+            synchronized (mLowPingTimeoutMode) {
+                long lastReceived = account.getXmppConnection().getLastPacketReceived();
+                long lastSent = account.getXmppConnection().getLastPingSent();
+                long pingInterval =
+                        isUiAction
+                                ? Config.PING_MIN_INTERVAL * 1000
+                                : Config.PING_MAX_INTERVAL * 1000;
+                long msToNextPing =
+                        (Math.max(lastReceived, lastSent) + pingInterval)
+                                - SystemClock.elapsedRealtime();
+                int pingTimeout =
+                        mLowPingTimeoutMode.contains(account.getJid().asBareJid())
+                                ? Config.LOW_PING_TIMEOUT * 1000
+                                : Config.PING_TIMEOUT * 1000;
+                long pingTimeoutIn = (lastSent + pingTimeout) - SystemClock.elapsedRealtime();
+                if (lastSent > lastReceived) {
+                    if (pingTimeoutIn < 0) {
+                        Log.d(Config.LOGTAG, account.getJid().asBareJid() + ": ping timeout");
+                        this.reconnectAccount(account, true, interactive);
                     } else {
-                        pingCandidates.add(account);
-                        if (isAccountPushed) {
-                            if (mLowPingTimeoutMode.add(account.getJid().asBareJid())) {
-                                Log.d(
-                                        Config.LOGTAG,
-                                        account.getJid().asBareJid()
-                                                + ": entering low ping timeout mode");
-                            }
-                            return true;
-                        } else if (msToNextPing <= 0) {
-                            return true;
-                        } else {
-                            this.scheduleWakeUpCall(msToNextPing, requestCode);
-                            if (mLowPingTimeoutMode.remove(account.getJid().asBareJid())) {
-                                Log.d(
-                                        Config.LOGTAG,
-                                        account.getJid().asBareJid()
-                                                + ": leaving low ping timeout mode");
-                            }
+                        this.scheduleWakeUpCall(pingTimeoutIn, requestCode);
+                    }
+                } else {
+                    pingCandidates.add(account);
+                    if (isAccountPushed) {
+                        if (mLowPingTimeoutMode.add(account.getJid().asBareJid())) {
+                            Log.d(
+                                    Config.LOGTAG,
+                                    account.getJid().asBareJid()
+                                            + ": entering low ping timeout mode");
+                        }
+                        return true;
+                    } else if (msToNextPing <= 0) {
+                        return true;
+                    } else {
+                        this.scheduleWakeUpCall(msToNextPing, requestCode);
+                        if (mLowPingTimeoutMode.remove(account.getJid().asBareJid())) {
+                            Log.d(
+                                    Config.LOGTAG,
+                                    account.getJid().asBareJid()
+                                            + ": leaving low ping timeout mode");
                         }
                     }
                 }
-            } else if (account.getStatus() == Account.State.OFFLINE) {
-                reconnectAccount(account, true, interactive);
-            } else if (account.getStatus() == Account.State.CONNECTING) {
-                final var connectionDuration = connection.getConnectionDuration();
-                final var discoDuration = connection.getDiscoDuration();
-                final var connectionTimeout = Config.CONNECT_TIMEOUT * 1000L - connectionDuration;
-                final var discoTimeout = Config.CONNECT_DISCO_TIMEOUT * 1000L - discoDuration;
-                if (connectionTimeout < 0) {
-                    connection.triggerConnectionTimeout();
-                } else if (discoTimeout < 0) {
-                    connection.sendDiscoTimeout();
-                    scheduleWakeUpCall(discoTimeout, requestCode);
-                } else {
-                    scheduleWakeUpCall(Math.min(connectionTimeout, discoTimeout), requestCode);
-                }
+            }
+        } else if (account.getStatus() == Account.State.OFFLINE) {
+            reconnectAccount(account, true, interactive);
+        } else if (account.getStatus() == Account.State.CONNECTING) {
+            final var connectionDuration = connection.getConnectionDuration();
+            final var discoDuration = connection.getDiscoDuration();
+            final var connectionTimeout = Config.CONNECT_TIMEOUT * 1000L - connectionDuration;
+            final var discoTimeout = Config.CONNECT_DISCO_TIMEOUT * 1000L - discoDuration;
+            if (connectionTimeout < 0) {
+                connection.triggerConnectionTimeout();
+            } else if (discoTimeout < 0) {
+                connection.sendDiscoTimeout();
+                scheduleWakeUpCall(discoTimeout, requestCode);
             } else {
-                final boolean aggressive =
-                        account.getStatus() == Account.State.SEE_OTHER_HOST
-                                || connection
-                                        .getManager(JingleManager.class)
-                                        .hasJingleRtpConnection();
-                if (connection.getTimeToNextAttempt(aggressive) <= 0) {
-                    reconnectAccount(account, true, interactive);
-                }
+                scheduleWakeUpCall(Math.min(connectionTimeout, discoTimeout), requestCode);
+            }
+        } else {
+            final boolean aggressive =
+                    account.getStatus() == Account.State.SEE_OTHER_HOST
+                            || connection.getManager(JingleManager.class).hasJingleRtpConnection();
+            if (connection.getTimeToNextAttempt(aggressive) <= 0) {
+                reconnectAccount(account, true, interactive);
             }
         }
         return false;
@@ -997,14 +986,12 @@ public class XmppConnectionService extends Service {
                         getResources().getString(R.string.picture_compression));
     }
 
-    private void resetAllAttemptCounts(boolean reallyAll, boolean retryImmediately) {
-        Log.d(Config.LOGTAG, "resetting all attempt counts");
-        for (Account account : accounts) {
+    private void resetAllAttemptCounts(final boolean reallyAll) {
+        for (final var account : accounts) {
             if (account.hasErrorStatus() || reallyAll) {
-                final XmppConnection connection = account.getXmppConnection();
-                if (connection != null) {
-                    connection.resetAttemptCount(retryImmediately);
-                }
+                Log.d(Config.LOGTAG, account.getJid().asBareJid() + ": resetting attempt count");
+                final var connection = account.getXmppConnection();
+                connection.resetAttemptCount();
             }
             if (account.setShowErrorNotification(true)) {
                 mDatabaseWriterExecutor.execute(() -> databaseBackend.updateAccount(account));
@@ -1050,33 +1037,6 @@ public class XmppConnectionService extends Service {
                         updateConversationUi();
                     }
                 });
-    }
-
-    public boolean hasInternetConnection() {
-        final ConnectivityManager cm =
-                ContextCompat.getSystemService(this, ConnectivityManager.class);
-        if (cm == null) {
-            return true; // if internet connection can not be checked it is probably best to just
-            // try
-        }
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                final Network activeNetwork = cm.getActiveNetwork();
-                final NetworkCapabilities capabilities =
-                        activeNetwork == null ? null : cm.getNetworkCapabilities(activeNetwork);
-                return capabilities != null
-                        && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
-            } else {
-                final NetworkInfo networkInfo = cm.getActiveNetworkInfo();
-                return networkInfo != null
-                        && (networkInfo.isConnected()
-                                || networkInfo.getType() == ConnectivityManager.TYPE_ETHERNET);
-            }
-        } catch (final RuntimeException e) {
-            Log.d(Config.LOGTAG, "unable to check for internet connection", e);
-            return true; // if internet connection can not be checked it is probably best to just
-            // try
-        }
     }
 
     @SuppressLint("TrulyRandom")
@@ -3174,8 +3134,7 @@ public class XmppConnectionService extends Service {
             final Account account, final boolean force, final boolean interactive) {
         synchronized (account) {
             final XmppConnection connection = account.getXmppConnection();
-            final boolean hasInternet = hasInternetConnection();
-            if (account.isConnectionEnabled() && hasInternet) {
+            if (account.isConnectionEnabled()) {
                 if (!force) {
                     disconnect(account, false);
                 }
@@ -3186,16 +3145,12 @@ public class XmppConnectionService extends Service {
                 thread.start();
                 scheduleWakeUpCall(Config.CONNECT_DISCO_TIMEOUT, account.getUuid().hashCode());
             } else {
-                disconnect(account, force || account.getTrueStatus().isError() || !hasInternet);
+                disconnect(account, force || account.getTrueStatus().isError());
                 connection.getManager(PresenceManager.class).clear();
                 connection.resetEverything();
                 final AxolotlService axolotlService = account.getAxolotlService();
                 if (axolotlService != null) {
                     axolotlService.resetBrokenness();
-                }
-                if (!hasInternet) {
-                    // TODO should this go via XmppConnection.setStatusAndTriggerProcessor()?
-                    account.setStatus(Account.State.NO_INTERNET);
                 }
             }
         }
@@ -3629,7 +3584,7 @@ public class XmppConnectionService extends Service {
     public void sendIqPacket(final Account account, final Iq packet, final Consumer<Iq> callback) {
         final XmppConnection connection = account.getXmppConnection();
         if (connection != null) {
-            connection.sendIqPacket(packet, callback);
+            connection.sendIqPacket(packet, callback, false);
         } else if (callback != null) {
             callback.accept(Iq.TIMEOUT);
         }

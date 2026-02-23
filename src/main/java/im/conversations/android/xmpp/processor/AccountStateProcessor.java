@@ -83,8 +83,7 @@ public class AccountStateProcessor extends XmppConnection.Delegate
         } else if (account.getStatus() == Account.State.REGISTRATION_SUCCESSFUL) {
             this.service.databaseBackend.updateAccount(account);
             this.service.reconnectAccount(account, true, false);
-        } else if (account.getStatus() != Account.State.CONNECTING
-                && account.getStatus() != Account.State.NO_INTERNET) {
+        } else if (account.getStatus() != Account.State.CONNECTING) {
             this.service.resetSendingToWaiting(account);
             if (connection != null && account.getStatus().isAttemptReconnect()) {
                 final boolean aggressive =

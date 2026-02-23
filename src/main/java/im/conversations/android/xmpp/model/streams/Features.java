@@ -3,6 +3,7 @@ package im.conversations.android.xmpp.model.streams;
 import im.conversations.android.annotation.XmlElement;
 import im.conversations.android.xmpp.model.StreamElement;
 import im.conversations.android.xmpp.model.StreamFeature;
+import im.conversations.android.xmpp.model.bind.Bind;
 import im.conversations.android.xmpp.model.capabilties.EntityCapabilities;
 import im.conversations.android.xmpp.model.csi.ClientStateIndication;
 import im.conversations.android.xmpp.model.register.RegisterStreamFeature;
@@ -44,5 +45,9 @@ public class Features extends StreamElement implements EntityCapabilities {
     public boolean session() {
         final var session = getExtension(Session.class);
         return session != null && !session.isOptional();
+    }
+
+    public boolean bind() {
+        return hasExtension(Bind.class);
     }
 }

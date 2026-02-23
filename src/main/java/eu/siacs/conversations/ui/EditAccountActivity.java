@@ -1440,6 +1440,7 @@ public class EditAccountActivity extends OmemoActivity
             if (status.isError()
                     || Arrays.asList(
                                     Account.State.NO_INTERNET,
+                                    Account.State.AIRPLANE_MODE,
                                     Account.State.MISSING_INTERNET_PERMISSION)
                             .contains(status)) {
                 if (status == Account.State.UNAUTHORIZED

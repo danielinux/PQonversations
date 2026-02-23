@@ -16,8 +16,8 @@ import com.google.common.collect.ImmutableSet;
 import eu.siacs.conversations.persistance.FileBackend;
 import eu.siacs.conversations.services.QuickConversationsService;
 import eu.siacs.conversations.utils.Compatibility;
+import eu.siacs.conversations.utils.Random;
 import eu.siacs.conversations.xmpp.Jid;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Objects;
@@ -354,8 +354,7 @@ public class AppSettings {
         if (existing != 0) {
             return existing;
         }
-        final var secureRandom = new SecureRandom();
-        final var installationId = secureRandom.nextLong();
+        final var installationId = Random.SECURE_RANDOM.nextLong();
         sharedPreferences.edit().putLong(INSTALLATION_ID, installationId).apply();
         return installationId;
     }
@@ -377,8 +376,7 @@ public class AppSettings {
     }
 
     public synchronized void resetInstallationId() {
-        final var secureRandom = new SecureRandom();
-        final var installationId = secureRandom.nextLong();
+        final var installationId = Random.SECURE_RANDOM.nextLong();
         PreferenceManager.getDefaultSharedPreferences(context)
                 .edit()
                 .putLong(INSTALLATION_ID, installationId)

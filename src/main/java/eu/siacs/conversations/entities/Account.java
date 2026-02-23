@@ -690,6 +690,7 @@ public class Account extends AbstractEntity implements AvatarService.Avatar {
         CONNECTING(false),
         ONLINE(false),
         NO_INTERNET(false),
+        AIRPLANE_MODE(false),
         CONNECTION_TIMEOUT,
         UNAUTHORIZED,
         TEMPORARY_AUTH_FAILURE,
@@ -755,6 +756,7 @@ public class Account extends AbstractEntity implements AvatarService.Avatar {
                 case UNAUTHORIZED -> R.string.account_status_unauthorized;
                 case SERVER_NOT_FOUND -> R.string.account_status_not_found;
                 case NO_INTERNET -> R.string.account_status_no_internet;
+                case AIRPLANE_MODE -> R.string.account_status_airplane_mode;
                 case CONNECTION_TIMEOUT -> R.string.account_status_connection_timeout;
                 case REGISTRATION_FAILED -> R.string.account_status_regis_fail;
                 case REGISTRATION_WEB -> R.string.account_status_regis_web;
