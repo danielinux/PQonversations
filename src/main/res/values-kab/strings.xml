@@ -510,4 +510,70 @@
     <string name="location_disabled">Beṭṭu n wadig yensa</string>
     <string name="action_fix_to_location">Seɣti ideg</string>
     <string name="unable_to_start_recording">Yegguma ad isenker asekles</string>
+    <string name="please_wait_for_keys_to_be_fetched">Ttxil-k·m arǧu ad d-tawiḍ tisura</string>
+    <string name="share_as_uri">Bḍu URI XMPP</string>
+    <string name="share_invitation">Bḍu tinnubga</string>
+    <string name="invalid_barcode">Tangalt QR mačči d tameɣtut</string>
+    <string name="pref_clean_cache_summary">Sfeḍ akaram n tzarkatut (yettwasqedcen sɣur tkamiṛat n usnas)</string>
+    <string name="pref_clean_cache">Sfeḍ tazarkatut</string>
+    <string name="pref_clean_private_storage">Sfeḍ takatut tusligt</string>
+    <string name="pref_clean_private_storage_summary">Sfeḍ asekles uslig anda ttwaḥerzen yifuyla (Zemren ad ttusidren tikkelt nniḍen seg uqeddac)</string>
+    <string name="i_followed_this_link_from_a_trusted_source">Ḍefreɣ aseɣwen-a seg uɣbalu yettwamanen</string>
+    <string name="verify_omemo_keys">Selken tisura OMEMO</string>
+    <string name="show_inactive_devices">Sken-d arurmid</string>
+    <string name="hide_inactive_devices">Ffer arurmid</string>
+    <string name="distrust_omemo_key">Kkes taflest deg ibenk</string>
+    <string name="distrust_omemo_key_text">Tebɣiḍ ad tekkseḍ asenqad n yibenk-agi?\nIbenk-a akked yizen-agi ad yettwacreḍ am \"Ur yettwaman ara\".</string>
+    <plurals name="seconds">
+        <item quantity="one">%d n tasint</item>
+        <item quantity="other">%d n tasinin</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">%d n tasdat</item>
+        <item quantity="other">%d n tesdatin</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%d usrag</item>
+        <item quantity="other">%d yisragen</item>
+    </plurals>
+    <plurals name="days">
+        <item quantity="one">%d wass</item>
+        <item quantity="other">%d wussan</item>
+    </plurals>
+    <plurals name="weeks">
+        <item quantity="one">%d n dduṛt</item>
+        <item quantity="other">%d n dduṛtat</item>
+    </plurals>
+    <plurals name="months">
+        <item quantity="one">%d n wayyur</item>
+        <item quantity="other">%d n wayyuren</item>
+    </plurals>
+    <string name="pref_automatically_delete_messages">Tukksa tawurmant n yizen</string>
+    <string name="pref_automatically_delete_messages_description">Kkes s wudem awurman iznan seg yibenk-agi i yellan d iqburen ugar n wakud yettusewlen.</string>
+    <string name="encrypting_message">Awgelhen n yizen</string>
+    <string name="transcoding_video">Askussem n tvidyut</string>
+    <string name="contact_blocked_past_tense">Anermis ittwasewḥel.</string>
+    <plurals name="x_unread_conversations">
+        <item quantity="one">%d udiwenni ur nettwaɣri ara</item>
+        <item quantity="other">%d idiwenniyen ur nettwaɣri ara</item>
+    </plurals>
+    <string name="conversations_backup">Aḥraz n idiwenniyen</string>
+    <string name="not_a_backup_file">Afaylu yettwafernen mačči d afaylu n weḥraz n Useqerdec</string>
+    <string name="search_all_conversations">Akk idiwenniyen</string>
+    <string name="empty_conversations_list_hint">Mi ara tebduḍ adiwenni amaynut, ad t-twaliḍ dagi</string>
+    <string name="create_private_group_chat">Snulfu-d agraw udiwenni uslig</string>
+    <string name="join_public_channel">Ddu ɣer ubadu azayez</string>
+    <string name="open_join_dialog">Ddu ɣer ubadu azayez…</string>
+    <string name="create_public_channel">Snulfu-d abadu azayez</string>
+    <string name="discover_channels">Asnirem n yibuda</string>
+    <string name="add_contact_or_create_or_join_group_chat">Rnu anermis, snulfu-d neɣ ddu ɣer ugraw udiwenni, neɣ snirem ibuda</string>
+    <string name="could_not_destroy_room">D awezɣi ahuddu n ugraw n udiwenni</string>
+    <string name="action_edit_subject">Ẓreg asentel n ugraw useqerdec</string>
+    <string name="joining_conference">Timerna ɣer ugraw udiwenni…</string>
+    <string name="no_conference_server_found">Ulac aqeddac n ugraw n udiwenni yettwafen</string>
+    <string name="conference_creation_failed">Ulamek asnulfu n wegraw n udiwenni</string>
+    <string name="remove_from_room">Kkes seg ugraw n udiwenni</string>
+    <string name="conference_options">Tawila n ugraw udiwenni uslig</string>
+    <string name="modified_conference_options">Tinefrunin n ugraw udiwenni yettwabeddelen!</string>
+    <string name="could_not_modify_conference_options">Ulamek abeddel n tnefrunin n ugraw n udiwenni</string>
 </resources>
