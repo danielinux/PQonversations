@@ -107,7 +107,7 @@ public class MagicCreateActivity extends XmppActivity implements TextWatcher {
                                             R.string.secure_password_generated,
                                             Toast.LENGTH_SHORT)
                                     .show();
-                            StartConversationActivity.addInviteUri(intent, getIntent());
+                            StartConversationActivity.addInviteUri(intent, this);
                             startActivity(intent);
                         }
                     } catch (final IllegalArgumentException e) {

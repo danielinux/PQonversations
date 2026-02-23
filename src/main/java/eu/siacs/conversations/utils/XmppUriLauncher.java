@@ -57,7 +57,7 @@ public class XmppUriLauncher {
                     && uri.isAction(MiniUri.Xmpp.ACTION_ROSTER)
                     && uri.isYesIbr()) {
                 intent = SignupUtils.getTokenRegistrationIntent(context, jid.getDomain(), preAuth);
-                intent.putExtra(StartConversationActivity.EXTRA_INVITE_URI, uri.toString());
+                intent.putExtra(StartConversationActivity.EXTRA_INVITE_URI, uri.asUri().toString());
                 this.context.startActivity(intent);
                 return;
             }
@@ -69,7 +69,7 @@ public class XmppUriLauncher {
         if (accounts.isEmpty()) {
             if (uri.isAddress()) {
                 intent = SignupUtils.getSignUpIntent(context);
-                intent.putExtra(StartConversationActivity.EXTRA_INVITE_URI, uri.toString());
+                intent.putExtra(StartConversationActivity.EXTRA_INVITE_URI, uri.asUri().toString());
                 this.context.startActivity(intent);
             } else {
                 showError(R.string.invalid_jid);

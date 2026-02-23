@@ -512,7 +512,7 @@ public class EditAccountActivity extends OmemoActivity
             final Intent intent =
                     SignupUtils.getTokenRegistrationIntent(
                             this, preset, mAccount.getKey(Account.KEY_PRE_AUTH_REGISTRATION_TOKEN));
-            StartConversationActivity.addInviteUri(intent, getIntent());
+            StartConversationActivity.addInviteUri(intent, this);
             startActivity(intent);
             return;
         }
@@ -522,7 +522,7 @@ public class EditAccountActivity extends OmemoActivity
         if (accounts != null && accounts.isEmpty() && Config.MAGIC_CREATE_DOMAIN != null) {
             Intent intent =
                     SignupUtils.getSignUpIntent(this, mForceRegister != null && mForceRegister);
-            StartConversationActivity.addInviteUri(intent, getIntent());
+            StartConversationActivity.addInviteUri(intent, this);
             startActivity(intent);
         }
     }
@@ -555,7 +555,7 @@ public class EditAccountActivity extends OmemoActivity
                                         PublishProfilePictureActivity.class);
                         intent.putExtra(EXTRA_ACCOUNT, mAccount.getJid().asBareJid().toString());
                         intent.putExtra("setup", true);
-                        StartConversationActivity.addInviteUri(intent, getIntent());
+                        StartConversationActivity.addInviteUri(intent, this);
                     }
                     if (wasFirstAccount) {
                         intent.setFlags(
