@@ -15,6 +15,9 @@ import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 public class XmlReader implements Closeable {
+
+    private static final int XML_ELEMENT_MAX_DEPTH = 128;
+
     private final XmlPullParser parser;
     private InputStream is;
 
@@ -104,31 +107,35 @@ public class XmlReader implements Closeable {
     }
 
     public Element readElement(final Tag currentTag) throws IOException {
+        return readElement(currentTag, 0);
+    }
+
+    private Element readElement(final Tag currentTag, final int depth) throws IOException {
+        if (depth >= XML_ELEMENT_MAX_DEPTH) {
+            throw new XmlMaxDepthReachedException();
+        }
         final var namespace = currentTag.getNamespace();
         final var name = currentTag.getName();
         final Element element = ExtensionFactory.create(name, namespace);
         element.setAttributes(currentTag.getAttributes());
         Tag nextTag = this.readTag();
-        if (nextTag == null) {
-            throw new IOException("interrupted mid tag");
-        }
         if (nextTag.isNo()) {
             element.setContent(nextTag.getName());
             nextTag = this.readTag();
-            if (nextTag == null) {
-                throw new IOException("interrupted mid tag");
-            }
         }
         while (!nextTag.isEnd(element.getName())) {
             if (!nextTag.isNo()) {
-                Element child = this.readElement(nextTag);
+                final var child = this.readElement(nextTag, depth + 1);
                 element.addChild(child);
             }
             nextTag = this.readTag();
-            if (nextTag == null) {
-                throw new IOException("interrupted mid tag");
-            }
         }
         return element;
+    }
+
+    public static class XmlMaxDepthReachedException extends IOException {
+        public XmlMaxDepthReachedException() {
+            super("Reached maximum depth of XML stream");
+        }
     }
 }

@@ -568,8 +568,14 @@ public class XmppConnection implements Runnable {
             this.changeState(target);
         } catch (final SocksSocketFactory.SocksProxyNotFoundException e) {
             this.changeState(Account.State.TOR_NOT_AVAILABLE);
+        } catch (final XmlReader.XmlMaxDepthReachedException e) {
+            Log.d(
+                    Config.LOGTAG,
+                    account.getJid().asBareJid()
+                            + ": elements in XML stream reached maximum depth");
+            this.changeState(Account.State.INCOMPATIBLE_SERVER);
         } catch (final IOException | XmlPullParserException e) {
-            Log.d(Config.LOGTAG, account.getJid().asBareJid().toString() + ": " + e.getMessage());
+            Log.d(Config.LOGTAG, account.getJid().asBareJid() + ": error reading XML stream", e);
             this.changeState(Account.State.OFFLINE);
             this.attempt = Math.max(0, this.attempt - 1);
         } finally {
