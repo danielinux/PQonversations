@@ -153,7 +153,7 @@
     <string name="account_status_offline">Deconectat</string>
     <string name="account_status_unauthorized">Neautorizat</string>
     <string name="account_status_not_found">Serverul nu a fost găsit</string>
-    <string name="account_status_no_internet">Fără conexiune</string>
+    <string name="account_status_no_internet">Fără acces Internet</string>
     <string name="account_status_regis_fail">Înregistrare eșuată</string>
     <string name="account_status_regis_conflict">Nume de utilizator deja alocat</string>
     <string name="account_status_regis_success">Înregistrare completă</string>
@@ -1181,4 +1181,5 @@
     <string name="remove_membership">Abrogă rol de membru</string>
     <string name="dismiss_as_admin">Abrogă rol de administrator</string>
     <string name="dismiss_as_owner">Abrogă rol de proprietar</string>
+    <string name="account_status_airplane_mode">Modul Avion</string>
 </resources>
