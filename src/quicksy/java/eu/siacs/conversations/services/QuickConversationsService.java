@@ -19,6 +19,7 @@ import eu.siacs.conversations.entities.Entry;
 import eu.siacs.conversations.http.HttpConnectionManager;
 import eu.siacs.conversations.utils.AccountUtils;
 import eu.siacs.conversations.utils.CryptoHelper;
+import eu.siacs.conversations.utils.NetworkManager;
 import eu.siacs.conversations.utils.PhoneNumberUtilWrapper;
 import eu.siacs.conversations.utils.QuicksyAuthentication;
 import eu.siacs.conversations.utils.SerialSingleThreadExecutor;
@@ -341,7 +342,7 @@ public class QuickConversationsService extends AbstractQuickConversationsService
     }
 
     private int getApiErrorCode(final Exception e) {
-        if (!service.hasInternetConnection()) {
+        if (new NetworkManager(service).getHint() != NetworkManager.Hint.ACTIVE) {
             return API_ERROR_AIRPLANE_MODE;
         } else if (e instanceof UnknownHostException) {
             return API_ERROR_UNKNOWN_HOST;
