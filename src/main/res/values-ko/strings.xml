@@ -100,7 +100,7 @@
     <string name="account_status_offline">오프라인 </string>
     <string name="account_status_unauthorized">승인되지 않음 </string>
     <string name="account_status_not_found">서버를 찾을 수 없음 </string>
-    <string name="account_status_no_internet">접속할 수 없음 </string>
+    <string name="account_status_no_internet">접속할 수 없음</string>
     <string name="account_status_regis_fail">등록 실패 </string>
     <string name="account_status_regis_conflict">사용자 이름이 이미 사용중입니다 </string>
     <string name="account_status_regis_success">등록 성공 </string>
