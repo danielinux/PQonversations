@@ -114,7 +114,7 @@
     <string name="account_status_offline">I shkëputur</string>
     <string name="account_status_unauthorized">E paautorizuar</string>
     <string name="account_status_not_found">S’u gjet shërbyes</string>
-    <string name="account_status_no_internet">Pa lidhje</string>
+    <string name="account_status_no_internet">S’ka internet</string>
     <string name="account_status_regis_fail">Regjistrimi dështoi</string>
     <string name="account_status_regis_conflict">Emër përdoruesi tashmë në përdorim</string>
     <string name="account_status_regis_success">Regjistrimi u plotësua</string>
@@ -1166,4 +1166,5 @@
     <string name="remove_membership">Hiqini anëtarësimin</string>
     <string name="make_owner">Bëjeni të zotin</string>
     <string name="dismiss_as_owner">Hiqeni nga zot</string>
+    <string name="account_status_airplane_mode">Mënyra aeroplan</string>
 </resources>
