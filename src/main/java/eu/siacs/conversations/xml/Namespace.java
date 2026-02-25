@@ -25,7 +25,8 @@ public final class Namespace {
     public static final String DELAY = "urn:xmpp:delay";
     public static final String OCCUPANT_ID = "urn:xmpp:occupant-id:0";
     public static final String STREAMS = "http://etherx.jabber.org/streams";
-    public static final String STANZAS = "urn:ietf:params:xml:ns:xmpp-stanzas";
+    public static final String XMPP_STREAMS = "urn:ietf:params:xml:ns:xmpp-streams";
+    public static final String XMPP_STANZAS = "urn:ietf:params:xml:ns:xmpp-stanzas";
     public static final String JABBER_CLIENT = "jabber:client";
     public static final String FORWARD = "urn:xmpp:forward:0";
     public static final String DISCO_ITEMS = "http://jabber.org/protocol/disco#items";

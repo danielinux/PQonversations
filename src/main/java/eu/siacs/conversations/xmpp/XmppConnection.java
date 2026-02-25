@@ -117,6 +117,7 @@ import im.conversations.android.xmpp.model.stanza.Iq;
 import im.conversations.android.xmpp.model.stanza.Presence;
 import im.conversations.android.xmpp.model.stanza.Stanza;
 import im.conversations.android.xmpp.model.streams.StreamError;
+import im.conversations.android.xmpp.model.streams.StreamErrorCondition;
 import im.conversations.android.xmpp.model.tls.Proceed;
 import im.conversations.android.xmpp.model.tls.StartTls;
 import im.conversations.android.xmpp.processor.AccountStateProcessor;
@@ -680,7 +681,7 @@ public class XmppConnection implements Runnable {
         final CountDownLatch streamCountDownLatch = new CountDownLatch(1);
         this.mStreamCountDownLatch = streamCountDownLatch;
         Tag nextTag = tagReader.readTag();
-        while (nextTag != null && !nextTag.isEnd("stream")) {
+        while (!nextTag.isEnd("stream")) {
             if (nextTag.isStart("error", Namespace.STREAMS)) {
                 processStreamError(tagReader.readElement(nextTag, StreamError.class));
             } else if (nextTag.isStart("features", Namespace.STREAMS)) {
@@ -1064,7 +1065,7 @@ public class XmppConnection implements Runnable {
 
     private void processNopStreamFeatures() throws IOException {
         final Tag tag = tagReader.readTag();
-        if (tag != null && tag.isStart("features", Namespace.STREAMS)) {
+        if (tag.isStart("features", Namespace.STREAMS)) {
             this.streamFeatures =
                     tagReader.readElement(
                             tag, im.conversations.android.xmpp.model.streams.Features.class);
@@ -2369,9 +2370,10 @@ public class XmppConnection implements Runnable {
     }
 
     private void processStreamError(final StreamError streamError) throws IOException {
+        final var condition = streamError.getCondition();
         final var loginInfo = this.loginInfo;
         final var isSecureLoggedIn = isSecure() && LoginInfo.isSuccess(loginInfo);
-        if (isSecureLoggedIn && streamError.hasChild("conflict")) {
+        if (isSecureLoggedIn && condition instanceof StreamErrorCondition.Conflict) {
             if (loginInfo.saslVersion == SaslMechanism.Version.SASL_2) {
                 this.appSettings.resetInstallationId();
             }
@@ -2383,9 +2385,9 @@ public class XmppConnection implements Runnable {
                             + account.getResource()
                             + ")");
             throw new IOException("Closed stream due to resource conflict");
-        } else if (streamError.hasChild("host-unknown")) {
+        } else if (condition instanceof StreamErrorCondition.HostUnknown) {
             throw new StateChangingException(Account.State.HOST_UNKNOWN);
-        } else if (streamError.hasChild("policy-violation")) {
+        } else if (condition instanceof StreamErrorCondition.PolicyViolation) {
             this.lastConnectionStarted = SystemClock.elapsedRealtime();
             final String text = streamError.findChildContent("text");
             Log.d(Config.LOGTAG, account.getJid().asBareJid() + ": policy violation. " + text);
@@ -2393,10 +2395,10 @@ public class XmppConnection implements Runnable {
                 failPendingMessages(text);
             }
             throw new StateChangingException(Account.State.POLICY_VIOLATION);
-        } else if (streamError.hasChild("see-other-host")) {
-            final String seeOtherHost = streamError.findChildContent("see-other-host");
+        } else if (condition instanceof StreamErrorCondition.SeeOtherHost seeOtherHost) {
+            final String host = seeOtherHost.getContent();
             final Resolver.Result currentResolverResult = this.currentResolverResult;
-            if (Strings.isNullOrEmpty(seeOtherHost) || currentResolverResult == null) {
+            if (Strings.isNullOrEmpty(host) || currentResolverResult == null) {
                 Log.d(
                         Config.LOGTAG,
                         account.getJid().asBareJid() + ": stream error " + streamError);
@@ -2406,10 +2408,10 @@ public class XmppConnection implements Runnable {
                     Config.LOGTAG,
                     account.getJid().asBareJid()
                             + ": see other host: "
-                            + seeOtherHost
+                            + host
                             + " "
                             + currentResolverResult);
-            final Resolver.Result seeOtherResult = currentResolverResult.seeOtherHost(seeOtherHost);
+            final Resolver.Result seeOtherResult = currentResolverResult.seeOtherHost(host);
             if (seeOtherResult != null) {
                 this.seeOtherHostResolverResult = seeOtherResult;
                 throw new StateChangingException(Account.State.SEE_OTHER_HOST);

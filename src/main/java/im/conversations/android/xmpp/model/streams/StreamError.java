@@ -9,4 +9,8 @@ public class StreamError extends StreamElement {
     public StreamError() {
         super(StreamError.class);
     }
+
+    public StreamErrorCondition getCondition() {
+        return getOnlyExtension(StreamErrorCondition.class);
+    }
 }
