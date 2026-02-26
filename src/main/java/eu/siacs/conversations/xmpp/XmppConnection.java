@@ -61,7 +61,6 @@ import eu.siacs.conversations.utils.Resolver;
 import eu.siacs.conversations.utils.SSLSockets;
 import eu.siacs.conversations.utils.SocksSocketFactory;
 import eu.siacs.conversations.utils.XmlHelper;
-import eu.siacs.conversations.xml.Element;
 import eu.siacs.conversations.xml.LocalizedContent;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xml.Tag;
@@ -88,12 +87,12 @@ import im.conversations.android.xmpp.model.StreamElement;
 import im.conversations.android.xmpp.model.bind2.Bind;
 import im.conversations.android.xmpp.model.bind2.Bound;
 import im.conversations.android.xmpp.model.cb.SaslChannelBinding;
-import im.conversations.android.xmpp.model.csi.Active;
-import im.conversations.android.xmpp.model.csi.Inactive;
+import im.conversations.android.xmpp.model.csi.Indication;
 import im.conversations.android.xmpp.model.error.Condition;
 import im.conversations.android.xmpp.model.error.Text;
 import im.conversations.android.xmpp.model.fast.Fast;
 import im.conversations.android.xmpp.model.fast.RequestToken;
+import im.conversations.android.xmpp.model.fast.Token;
 import im.conversations.android.xmpp.model.sasl.Auth;
 import im.conversations.android.xmpp.model.sasl.Failure;
 import im.conversations.android.xmpp.model.sasl.Mechanisms;
@@ -117,6 +116,7 @@ import im.conversations.android.xmpp.model.sm.StreamManagement;
 import im.conversations.android.xmpp.model.stanza.Iq;
 import im.conversations.android.xmpp.model.stanza.Presence;
 import im.conversations.android.xmpp.model.stanza.Stanza;
+import im.conversations.android.xmpp.model.streams.Features;
 import im.conversations.android.xmpp.model.streams.Stream;
 import im.conversations.android.xmpp.model.streams.StreamError;
 import im.conversations.android.xmpp.model.streams.StreamErrorCondition;
@@ -762,59 +762,9 @@ public class XmppConnection implements Runnable {
                 final var enabled = tagReader.readElement(startTag, Enabled.class);
                 processEnabled(enabled);
             } else if (startTag.is(Request.class)) {
-                tagReader.readElement(startTag, Request.class);
-                if (Config.EXTENDED_SM_LOGGING) {
-                    Log.d(
-                            Config.LOGTAG,
-                            account.getJid().asBareJid()
-                                    + ": acknowledging stanza #"
-                                    + this.stanzasReceived);
-                }
-                final Ack ack = new Ack(this.stanzasReceived);
-                tagWriter.writeStanzaAsync(ack);
+                processRequest(tagReader.readElement(startTag, Request.class));
             } else if (startTag.is(Ack.class)) {
-                boolean accountUiNeedsRefresh = false;
-                synchronized (NotificationService.CATCHUP_LOCK) {
-                    if (mWaitingForSmCatchup.compareAndSet(true, false)) {
-                        final int messageCount = mSmCatchupMessageCounter.get();
-                        final int pendingIQs = packetCallbacks.size();
-                        Log.d(
-                                Config.LOGTAG,
-                                account.getJid().asBareJid()
-                                        + ": SM catchup complete (messages="
-                                        + messageCount
-                                        + ", pending IQs="
-                                        + pendingIQs
-                                        + ")");
-                        accountUiNeedsRefresh = true;
-                        if (messageCount > 0) {
-                            mXmppConnectionService
-                                    .getNotificationService()
-                                    .finishBacklog(true, account);
-                        }
-                    }
-                }
-                if (accountUiNeedsRefresh) {
-                    mXmppConnectionService.updateAccountUi();
-                }
-                final var ack = tagReader.readElement(startTag, Ack.class);
-                lastPacketReceived = SystemClock.elapsedRealtime();
-                final boolean acknowledgedMessages;
-                synchronized (this.mStanzaQueue) {
-                    final Optional<Integer> serverSequence = ack.getHandled();
-                    if (serverSequence.isPresent()) {
-                        acknowledgedMessages = acknowledgeStanzaUpTo(serverSequence.get());
-                    } else {
-                        acknowledgedMessages = false;
-                        Log.d(
-                                Config.LOGTAG,
-                                account.getJid().asBareJid()
-                                        + ": server send ack without sequence number");
-                    }
-                }
-                if (acknowledgedMessages) {
-                    mXmppConnectionService.updateConversationUi();
-                }
+                processAck(tagReader.readElement(startTag, Ack.class));
             } else {
                 throw new StateChangingException(
                         Account.State.INCOMPATIBLE_SERVER,
@@ -936,9 +886,9 @@ public class XmppConnection implements Runnable {
             }
             final Bound bound = success.getExtension(Bound.class);
             final Resumed resumed = success.getExtension(Resumed.class);
-            final Failed failed = success.getExtension(Failed.class);
-            final Element tokenWrapper = success.findChild("token", Namespace.FAST);
-            final String token = tokenWrapper == null ? null : tokenWrapper.getAttribute("token");
+            final var failed = success.getExtension(Failed.class);
+            final var tokenWrapper = success.getOnlyExtension(Token.class);
+            final var token = tokenWrapper == null ? null : tokenWrapper.getToken();
             if (bound != null && resumed != null) {
                 throw new StateChangingException(
                         Account.State.INCOMPATIBLE_SERVER,
@@ -962,7 +912,9 @@ public class XmppConnection implements Runnable {
                 processNopStreamFeatures();
                 this.boundStreamFeatures = this.streamFeatures;
                 final Enabled streamManagementEnabled = bound.getExtension(Enabled.class);
-                final Element carbonsEnabled = bound.findChild("enabled", Namespace.CARBONS);
+                final var carbonsEnabled =
+                        bound.getOnlyExtension(
+                                im.conversations.android.xmpp.model.carbons.Enabled.class);
                 final boolean waitForDisco;
                 if (streamManagementEnabled != null) {
                     resetOutboundStanzaQueue();
@@ -1186,6 +1138,58 @@ public class XmppConnection implements Runnable {
         this.inSmacksSession = true;
         final var r = new Request();
         tagWriter.writeStanzaAsync(r);
+    }
+
+    private void processRequest(final Request ignored) {
+        if (Config.EXTENDED_SM_LOGGING) {
+            Log.d(
+                    Config.LOGTAG,
+                    account.getJid().asBareJid()
+                            + ": acknowledging stanza #"
+                            + this.stanzasReceived);
+        }
+        this.sendPacket(new Ack(this.stanzasReceived));
+    }
+
+    private void processAck(final Ack ack) {
+        boolean accountUiNeedsRefresh = false;
+        synchronized (NotificationService.CATCHUP_LOCK) {
+            if (mWaitingForSmCatchup.compareAndSet(true, false)) {
+                final int messageCount = mSmCatchupMessageCounter.get();
+                final int pendingIQs = packetCallbacks.size();
+                Log.d(
+                        Config.LOGTAG,
+                        account.getJid().asBareJid()
+                                + ": SM catchup complete (messages="
+                                + messageCount
+                                + ", pending IQs="
+                                + pendingIQs
+                                + ")");
+                accountUiNeedsRefresh = true;
+                if (messageCount > 0) {
+                    mXmppConnectionService.getNotificationService().finishBacklog(true, account);
+                }
+            }
+        }
+        if (accountUiNeedsRefresh) {
+            mXmppConnectionService.updateAccountUi();
+        }
+        lastPacketReceived = SystemClock.elapsedRealtime();
+        final boolean acknowledgedMessages;
+        synchronized (this.mStanzaQueue) {
+            final Optional<Integer> serverSequence = ack.getHandled();
+            if (serverSequence.isPresent()) {
+                acknowledgedMessages = acknowledgeStanzaUpTo(serverSequence.get());
+            } else {
+                acknowledgedMessages = false;
+                Log.d(
+                        Config.LOGTAG,
+                        account.getJid().asBareJid() + ": server send ack without sequence number");
+            }
+        }
+        if (acknowledgedMessages) {
+            mXmppConnectionService.updateConversationUi();
+        }
     }
 
     @Nullable
@@ -2401,7 +2405,7 @@ public class XmppConnection implements Runnable {
             throw new StateChangingException(Account.State.HOST_UNKNOWN);
         } else if (condition instanceof StreamErrorCondition.PolicyViolation) {
             this.lastConnectionStarted = SystemClock.elapsedRealtime();
-            final String text = streamError.findChildContent("text");
+            final String text = streamError.getText();
             Log.d(Config.LOGTAG, account.getJid().asBareJid() + ": policy violation. " + text);
             if (isSecureLoggedIn) {
                 failPendingMessages(text);
@@ -2639,7 +2643,11 @@ public class XmppConnection implements Runnable {
         this.sendPacket(packet);
     }
 
-    private synchronized void sendPacket(final StreamElement packet) {
+    public void send(final Indication indication) {
+        this.sendPacket(indication);
+    }
+
+    private void sendPacket(final StreamElement packet) {
         sendPacket(packet, false);
     }
 
@@ -2657,8 +2665,9 @@ public class XmppConnection implements Runnable {
                 Log.d(
                         Config.LOGTAG,
                         account.getJid().asBareJid()
-                                + " do not write stanza to unbound stream "
-                                + packet.toString());
+                                + " do not write "
+                                + packet.getClass().getSimpleName()
+                                + " to unbound stream");
             }
             if (packet instanceof Stanza stanza) {
                 if (this.mStanzaQueue.size() != 0) {
@@ -2797,6 +2806,10 @@ public class XmppConnection implements Runnable {
         return this.features;
     }
 
+    public im.conversations.android.xmpp.model.streams.Features getStreamFeatures() {
+        return this.streamFeatures;
+    }
+
     public long getLastSessionEstablished() {
         final long diff = SystemClock.elapsedRealtime() - this.lastSessionStarted;
         return System.currentTimeMillis() - diff;
@@ -2816,14 +2829,6 @@ public class XmppConnection implements Runnable {
 
     public long getLastPacketReceived() {
         return this.lastPacketReceived;
-    }
-
-    public void sendActive() {
-        this.sendPacket(new Active());
-    }
-
-    public void sendInactive() {
-        this.sendPacket(new Inactive());
     }
 
     public void resetAttemptCount() {
@@ -3068,11 +3073,6 @@ public class XmppConnection implements Runnable {
                             && connection.streamFeatures.streamManagement());
         }
 
-        public boolean csi() {
-            return connection.streamFeatures != null
-                    && connection.streamFeatures.clientStateIndication();
-        }
-
         public boolean bind2() {
             final var loginInfo = XmppConnection.this.loginInfo;
             return loginInfo != null && !loginInfo.inlineBindFeatures.isEmpty();
@@ -3091,11 +3091,6 @@ public class XmppConnection implements Runnable {
         // TODO remove this once AxolotlManager is a proper manager (and calls manager methods)
         public boolean pepPublishOptions() {
             return hasDiscoFeature(account.getJid().asBareJid(), Namespace.PUB_SUB_PUBLISH_OPTIONS);
-        }
-
-        public boolean rosterVersioning() {
-            return connection.streamFeatures != null
-                    && connection.streamFeatures.rosterVersioning();
         }
 
         public HttpUrl getServiceOutageStatus() {

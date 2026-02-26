@@ -85,6 +85,7 @@ import eu.siacs.conversations.xmpp.XmppConnection;
 import eu.siacs.conversations.xmpp.XmppConnection.Features;
 import eu.siacs.conversations.xmpp.manager.BlockingManager;
 import eu.siacs.conversations.xmpp.manager.CarbonsManager;
+import eu.siacs.conversations.xmpp.manager.ClientStateIndicationManager;
 import eu.siacs.conversations.xmpp.manager.ExternalServiceDiscoveryManager;
 import eu.siacs.conversations.xmpp.manager.HttpUploadManager;
 import eu.siacs.conversations.xmpp.manager.MessageArchiveManager;
@@ -92,6 +93,7 @@ import eu.siacs.conversations.xmpp.manager.PepManager;
 import eu.siacs.conversations.xmpp.manager.PresenceManager;
 import eu.siacs.conversations.xmpp.manager.PushNotificationManager;
 import eu.siacs.conversations.xmpp.manager.RegistrationManager;
+import eu.siacs.conversations.xmpp.manager.RosterManager;
 import im.conversations.android.xmpp.model.data.Data;
 import im.conversations.android.xmpp.model.mam.Preferences;
 import im.conversations.android.xmpp.model.stanza.Presence;
@@ -1254,7 +1256,8 @@ public class EditAccountActivity extends OmemoActivity
             this.binding.sessionEst.setText(
                     UIHelper.readableTimeDifferenceFull(
                             this, this.mAccount.getXmppConnection().getLastSessionEstablished()));
-            if (features.rosterVersioning()) {
+            final var rosterManager = connection.getManager(RosterManager.class);
+            if (rosterManager.versioning()) {
                 this.binding.serverInfoRosterVersion.setText(R.string.server_info_available);
             } else {
                 this.binding.serverInfoRosterVersion.setText(R.string.server_info_unavailable);
@@ -1269,7 +1272,7 @@ public class EditAccountActivity extends OmemoActivity
             } else {
                 this.binding.serverInfoMam.setText(R.string.server_info_unavailable);
             }
-            if (features.csi()) {
+            if (connection.getManager(ClientStateIndicationManager.class).hasFeature()) {
                 this.binding.serverInfoCsi.setText(R.string.server_info_available);
             } else {
                 this.binding.serverInfoCsi.setText(R.string.server_info_unavailable);

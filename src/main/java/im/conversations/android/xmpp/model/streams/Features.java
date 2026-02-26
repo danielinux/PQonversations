@@ -7,6 +7,7 @@ import im.conversations.android.xmpp.model.bind.Bind;
 import im.conversations.android.xmpp.model.capabilties.EntityCapabilities;
 import im.conversations.android.xmpp.model.csi.ClientStateIndication;
 import im.conversations.android.xmpp.model.register.RegisterStreamFeature;
+import im.conversations.android.xmpp.model.roster.PreApproval;
 import im.conversations.android.xmpp.model.roster.Versioning;
 import im.conversations.android.xmpp.model.session.Session;
 import im.conversations.android.xmpp.model.sm.StreamManagement;
@@ -28,6 +29,10 @@ public class Features extends StreamElement implements EntityCapabilities {
 
     public boolean rosterVersioning() {
         return this.hasStreamFeature(Versioning.class);
+    }
+
+    public boolean rosterPreApproval() {
+        return this.hasStreamFeature(PreApproval.class);
     }
 
     public boolean register() {

@@ -8,6 +8,7 @@ import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.http.ServiceOutageStatus;
 import eu.siacs.conversations.services.XmppConnectionService;
 import eu.siacs.conversations.xmpp.XmppConnection;
+import eu.siacs.conversations.xmpp.manager.ClientStateIndicationManager;
 import eu.siacs.conversations.xmpp.manager.JingleManager;
 import eu.siacs.conversations.xmpp.manager.MultiUserChatManager;
 import java.util.concurrent.TimeUnit;
@@ -46,13 +47,12 @@ public class AccountStateProcessor extends XmppConnection.Delegate
             if (account.setShowErrorNotification(true)) {
                 this.service.databaseBackend.updateAccount(account);
             }
-            if (this.connection.getFeatures().csi()) {
+            final var csiManager = getManager(ClientStateIndicationManager.class);
+            if (csiManager.hasFeature()) {
                 if (this.service.checkListeners()) {
-                    Log.d(Config.LOGTAG, account.getJid().asBareJid() + " sending csi//inactive");
-                    connection.sendInactive();
+                    csiManager.indicateInactive();
                 } else {
-                    Log.d(Config.LOGTAG, account.getJid().asBareJid() + " sending csi//active");
-                    connection.sendActive();
+                    csiManager.indicateActive();
                 }
             }
             final var mucManager = getManager(MultiUserChatManager.class);

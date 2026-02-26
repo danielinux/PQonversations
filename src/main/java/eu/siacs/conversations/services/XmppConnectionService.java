@@ -120,6 +120,7 @@ import eu.siacs.conversations.xmpp.manager.AvatarManager;
 import eu.siacs.conversations.xmpp.manager.BlockingManager;
 import eu.siacs.conversations.xmpp.manager.BookmarkManager;
 import eu.siacs.conversations.xmpp.manager.ChatStateManager;
+import eu.siacs.conversations.xmpp.manager.ClientStateIndicationManager;
 import eu.siacs.conversations.xmpp.manager.DisplayedManager;
 import eu.siacs.conversations.xmpp.manager.JingleManager;
 import eu.siacs.conversations.xmpp.manager.MessageArchiveManager;
@@ -2700,8 +2701,9 @@ public class XmppConnectionService extends Service {
                 continue;
             }
             connection.getManager(ActivityManager.class).reset();
-            if (connection.getFeatures().csi()) {
-                connection.sendActive();
+            final var csiManager = connection.getManager(ClientStateIndicationManager.class);
+            if (csiManager.hasFeature()) {
+                csiManager.indicateActive();
             }
             if (broadcastLastActivity) {
                 // send new presence but don't include idle because we are not
@@ -2727,8 +2729,9 @@ public class XmppConnectionService extends Service {
             if (broadcastLastActivity) {
                 connection.getManager(PresenceManager.class).available(true);
             }
-            if (connection.getFeatures().csi()) {
-                connection.sendInactive();
+            final var csiManager = connection.getManager(ClientStateIndicationManager.class);
+            if (csiManager.hasFeature()) {
+                csiManager.indicateInactive();
             }
         }
         this.mNotificationService.setIsInForeground(false);
