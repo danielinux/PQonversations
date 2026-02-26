@@ -151,7 +151,7 @@
     <string name="account_status_offline">Offline</string>
     <string name="account_status_unauthorized">Non autorizzato</string>
     <string name="account_status_not_found">Server non trovato</string>
-    <string name="account_status_no_internet">Connessione assente</string>
+    <string name="account_status_no_internet">Internet assente</string>
     <string name="account_status_regis_fail">Registrazione fallita</string>
     <string name="account_status_regis_conflict">Nome utente già in uso</string>
     <string name="account_status_regis_success">Registrazione completata</string>
@@ -1176,4 +1176,5 @@
     <string name="dismiss_as_admin">Declassa da amministratore</string>
     <string name="make_owner">Rendi proprietario</string>
     <string name="dismiss_as_owner">Declassa da proprietario</string>
+    <string name="account_status_airplane_mode">Modalità aereo</string>
 </resources>
