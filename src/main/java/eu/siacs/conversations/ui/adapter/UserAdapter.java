@@ -113,8 +113,6 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
                             selectedUser = user;
                             return false;
                         });
-        final String resource = user.resource();
-        final String displayName = user.getDisplayName();
         viewHolder.binding.contactDisplayName.setText(user.getDisplayName());
         final var jid = user.getRealJid();
         if (jid != null) {
