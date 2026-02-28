@@ -1045,7 +1045,7 @@
     <string name="edit_nick">Redigera smeknamn</string>
     <string name="pref_title_bubbles">Chattbubblor</string>
     <string name="pref_large_font">Stort typsnitt</string>
-    <string name="pref_category_e2ee">Ände-till-ände-kryptering</string>
+    <string name="pref_category_e2ee">Totalsträckskryptering</string>
     <string name="change_notification_settings">Ändra aviseringsinställningar</string>
     <string name="server_info_login_mechanism">Inloggningsmekanism</string>
     <string name="custom_notifications">Anpassade aviseringar</string>
