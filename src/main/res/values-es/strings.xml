@@ -1170,4 +1170,7 @@
     <string name="give_membership">Otorgar membresía</string>
     <string name="remove_membership">Quitar membresía</string>
     <string name="make_admin">Hacer admin</string>
+    <string name="dismiss_as_admin">Quitar rol de admin</string>
+    <string name="make_owner">Hacer propietario</string>
+    <string name="dismiss_as_owner">Quitar rol de propietario</string>
 </resources>
