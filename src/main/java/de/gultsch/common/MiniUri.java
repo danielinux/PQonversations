@@ -13,6 +13,8 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.escape.CharEscaper;
+import com.google.common.primitives.Chars;
+import com.google.common.primitives.Ints;
 import eu.siacs.conversations.xmpp.Jid;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
@@ -104,9 +106,26 @@ public class MiniUri {
         return builder.build().asMap();
     }
 
-    // TODO write custom percent decoder that doesn’t decode +
-    private static String pathDecodeOrEmpty(final String path) {
-        return urlDecodeOrEmpty(path.replace("+", "%2B"));
+    private static String percentDecode(final @NonNull String encoded) {
+        if (Strings.isNullOrEmpty(encoded)) {
+            return encoded;
+        }
+        final var decoded = new StringBuilder();
+        for (int i = 0; i < encoded.length(); i++) {
+            final char c = encoded.charAt(i);
+            if (c == '%' && i + 2 < encoded.length()) {
+                final var value = Ints.tryParse(encoded.substring(i + 1, i + 3), 16);
+                if (value != null) {
+                    decoded.append(Chars.checkedCast(value));
+                    i += 2;
+                } else {
+                    decoded.append(c);
+                }
+            } else {
+                decoded.append(c);
+            }
+        }
+        return decoded.toString();
     }
 
     private static String urlDecodeOrEmpty(final String input) {
@@ -301,7 +320,7 @@ public class MiniUri {
             Preconditions.checkArgument(getScheme().equals("xmpp"), "scheme must be xmpp");
             Preconditions.checkArgument(
                     Objects.isNull(getAuthority()), "authorities are not supported");
-            final var path = pathDecodeOrEmpty(getPath());
+            final var path = MiniUri.percentDecode(getPath());
             if (Strings.isNullOrEmpty(path)) {
                 if (this.getParameter().isEmpty()) {
                     throw new IllegalArgumentException(
@@ -431,7 +450,7 @@ public class MiniUri {
                     final var isJoin = action != null && action.equals("j");
                     final Jid jid;
                     try {
-                        jid = Jid.ofUserInput(urlDecodeOrEmpty(Iterables.getLast(pathSegments)));
+                        jid = Jid.ofUserInput(percentDecode(Iterables.getLast(pathSegments)));
                     } catch (final IllegalArgumentException e) {
                         return this;
                     }
