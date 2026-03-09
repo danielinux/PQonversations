@@ -267,6 +267,7 @@ public class MiniUri {
                 }
                 throw new IllegalArgumentException("HTTP URI does not match pattern");
             }
+            case "mumble" -> asMiniUriIfMatch(Patterns.URI_MUMBLE, uri);
             case "geo" -> asMiniUriIfMatch(Patterns.URI_GEO, uri);
             case "xmpp" -> new Xmpp(uri);
             case "taler" -> asMiniUriIfMatch(Patterns.URI_TALER, uri);
@@ -274,8 +275,9 @@ public class MiniUri {
             case "web+ap" -> {
                 if (Patterns.URI_WEB_AP.matcher(uri).matches()) {
                     final var webAp = new MiniUri(uri);
-                    // TODO once we have fragment support check that there aren't any
-                    if (Objects.nonNull(webAp.getAuthority()) && webAp.getParameter().isEmpty()) {
+                    if (Objects.nonNull(webAp.getAuthority())
+                            && webAp.getParameter().isEmpty()
+                            && Strings.isNullOrEmpty(webAp.getFragment())) {
                         yield webAp;
                     }
                 }
