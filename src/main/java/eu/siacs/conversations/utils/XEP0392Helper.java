@@ -12,7 +12,7 @@ public class XEP0392Helper {
         try {
             final var digest =
                     Hashing.sha1().hashString(nickname, StandardCharsets.UTF_8).asBytes();
-            final var angle = ((int) (digest[0]) & 0xff) + ((int) (digest[1]) & 0xff) * 256;
+            final var angle = Byte.toUnsignedInt(digest[0]) + Byte.toUnsignedInt(digest[1]) * 256;
             return angle / 65536. * 360;
         } catch (final Exception e) {
             return 0.0;
