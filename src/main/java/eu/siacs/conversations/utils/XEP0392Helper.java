@@ -13,7 +13,7 @@ public class XEP0392Helper {
             final var digest =
                     Hashing.sha1().hashString(nickname, StandardCharsets.UTF_8).asBytes();
             final var angle = ((int) (digest[0]) & 0xff) + ((int) (digest[1]) & 0xff) * 256;
-            return angle / 65536.;
+            return angle / 65536. * 360;
         } catch (final Exception e) {
             return 0.0;
         }
@@ -21,7 +21,7 @@ public class XEP0392Helper {
 
     @ColorInt
     public static int rgbFromNick(final String name) {
-        return rgbFromAngle(angle(name) * 360);
+        return rgbFromAngle(angle(name));
     }
 
     @ColorInt
