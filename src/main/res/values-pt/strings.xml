@@ -1068,7 +1068,7 @@
     <string name="clients_may_not_support_av">O cliente XMPP do seu contacto pode não suportar chamadas de áudio/vídeo.</string>
     <string name="sos_scheduled_return">É esperado que o serviço volte às %s</string>
     <string name="could_not_moderate_message">Impossível moderar mensagem</string>
-    <string name="pref_backup_summary">Criar único, Programar recorrente</string>
+    <string name="pref_backup_summary">Criar único, Programar recorrente, Localização de armazenamento</string>
     <string name="pref_up_long_summary">Quando agindo como um Distribuidor de Unified Push, a conexão XMPP persistente, confiável e de baixo consumo de bateria será usada para acordar outras aplicações compatíveis com UnifiedPush como Tusky, Ltt.rs, FluffyChat e mais.</string>
     <string name="video_is_enabled_tap_to_disable">Vídeo está ativado. Toque para desativar.</string>
     <string name="pref_category_application">Aplicação</string>
@@ -1161,4 +1161,11 @@
     <string name="make_owner">Encarregar de dono</string>
     <string name="dismiss_as_owner">Desencarregar de dono</string>
     <string name="account_status_airplane_mode">Modo Avião</string>
+    <string name="account_status_regis_invalid_captcha">CAPTCHA inválida</string>
+    <string name="its_time_for_contact">São ^1 para ^2</string>
+    <string name="backup_and_restore">Cópia de Segurança &amp; Restaurar</string>
+    <string name="pref_import_backup_summary">Selecione um ficheiro da cópia para restaurar os seus dados</string>
+    <string name="pref_category_backup_storage">Armazenamento</string>
+    <string name="pref_entity_time_summary">Partilhe o seu tempo atual com contactos para ver o tempo atual deles em troca.</string>
+    <string name="pref_entity_time">Partilhar tempo local</string>
 </resources>
