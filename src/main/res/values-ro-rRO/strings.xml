@@ -1181,4 +1181,6 @@
     <string name="backup_and_restore">Copie siguranță &amp; restaurare</string>
     <string name="pref_import_backup_summary">Selectați fișier de rezervă pentru restaurare date</string>
     <string name="pref_category_backup_storage">Stocare</string>
+    <string name="pref_entity_time_summary">Partajați-vă ora curentă cu contactele pentru a putea vedea ora lor locală.</string>
+    <string name="pref_entity_time">Partajează ora locală</string>
 </resources>
