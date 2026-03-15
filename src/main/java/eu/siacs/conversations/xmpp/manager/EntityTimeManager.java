@@ -1,6 +1,5 @@
 package eu.siacs.conversations.xmpp.manager;
 
-import android.content.Context;
 import android.util.Log;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -8,11 +7,13 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
+import eu.siacs.conversations.services.XmppConnectionService;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.XmppConnection;
@@ -28,30 +29,35 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import org.jspecify.annotations.NonNull;
 
 public class EntityTimeManager extends AbstractManager {
+
+    private final CacheLoader<Jid, ListenableFuture<EntityTime>> entityTimeLoader =
+            new CacheLoader<>() {
+
+                @Override
+                public ListenableFuture<EntityTime> load(final Jid address) {
+                    return Futures.transform(
+                            zonedDateTime(address),
+                            zonedDateTime ->
+                                    new OffsetEntityTime(
+                                            Objects.requireNonNull(zonedDateTime).getOffset()),
+                            MoreExecutors.directExecutor());
+                }
+            };
 
     private final LoadingCache<Jid, ListenableFuture<EntityTime>> entityTimeCache =
             CacheBuilder.newBuilder()
                     .expireAfterWrite(Duration.ofHours(3))
-                    .build(
-                            new CacheLoader<>() {
-                                @Override
-                                public ListenableFuture<EntityTime> load(final Jid address) {
-                                    return Futures.transform(
-                                            zonedDateTime(address),
-                                            zonedDateTime ->
-                                                    new OffsetEntityTime(
-                                                            Objects.requireNonNull(zonedDateTime)
-                                                                    .getOffset()),
-                                            MoreExecutors.directExecutor());
-                                }
-                            });
+                    .build(this.entityTimeLoader);
+    private final XmppConnectionService service;
     private final AppSettings appSettings;
 
-    public EntityTimeManager(final Context context, final XmppConnection connection) {
-        super(context, connection);
-        this.appSettings = new AppSettings(context);
+    public EntityTimeManager(final XmppConnectionService service, final XmppConnection connection) {
+        super(service.getApplicationContext(), connection);
+        this.appSettings = new AppSettings(context.getApplicationContext());
+        this.service = service;
     }
 
     public void request(final Iq request) {
@@ -77,25 +83,42 @@ public class EntityTimeManager extends AbstractManager {
         }
     }
 
-    // TODO add a zoneDateTimeWithTimeout and use that in the cache
-
     public ListenableFuture<ZonedDateTime> zonedDateTime(final Jid address) {
         Log.d(Config.LOGTAG, "requesting entity time: " + address);
-        final var future = this.connection.sendIqPacket(new Iq(Iq.Type.GET, address, new Time()));
-        return Futures.transform(
-                future,
-                iq -> {
-                    final var time = Objects.requireNonNull(iq).getOnlyExtension(Time.class);
-                    if (time == null) {
-                        throw new IllegalArgumentException("No valid time extension in response");
+        final var iqFuture = this.connection.sendIqPacket(new Iq(Iq.Type.GET, address, new Time()));
+        final var zonedEntityTimeFuture =
+                Futures.transform(
+                        iqFuture,
+                        iq -> {
+                            final var time =
+                                    Objects.requireNonNull(iq).getOnlyExtension(Time.class);
+                            if (time == null) {
+                                throw new IllegalArgumentException(
+                                        "No valid time extension in response");
+                            }
+                            final var zonedDateTime = time.asZonedDateTime();
+                            if (zonedDateTime == null) {
+                                throw new IllegalArgumentException(
+                                        "No valid zoned date time in response");
+                            }
+                            return zonedDateTime;
+                        },
+                        MoreExecutors.directExecutor());
+        Futures.addCallback(
+                zonedEntityTimeFuture,
+                new FutureCallback<>() {
+                    @Override
+                    public void onSuccess(final ZonedDateTime result) {
+                        service.updateConversationUi();
                     }
-                    final var zonedDateTime = time.asZonedDateTime();
-                    if (zonedDateTime == null) {
-                        throw new IllegalArgumentException("No valid zoned date time in response");
+
+                    @Override
+                    public void onFailure(@NonNull Throwable t) {
+                        Log.d(Config.LOGTAG, "could not request entity time from" + address, t);
                     }
-                    return zonedDateTime;
                 },
                 MoreExecutors.directExecutor());
+        return zonedEntityTimeFuture;
     }
 
     private ListenableFuture<List<EntityTime>> getEntityTimes(final Jid address) {
@@ -110,8 +133,13 @@ public class EntityTimeManager extends AbstractManager {
                                 return Futures.immediateFuture(new NoEntityTime());
                             }
                             final var entityTimeFuture = entityTimeCache.getUnchecked(fullAddress);
+                            final var entityTimeTimeoutFuture =
+                                    Futures.withTimeout(
+                                            entityTimeFuture,
+                                            Duration.ofSeconds(10L),
+                                            FUTURE_TIMEOUT_EXECUTOR);
                             return Futures.catching(
-                                    entityTimeFuture,
+                                    entityTimeTimeoutFuture,
                                     Exception.class,
                                     ex -> new InvalidEntityTime(),
                                     MoreExecutors.directExecutor());
