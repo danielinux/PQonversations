@@ -75,6 +75,25 @@ public class EntityTimeTest {
     }
 
     @Test
+    public void zuluRead() throws IOException {
+        final var xml =
+                """
+                <time xmlns="urn:xmpp:time"><utc>2026-01-01T00:00:00Z</utc><tzo>Z</tzo></time>\
+                """;
+        final var element = XmlElementReader.read(xml.getBytes(StandardCharsets.UTF_8));
+        assertThat(element, instanceOf(Time.class));
+        final var time = (Time) element;
+        final var zonedDateTime = time.asZonedDateTime();
+        Assert.assertEquals(ZonedDateTime.parse("2026-01-01T00:00:00+00:00"), zonedDateTime);
+        final var serialized = StreamElementWriter.asString(new Time(zonedDateTime));
+        final var expected =
+                """
+                <time xmlns="urn:xmpp:time"><utc>2026-01-01T00:00:00Z</utc><tzo>+00:00</tzo></time>\
+                """;
+        Assert.assertEquals(expected, serialized);
+    }
+
+    @Test
     public void shenzhenMissingPlusRead() throws IOException {
         final var xml =
                 """

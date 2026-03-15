@@ -32,6 +32,9 @@ public class TimeZoneOffset extends Extension {
         if (Strings.isNullOrEmpty(content)) {
             return null;
         }
+        if (content.equals("Z")) {
+            return ZoneOffset.UTC;
+        }
         final var parts = Splitter.on(':').splitToList(content);
         if (parts.size() != 2) {
             return null;
