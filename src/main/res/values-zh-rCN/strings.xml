@@ -303,10 +303,10 @@
     <string name="message_options">消息选项</string>
     <string name="quote">引用</string>
     <string name="paste_as_quote">粘贴为引用</string>
-    <string name="copy_original_url">复制原始 URL</string>
+    <string name="copy_original_url">复制原始网址</string>
     <string name="send_again">再次发送</string>
     <string name="file_url">文件 URL</string>
-    <string name="url_copied_to_clipboard">已将 URL 复制到剪贴板</string>
+    <string name="url_copied_to_clipboard">已将网址复制到剪贴板</string>
     <string name="jabber_id_copied_to_clipboard">已将 XMPP 地址复制到剪贴板</string>
     <string name="error_message_copied_to_clipboard">已将错误消息复制到剪贴板</string>
     <string name="web_address">网址</string>
@@ -343,7 +343,7 @@
     <string name="no_application_found_to_open_link">未找到可以打开链接的应用</string>
     <string name="no_application_found_to_view_contact">未找到可以查看联系人的应用</string>
     <string name="pref_show_dynamic_tags">动态标签</string>
-    <string name="pref_show_dynamic_tags_summary">在联系人下方显示动态标签汇总</string>
+    <string name="pref_show_dynamic_tags_summary">在联系人下方显示只读标签</string>
     <string name="enable_notifications">启用通知</string>
     <string name="no_conference_server_found">未找到群聊服务器</string>
     <string name="conference_creation_failed">无法创建群聊</string>
@@ -692,7 +692,7 @@
     <string name="pref_use_share_location_plugin_summary">使用分享位置插件代替内置地图</string>
     <string name="copy_link">复制网址</string>
     <string name="copy_jabber_id">复制 XMPP 地址</string>
-    <string name="p1_s3_filetransfer">用于 S3 的 HTTP 文件分享</string>
+    <string name="p1_s3_filetransfer">用于 S3 的 HTTP 文件共享</string>
     <string name="pref_start_search">直接搜索</string>
     <string name="pref_start_search_summary">在“新对话”屏幕上打开键盘并将光标放入搜索栏</string>
     <string name="group_chat_avatar">群聊头像</string>
@@ -1146,5 +1146,7 @@
     <string name="backup_and_restore">备份和恢复</string>
     <string name="pref_import_backup_summary">选择备份文件以恢复您的数据</string>
     <string name="pref_category_backup_storage">存储</string>
-    <string name="its_time_for_contact">对于 ^2，现在时间为 ^1</string>
+    <string name="its_time_for_contact">^2 那边现在是 ^1</string>
+    <string name="pref_entity_time">分享本地时间</string>
+    <string name="pref_entity_time_summary">与联系人分享您的当前时间，即可查看他们的本地时间。</string>
 </resources>
