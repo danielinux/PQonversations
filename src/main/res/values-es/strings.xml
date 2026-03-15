@@ -139,7 +139,7 @@
     <string name="error_not_an_image_file">El archivo seleccionado no es una imagen</string>
     <string name="error_compressing_image">No se pudo comprimir el archivo de imagen</string>
     <string name="error_file_not_found">Archivo no encontrado</string>
-    <string name="error_io_exception">Error general. ¿Es posible que no tengas espacio en disco?</string>
+    <string name="error_io_exception">Error general de E/S. ¿Es posible que no tengas espacio de almacenamiento?</string>
     <string name="error_security_exception_during_image_copy">La aplicación que utilizó para seleccionar la imagen no tiene los permisos necesarios para ver la imagen.
 \n
 \n<small>Use otro administrador de archivos para seleccionar una imagen</small>.</string>
@@ -808,7 +808,7 @@
     <string name="restore_warning">No restaures claves OMEMO en un intento de clonar (ejecutar simultáneamente) una instalación. La restauración de claves OMEMO solo está pensada para migraciones o en caso de que hayas perdido el dispositivo original.</string>
     <string name="unable_to_restore_backup">No se ha podido restaurar la copia de respaldo.</string>
     <string name="unable_to_decrypt_backup">No se ha podido descifrar la copia de respaldo. ¿Es la contraseña correcta?</string>
-    <string name="backup_channel_name">Respaldar &amp; Restaurar</string>
+    <string name="backup_channel_name">Respaldo y Restauración</string>
     <string name="enter_jabber_id">Introduce dirección XMPP</string>
     <string name="create_group_chat">Crear una conversación grupal</string>
     <string name="join_public_channel">Unirse a canal público</string>
@@ -1048,7 +1048,7 @@
     <string name="pref_allow_screenshots_summary">Mostrar el contenido de la aplicación en el conmutador de aplicaciones y permitir la realización de capturas de pantalla</string>
     <string name="pref_accept_invites_from_strangers">Invitaciones de extraños</string>
     <string name="pref_accept_invites_from_strangers_summary">Aceptar invitaciones a chats grupales de extraños</string>
-    <string name="pref_backup_summary">Crear una sola vez, Programar recurrentes</string>
+    <string name="pref_backup_summary">Crear una sola vez, Programar recurrentes, Ubicación</string>
     <string name="pref_create_backup_one_off_summary">Crear una copia de seguridad única</string>
     <string name="pref_backup_recurring">Copia de seguridad periódica</string>
     <string name="unsupported_operation">Operación no admitida</string>
@@ -1169,4 +1169,9 @@
     <string name="dismiss_as_admin">Quitar rol de admin</string>
     <string name="make_owner">Hacer propietario</string>
     <string name="dismiss_as_owner">Quitar rol de propietario</string>
+    <string name="account_status_regis_invalid_captcha">CAPTCHA inválido</string>
+    <string name="backup_and_restore">Respaldo y Restauración</string>
+    <string name="pref_import_backup_summary">Selecciona un archivo de respaldo para restaurar tus datos</string>
+    <string name="pref_category_backup_storage">Almacenamiento</string>
+    <string name="its_time_for_contact">Hora para ^2: ^1</string>
 </resources>
