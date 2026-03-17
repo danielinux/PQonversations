@@ -1050,7 +1050,7 @@
     <string name="pref_large_font_summary">Aumenta la dimensione dei caratteri nei messaggi</string>
     <string name="pref_accept_invites_from_strangers">Inviti da estranei</string>
     <string name="pref_accept_invites_from_strangers_summary">Accetta inviti a chat di gruppo da estranei</string>
-    <string name="pref_backup_summary">Crea una volta sola, Programma ricorrenze</string>
+    <string name="pref_backup_summary">Crea una volta sola, Programma ricorrenze, Percorso</string>
     <string name="pref_backup_recurring">Backup ricorrente</string>
     <string name="pref_fullscreen_notification">Notifiche a schermo intero</string>
     <string name="unsupported_operation">Operazione non supportata</string>
@@ -1171,4 +1171,11 @@
     <string name="make_owner">Rendi proprietario</string>
     <string name="dismiss_as_owner">Declassa da proprietario</string>
     <string name="account_status_airplane_mode">Modalità aereo</string>
+    <string name="account_status_regis_invalid_captcha">CAPTCHA non valido</string>
+    <string name="its_time_for_contact">Sono le ^1 per ^2</string>
+    <string name="backup_and_restore">Backup e ripristino</string>
+    <string name="pref_import_backup_summary">Seleziona un file di backup per ripristinare i dati</string>
+    <string name="pref_entity_time_summary">Condividi la tua ora con i contatti per vedere in cambio il loro orario locale.</string>
+    <string name="pref_entity_time">Condividi ora locale</string>
+    <string name="pref_category_backup_storage">Archiviazione</string>
 </resources>
