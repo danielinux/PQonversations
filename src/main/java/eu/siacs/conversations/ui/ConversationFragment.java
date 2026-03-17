@@ -3105,12 +3105,18 @@ public class ConversationFragment extends XmppFragment
                                         R.string.contact_has_stopped_typing,
                                         conversation.getName())));
             } else {
-                if (zonedDateTime != null
+                final var contact = conversation.getContact();
+                final var availability = contact.getShownStatus();
+                if (availability == Presence.Availability.DND) {
+                    final var dndMessage =
+                            Message.createStatusMessage(conversation, MessageAdapter.BODY_DND);
+                    this.messageList.add(dndMessage);
+                } else if (zonedDateTime != null
                         && EntityTimeManager.isDifferentTimeZone(zonedDateTime)
                         && EntityTimeManager.isNightTime(zonedDateTime)) {
                     final var localTimeMessage =
                             Message.createStatusMessage(
-                                    conversation, MessageAdapter.LOCAL_TIME_BODY);
+                                    conversation, MessageAdapter.BODY_LOCAL_TIME);
                     localTimeMessage.setTime(zonedDateTime.getOffset().getTotalSeconds());
                     this.messageList.add(localTimeMessage);
                 }

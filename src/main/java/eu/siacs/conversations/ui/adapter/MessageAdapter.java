@@ -105,9 +105,10 @@ import java.util.regex.Pattern;
 
 public class MessageAdapter extends ArrayAdapter<Message> {
 
-    public static final String DATE_SEPARATOR_BODY = "DATE_SEPARATOR";
-    public static final String LOAD_MORE_BODY = "LOAD_MORE";
-    public static final String LOCAL_TIME_BODY = "LOCAL_TIME";
+    public static final String BODY_DATE_SEPARATOR = "DATE_SEPARATOR";
+    public static final String BODY_LOAD_MORE = "LOAD_MORE";
+    public static final String BODY_LOCAL_TIME = "LOCAL_TIME";
+    public static final String BODY_DND = "DND";
     private static final int END = 0;
     private static final int START = 1;
     private static final int STATUS = 2;
@@ -173,7 +174,7 @@ public class MessageAdapter extends ArrayAdapter<Message> {
 
     private static int getItemViewType(final Message message, final boolean alignStart) {
         if (message.getType() == Message.TYPE_STATUS) {
-            if (DATE_SEPARATOR_BODY.equals(message.getBody())) {
+            if (BODY_DATE_SEPARATOR.equals(message.getBody())) {
                 return DATE_SEPARATOR;
             } else {
                 return STATUS;
@@ -1134,21 +1135,18 @@ public class MessageAdapter extends ArrayAdapter<Message> {
 
     private View render(final Message message, final StatusMessageItemViewHolder viewHolder) {
         final var conversation = message.getConversation();
-        if (LOAD_MORE_BODY.equals(message.getBody())) {
+        if (BODY_LOAD_MORE.equals(message.getBody())) {
             viewHolder.binding.statusMessage.setVisibility(View.GONE);
             viewHolder.binding.messagePhoto.setVisibility(View.GONE);
             viewHolder.binding.statusIcon.setVisibility(View.GONE);
             viewHolder.binding.loadMoreMessages.setVisibility(View.VISIBLE);
             viewHolder.binding.loadMoreMessages.setOnClickListener(
                     v -> loadMoreMessages((Conversation) message.getConversation()));
-        } else if (LOCAL_TIME_BODY.equals(message.getBody())
+        } else if (BODY_LOCAL_TIME.equals(message.getBody())
                 && conversation instanceof Conversation c) {
             final var offset = ZoneOffset.ofTotalSeconds(Ints.saturatedCast(message.getTimeSent()));
             final var localDateTime = Instant.now().atZone(offset);
             final var resources = viewHolder.binding.statusMessage.getContext().getResources();
-            viewHolder.binding.statusMessage.setVisibility(View.VISIBLE);
-            viewHolder.binding.loadMoreMessages.setVisibility(View.GONE);
-            viewHolder.binding.messagePhoto.setVisibility(View.GONE);
             final var time =
                     new SpannableString(
                             localDateTime.toLocalTime().truncatedTo(ChronoUnit.MINUTES).toString());
@@ -1160,8 +1158,13 @@ public class MessageAdapter extends ArrayAdapter<Message> {
             viewHolder.binding.statusMessage.setText(
                     TextUtils.expandTemplate(
                             resources.getString(R.string.its_time_for_contact), time, c.getName()));
-            viewHolder.binding.statusIcon.setImageResource(R.drawable.ic_schedule_24dp);
-            viewHolder.binding.statusIcon.setVisibility(View.VISIBLE);
+            configureForStatusMessage(viewHolder, R.drawable.ic_schedule_24dp);
+        } else if (BODY_DND.equals(message.getBody()) && conversation instanceof Conversation c) {
+            final var resources = viewHolder.binding.statusMessage.getContext().getResources();
+            viewHolder.binding.statusMessage.setText(
+                    resources.getString(
+                            R.string.contact_has_paused_their_notifications, c.getName()));
+            configureForStatusMessage(viewHolder, R.drawable.ic_notifications_paused_24dp);
         } else {
             viewHolder.binding.statusMessage.setVisibility(View.VISIBLE);
             viewHolder.binding.loadMoreMessages.setVisibility(View.GONE);
@@ -1190,6 +1193,15 @@ public class MessageAdapter extends ArrayAdapter<Message> {
             }
         }
         return viewHolder.binding.getRoot();
+    }
+
+    private static void configureForStatusMessage(
+            final StatusMessageItemViewHolder viewHolder, final @DrawableRes int imageResource) {
+        viewHolder.binding.statusMessage.setVisibility(View.VISIBLE);
+        viewHolder.binding.loadMoreMessages.setVisibility(View.GONE);
+        viewHolder.binding.messagePhoto.setVisibility(View.GONE);
+        viewHolder.binding.statusIcon.setImageResource(imageResource);
+        viewHolder.binding.statusIcon.setVisibility(View.VISIBLE);
     }
 
     private void setAvatarDistance(
