@@ -1211,6 +1211,11 @@
     <string name="pref_import_backup_summary">Выбор файла резервной копии для восстановления данных</string>
     <string name="its_time_for_contact">У ^2 сейчас ^1</string>
     <string name="mobile_ticket">Цифровой пропуск</string>
-    <string name="pref_entity_time_summary">Делиться своим текущим временем с контактами, чтобы взамен знать их местное время.</string>
+    <string name="pref_entity_time_summary">Делиться своим текущим временем с контактами, чтобы взамен знать их местное время</string>
     <string name="pref_entity_time">Делиться местным временем</string>
+    <string name="contact_has_paused_their_notifications">%s приостановил(а) получение уведомлений</string>
+    <string name="pref_sync_system_dnd_summary">Автоматически устанавливать статус \"Не беспокоить\" в приложении, если активен режим DND (\"Не беспокоить\") в системе Android</string>
+    <string name="pref_sync_system_dnd">Синхронизировать режим DND</string>
+    <string name="pref_include_silent_modes">Включая беззвучный режим</string>
+    <string name="pref_include_silent_modes_summary">Также устанавливать статус \"Не беспокоить\" в приложении, когда на устройстве отключены уведомления или оно находится в режиме вибрации</string>
 </resources>
