@@ -1168,4 +1168,11 @@
     <string name="pref_entity_time">Tregoni kohën vendore</string>
     <string name="pref_entity_time_summary">Tregojuni kontakteve tuaj kohën tuaj vendore, që të mund të shihni të tyren.</string>
     <string name="its_time_for_contact">Është ^1 për ^2</string>
+    <string name="contact_has_paused_their_notifications">%s ka ndalur njoftimet e veta</string>
+    <string name="pref_headsup_notifications">Njoftime “Vini re”</string>
+    <string name="pref_headsup_notifications_summary">Shfaq njoftime “Vini re”</string>
+    <string name="pref_sync_system_dnd">Njëkohëso DND sistemi</string>
+    <string name="pref_sync_system_dnd_summary">Caktoni automatikisht gjendjen tuaj si “Mos Më Shqetësoni”, kur mënyra DND e Android-it është aktive.</string>
+    <string name="pref_include_silent_modes">Përfshi mënyra të heshtura</string>
+    <string name="pref_include_silent_modes_summary">Sinjalizo gjithashtu “Mos më Shqetësoni”, kur njoftimet heshtohen, ose telefoni gjendet nën mënyrën dridhje.</string>
 </resources>
