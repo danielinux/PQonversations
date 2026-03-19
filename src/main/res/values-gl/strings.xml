@@ -1162,4 +1162,9 @@
     <string name="pref_category_backup_storage">Almacenaxe</string>
     <string name="pref_entity_time_summary">Comparte a túa hora actual cos contactos para ver a súa en reciprocidade.</string>
     <string name="pref_entity_time">Compartir hora local</string>
+    <string name="contact_has_paused_their_notifications">%s detivo as súas notificacións</string>
+    <string name="pref_sync_system_dnd">Sincr DND do sistema</string>
+    <string name="pref_sync_system_dnd_summary">Establece automaticamente o estado a «Non Molestar» cando o modo Non Molestar de Android estea activo.</string>
+    <string name="pref_include_silent_modes">Incluír modos silenciosos</string>
+    <string name="pref_include_silent_modes_summary">Tamén indicar «Non Molestar» cando as notificacións estean silenciadas ou o teléfono en modo vibración.</string>
 </resources>
