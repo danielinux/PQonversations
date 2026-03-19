@@ -1190,4 +1190,9 @@
     <string name="pref_category_backup_storage">Magazyn</string>
     <string name="pref_entity_time_summary">Udostępniaj Twój bieżący czas kontaktom aby widzieć ich lokalny czas w zamian.</string>
     <string name="pref_entity_time">Udostępniaj czas lokalny</string>
+    <string name="contact_has_paused_their_notifications">%s wstrzymał swoje powiadomienia</string>
+    <string name="pref_sync_system_dnd">Synchronizuj systemowe „nie przeszkadzać”</string>
+    <string name="pref_sync_system_dnd_summary">Automatycznie ustawia Twój status na „nie przeszkadzać” gdy tryb „nie przeszkadzać” Androida jest aktywny.</string>
+    <string name="pref_include_silent_modes">Uwzględnij wyciszone tryby</string>
+    <string name="pref_include_silent_modes_summary">Sygnalizuj „nie przeszkadzać” również gdy powiadomienia są wyciszone lub telefon ma tylko wibrować.</string>
 </resources>
