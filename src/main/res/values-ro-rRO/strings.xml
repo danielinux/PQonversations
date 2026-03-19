@@ -1183,4 +1183,9 @@
     <string name="pref_category_backup_storage">Stocare</string>
     <string name="pref_entity_time_summary">Partajați-vă ora curentă cu contactele pentru a putea vedea ora lor locală.</string>
     <string name="pref_entity_time">Partajează ora locală</string>
+    <string name="contact_has_paused_their_notifications">%s și-a întrerupt notificările</string>
+    <string name="pref_sync_system_dnd">Sincronizare mod \"Nu deranjați\"</string>
+    <string name="pref_sync_system_dnd_summary">Setați automat starea dvs. la \"Nu deranjați\" atunci când modul Android este activ.</string>
+    <string name="pref_include_silent_modes">Include modurile silențioase</string>
+    <string name="pref_include_silent_modes_summary">Semnalează \"Nu deranjați\" și atunci când notificările sunt dezactivate sau telefonul este pe vibrație.</string>
 </resources>
