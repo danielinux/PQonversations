@@ -88,12 +88,14 @@ import eu.siacs.conversations.xmpp.manager.BlockingManager;
 import eu.siacs.conversations.xmpp.manager.BookmarkManager;
 import eu.siacs.conversations.xmpp.manager.MultiUserChatManager;
 import im.conversations.android.model.Bookmark;
+import im.conversations.android.model.DynamicTag;
 import im.conversations.android.model.ImmutableBookmark;
 import im.conversations.android.xmpp.model.stanza.Presence;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 public class StartConversationActivity extends XmppActivity
         implements XmppConnectionService.OnConversationUpdate,
@@ -176,15 +178,19 @@ public class StartConversationActivity extends XmppActivity
                 public void onTextChanged(CharSequence s, int start, int before, int count) {}
             };
     private MenuItem mMenuSearchView;
-    private final ListItemAdapter.OnTagClickedListener mOnTagClickedListener =
-            new ListItemAdapter.OnTagClickedListener() {
+    private final Consumer<DynamicTag> mOnTagClickedListener =
+            new Consumer<>() {
                 @Override
-                public void onTagClicked(String tag) {
-                    if (mMenuSearchView != null) {
+                public void accept(DynamicTag dynamicTag) {
+                    final var searchView = mMenuSearchView;
+                    if (searchView == null) {
+                        return;
+                    }
+                    if (dynamicTag instanceof DynamicTag.RosterGroup(String name)) {
                         mMenuSearchView.expandActionView();
                         mSearchEditText.setText("");
-                        mSearchEditText.append(tag);
-                        filter(tag);
+                        mSearchEditText.append(name);
+                        filter(name);
                     }
                 }
             };
@@ -304,9 +310,8 @@ public class StartConversationActivity extends XmppActivity
         mListPagerAdapter = new ListPagerAdapter(getSupportFragmentManager());
         binding.startConversationViewPager.setAdapter(mListPagerAdapter);
 
-        mConferenceAdapter = new ListItemAdapter(this, conferences);
-        mContactsAdapter = new ListItemAdapter(this, contacts);
-        mContactsAdapter.setOnTagClickedListener(this.mOnTagClickedListener);
+        mConferenceAdapter = new ListItemAdapter(this, conferences, this.mOnTagClickedListener);
+        mContactsAdapter = new ListItemAdapter(this, contacts, this.mOnTagClickedListener);
 
         final SharedPreferences preferences = getPreferences();
 
@@ -1140,7 +1145,7 @@ public class StartConversationActivity extends XmppActivity
         dialog.show();
     }
 
-    protected void filter(String needle) {
+    protected void filter(final String needle) {
         if (xmppConnectionServiceBound) {
             this.filterContacts(needle);
             this.filterConferences(needle);

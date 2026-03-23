@@ -10,10 +10,12 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.ColorInt;
+import androidx.annotation.ColorRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.StringRes;
 import androidx.constraintlayout.helper.widget.Flow;
 import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.core.content.ContextCompat;
 import androidx.databinding.DataBindingUtil;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
@@ -32,7 +34,9 @@ import eu.siacs.conversations.ui.util.MucDetailsContextMenuHelper;
 import eu.siacs.conversations.utils.Compatibility;
 import eu.siacs.conversations.utils.XEP0392Helper;
 import eu.siacs.conversations.xmpp.Jid;
+import im.conversations.android.model.DynamicTag;
 import java.util.List;
+import java.util.function.Consumer;
 import org.openintents.openpgp.util.OpenPgpUtils;
 
 public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHolder>
@@ -154,8 +158,14 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
         setHats(viewHolder.binding.tags, user.getDynamicTags());
     }
 
+    public static void setHats(final ConstraintLayout layout, final List<DynamicTag> tags) {
+        setHats(layout, tags, null);
+    }
+
     public static void setHats(
-            final ConstraintLayout layout, final List<MucOptions.DynamicTag> tags) {
+            final ConstraintLayout layout,
+            final List<DynamicTag> tags,
+            final Consumer<DynamicTag> onTagClickedListener) {
         if (tags.isEmpty()) {
             layout.setVisibility(View.GONE);
         } else {
@@ -165,15 +175,20 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
             final ImmutableList.Builder<Integer> viewIdBuilder = new ImmutableList.Builder<>();
             for (final var tag : tags) {
                 final TextView tv = (TextView) inflater.inflate(R.layout.item_tag, layout, false);
-                if (tag instanceof MucOptions.Hat hat) {
-                    setTag(tv, hat);
-                } else if (tag instanceof MucOptions.Attributes attributes) {
-                    setAttributes(tv, attributes);
-                } else {
-                    throw new IllegalArgumentException("Could not render unknown tag");
+                switch (tag) {
+                    case DynamicTag.Hat hat -> setTag(tv, hat);
+                    case DynamicTag.Attributes attributes -> setAttributes(tv, attributes);
+                    case DynamicTag.Status status -> setStatus(tv, status);
+                    case DynamicTag.RosterGroup rosterGroup -> setRosterGroup(tv, rosterGroup);
+                    case DynamicTag.Blocked ignored -> setBlocked(tv);
+                    case null, default ->
+                            throw new IllegalArgumentException("Could not render unknown tag");
                 }
                 final int id = View.generateViewId();
                 tv.setId(id);
+                if (onTagClickedListener != null) {
+                    tv.setOnClickListener(v -> onTagClickedListener.accept(tag));
+                }
                 viewIdBuilder.add(id);
                 layout.addView(tv);
             }
@@ -183,8 +198,64 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
         }
     }
 
+    private static void setBlocked(final TextView textView) {
+        final var context = textView.getContext();
+        textView.setText(R.string.blocked);
+        textView.setBackgroundTintList(
+                ColorStateList.valueOf(
+                        MaterialColors.harmonizeWithPrimary(
+                                context, ContextCompat.getColor(context, R.color.gray_800))));
+    }
+
+    private static void setRosterGroup(
+            final TextView textView, final DynamicTag.RosterGroup rosterGroup) {
+        @ColorInt final int color = XEP0392Helper.rgbFromNick(rosterGroup.name());
+        @ColorInt
+        final int harmonizedColor =
+                MaterialColors.harmonizeWithPrimary(textView.getContext(), color);
+        textView.setText(rosterGroup.name());
+        textView.setBackgroundTintList(ColorStateList.valueOf(harmonizedColor));
+    }
+
+    private static void setStatus(final TextView textView, final DynamicTag.Status status) {
+        final @StringRes int text;
+        final @ColorRes int color =
+                switch (status.availability()) {
+                    case CHAT -> {
+                        text = R.string.presence_chat;
+                        yield R.color.green_800;
+                    }
+                    case ONLINE -> {
+                        text = R.string.presence_online;
+                        yield R.color.green_800;
+                    }
+                    case AWAY -> {
+                        text = R.string.presence_away;
+                        yield R.color.amber_800;
+                    }
+                    case XA -> {
+                        text = R.string.presence_xa;
+                        yield R.color.orange_800;
+                    }
+                    case DND -> {
+                        text = R.string.presence_dnd;
+                        yield R.color.red_800;
+                    }
+                    case OFFLINE -> {
+                        text = R.string.presence_offline;
+                        yield R.color.gray_800;
+                    }
+                };
+        textView.setText(text);
+        textView.setBackgroundTintList(
+                ColorStateList.valueOf(
+                        MaterialColors.harmonizeWithPrimary(
+                                textView.getContext(),
+                                ContextCompat.getColor(textView.getContext(), color))));
+    }
+
     private static void setAttributes(
-            final TextView textView, final MucOptions.Attributes attributes) {
+            final TextView textView, final DynamicTag.Attributes attributes) {
         textView.setTextColor(
                 MaterialColors.getColor(
                         textView, com.google.android.material.R.attr.colorOnSurfaceVariant));
@@ -237,7 +308,7 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
         textView.setBackgroundTintList(ColorStateList.valueOf(color));
     }
 
-    private static void setTag(final TextView textView, final MucOptions.Hat hat) {
+    private static void setTag(final TextView textView, final DynamicTag.Hat hat) {
         textView.setText(hat.title());
         @ColorInt final int color;
         if (hat.hue() == null) {

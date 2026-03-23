@@ -152,6 +152,7 @@ public class EntityTimeManager extends AbstractManager {
             return Futures.immediateFailedFuture(
                     new IllegalStateException("Requesting entity time is disabled"));
         }
+        // TODO check isShownContactList
         return Futures.transform(
                 getEntityTimes(address),
                 entityTimes -> {

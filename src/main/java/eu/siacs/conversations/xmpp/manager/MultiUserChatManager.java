@@ -30,6 +30,7 @@ import eu.siacs.conversations.utils.StringUtils;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.XmppConnection;
+import im.conversations.android.model.DynamicTag;
 import im.conversations.android.model.ImmutableBookmark;
 import im.conversations.android.xmpp.Entity;
 import im.conversations.android.xmpp.EntityCapabilities;
@@ -420,7 +421,7 @@ public class MultiUserChatManager extends AbstractManager {
         final var hatsExtension = presence.getOnlyExtension(Hats.class);
         final String occupantId =
                 mucOptions.occupantId() && occupant != null ? occupant.getId() : null;
-        final Set<MucOptions.Hat> hats;
+        final Set<DynamicTag.Hat> hats;
         if (mucOptions.hats() && hatsExtension != null) {
             hats = transform(hatsExtension.getHats());
         } else {
@@ -476,9 +477,9 @@ public class MultiUserChatManager extends AbstractManager {
         }
     }
 
-    private static Set<MucOptions.Hat> transform(
+    private static Set<DynamicTag.Hat> transform(
             final Collection<im.conversations.android.xmpp.model.hats.Hat> rawHats) {
-        final var hatBuilder = new ImmutableSet.Builder<MucOptions.Hat>();
+        final var hatBuilder = new ImmutableSet.Builder<DynamicTag.Hat>();
         for (final var rawHat : rawHats) {
             final var title = rawHat.getTitle();
             final var uri = rawHat.getUri();
@@ -486,7 +487,7 @@ public class MultiUserChatManager extends AbstractManager {
             if (Strings.isNullOrEmpty(title) || Strings.isNullOrEmpty(uri)) {
                 continue;
             }
-            hatBuilder.add(new MucOptions.Hat(uri, title, optionalHue.orNull()));
+            hatBuilder.add(new DynamicTag.Hat(uri, title, optionalHue.orNull()));
         }
         return hatBuilder.build();
     }
@@ -1462,7 +1463,7 @@ public class MultiUserChatManager extends AbstractManager {
             final im.conversations.android.xmpp.model.muc.Item item,
             final Jid from,
             final String occupantId,
-            final Set<MucOptions.Hat> hats) {
+            final Set<DynamicTag.Hat> hats) {
         final var affiliation = item.getAffiliation();
         final var role = item.getRole();
         final Jid fullAddress;
