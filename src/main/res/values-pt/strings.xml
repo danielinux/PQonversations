@@ -1173,4 +1173,5 @@
     <string name="pref_sync_system_dnd_summary">Automaticamente define o seu estado como \"Não Perturbar\" quando o modo DND do Android está ativo.</string>
     <string name="pref_include_silent_modes">Incluir modos silenciosos</string>
     <string name="pref_include_silent_modes_summary">Também definir \"Não Perturbar\" quando as notificações estão silenciadas ou o telemóvel está em modo vibrar.</string>
+    <string name="presence_offline">Offline</string>
 </resources>
