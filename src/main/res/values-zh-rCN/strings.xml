@@ -1154,4 +1154,5 @@
     <string name="pref_sync_system_dnd_summary">当 Android 的勿扰模式开启时，自动将您的状态设置为忙碌。</string>
     <string name="pref_include_silent_modes">包含静音模式</string>
     <string name="pref_include_silent_modes_summary">当通知被静音或手机处于振动模式时，也将您的状态设置为忙碌。</string>
+    <string name="presence_offline">离线</string>
 </resources>
