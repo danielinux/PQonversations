@@ -1182,4 +1182,10 @@
     <string name="its_time_for_contact">Kasutajal ^2 on kell ^1</string>
     <string name="pref_entity_time_summary">Jaga oma kellaaega teiste kasutajatega ja näed nende oma.</string>
     <string name="pref_entity_time">Jaga kohalikku kellaaega</string>
+    <string name="contact_has_paused_their_notifications">%s on oma teavitused ajutiselt peatanud</string>
+    <string name="presence_offline">Pole võrgus</string>
+    <string name="pref_sync_system_dnd">Sünkrooni seadme „Ära sega mind“ olekuga</string>
+    <string name="pref_sync_system_dnd_summary">Kui Androidi „Ära sega mind“ olek on aktiivne, siis sünkrooni see ka rakendusse.</string>
+    <string name="pref_include_silent_modes">Kaasa seadme vaiksed olekud</string>
+    <string name="pref_include_silent_modes_summary">Märgi olekuks „Ära sega mind“ ka siis, kui teavitused on summutatud või nutiseade kasutab teavituseks vaid värinat.</string>
 </resources>
