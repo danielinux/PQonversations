@@ -71,6 +71,13 @@ public class AdHocCommandsManager extends AbstractManager {
                 MoreExecutors.directExecutor());
     }
 
+    public ListenableFuture<Data> commandComplete(
+            final Jid address, final String node, @Nullable final Map<String, Object> data) {
+        final var future = command(address, node, Command.Action.COMPLETE, null, data);
+        return Futures.transform(
+                future, AdHocCommandsManager::completedData, MoreExecutors.directExecutor());
+    }
+
     public static Data completedData(final AdHocCommandsManager.Stage stage) {
         if (stage instanceof AdHocCommandsManager.Completed completed) {
             final var data = completed.data();
