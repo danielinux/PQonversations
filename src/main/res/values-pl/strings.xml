@@ -264,10 +264,10 @@
     <string name="enable">Włącz</string>
     <string name="conference_requires_password">Konferencja wymaga hasła</string>
     <string name="enter_password">Wprowadź hasło</string>
-    <string name="request_presence_updates">Poproś kontakt o udostępnianie powiadomień o obecności. \n \n<small>Pozwoli to na ustalenie klienta, z którego korzysta rozmówca</small>.</string>
+    <string name="request_presence_updates">Poproś kontakt o udostępnianie powiadomień o obecności. \n\n<small>Pozwoli to na ustalenie klienta, z którego korzysta rozmówca.</small></string>
     <string name="request_now">Zażądaj teraz</string>
     <string name="ignore">Ignoruj</string>
-    <string name="without_mutual_presence_updates"><b>Uwaga:</b> Wysyłanie bez obustronnych powiadomień o obecności może powodować nieoczekiwane problemy.\n\n<small>Sprawdź subskrypcję powiadomień w szczegółach kontaktu.</small></string>
+    <string name="without_mutual_presence_updates"><b>Uwaga:</b> wysyłanie bez obustronnych powiadomień o obecności może powodować nieoczekiwane problemy.\n\n<small>Sprawdź subskrypcję powiadomień w szczegółach kontaktu.</small></string>
     <string name="pref_security_settings">Bezpieczeństwo</string>
     <string name="pref_allow_message_correction">Edycje wiadomości</string>
     <string name="pref_allow_message_correction_summary">Pozwól swoim kontaktom poprawiać wiadomości</string>
@@ -518,7 +518,7 @@
     <string name="use_own_provider">Użyj innego serwera</string>
     <string name="pick_your_username">Wybierz nazwę użytkownika</string>
     <string name="pref_manually_change_presence">Zarządzaj dostępnością ręcznie</string>
-    <string name="pref_manually_change_presence_summary">Ustaw dostępność w oknie edytowania wiadomości statusu.</string>
+    <string name="pref_manually_change_presence_summary">Ustaw dostępność w oknie edytowania wiadomości statusu.</string>
     <string name="status_message">Status</string>
     <string name="presence_chat">Chętny do rozmowy</string>
     <string name="presence_online">Dostępny</string>
@@ -1195,4 +1195,5 @@
     <string name="pref_sync_system_dnd_summary">Automatycznie ustawia Twój status na „nie przeszkadzać” gdy tryb „nie przeszkadzać” Androida jest aktywny.</string>
     <string name="pref_include_silent_modes">Uwzględnij wyciszone tryby</string>
     <string name="pref_include_silent_modes_summary">Sygnalizuj „nie przeszkadzać” również gdy powiadomienia są wyciszone lub telefon ma tylko wibrować.</string>
+    <string name="presence_offline">Rozłączony</string>
 </resources>
