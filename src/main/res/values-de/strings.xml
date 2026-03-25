@@ -521,7 +521,7 @@
     <string name="presence_online">Online</string>
     <string name="presence_away">Weg</string>
     <string name="presence_xa">Nicht verfügbar</string>
-    <string name="presence_dnd">Beschäftigt</string>
+    <string name="presence_dnd">Bitte nicht stören</string>
     <string name="secure_password_generated">Ein sicheres Passwort wurde erstellt</string>
     <string name="device_does_not_support_battery_op">Dein Gerät unterstützt nicht das Ausschalten der Akkuoptimierung</string>
     <string name="registration_please_wait">Registrierung fehlgeschlagen: Bitte später versuchen</string>
@@ -644,7 +644,7 @@
     <string name="certificate_does_not_contain_jid">Zertifikat enthält keine XMPP-Adresse</string>
     <string name="server_info_partial">teilweise</string>
     <string name="attach_record_video">Video aufnehmen</string>
-    <string name="copy_to_clipboard">In die Zwischenablage kopieren</string>
+    <string name="copy_to_clipboard">Kopieren</string>
     <string name="message_copied_to_clipboard">Nachricht in die Zwischenablage kopiert</string>
     <string name="message">Nachricht</string>
     <string name="private_messages_are_disabled">Private Nachrichten sind deaktiviert</string>
@@ -1168,4 +1168,5 @@
     <string name="pref_include_silent_modes">Lautlos-Modus einbeziehen</string>
     <string name="pref_include_silent_modes_summary">Zusätzlich wird „Nicht stören“ angezeigt, wenn Benachrichtigungen stummgeschaltet sind oder das Telefon auf Vibration eingestellt ist.</string>
     <string name="presence_offline">Offline</string>
+    <string name="rtp_state_no_internet">Keine Internetverbindung</string>
 </resources>
