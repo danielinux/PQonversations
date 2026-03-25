@@ -34,6 +34,8 @@ import org.jspecify.annotations.NonNull;
 
 public class EntityTimeManager extends AbstractManager {
 
+    private static final Duration DURATION_RECENT_MESSAGE = Duration.ofMinutes(12);
+
     private final CacheLoader<Jid, ListenableFuture<EntityTime>> entityTimeLoader =
             new CacheLoader<>() {
 
@@ -153,7 +155,11 @@ public class EntityTimeManager extends AbstractManager {
             return Futures.immediateFailedFuture(
                     new IllegalStateException("Requesting entity time is disabled"));
         }
-        // TODO check isShownContactList
+        final var contact = getManager(RosterManager.class).getContactFromContactList(address);
+        if (contact == null) {
+            return Futures.immediateFailedFuture(
+                    new IllegalStateException("Requesting entity time is limited to contacts"));
+        }
         return Futures.transform(
                 getEntityTimes(address),
                 entityTimes -> {
@@ -196,7 +202,7 @@ public class EntityTimeManager extends AbstractManager {
 
     public static boolean noRecentMessages(final Conversation conversation) {
         final var duration = Duration.between(conversation.getLastReceived(), Instant.now());
-        return Duration.ofMinutes(15).compareTo(duration) < 0;
+        return DURATION_RECENT_MESSAGE.compareTo(duration) < 0;
     }
 
     public sealed interface EntityTime {}
