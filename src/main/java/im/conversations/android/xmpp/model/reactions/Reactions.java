@@ -2,6 +2,7 @@ package im.conversations.android.xmpp.model.reactions;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableSet;
 import im.conversations.android.annotation.XmlElement;
 import im.conversations.android.xmpp.model.Extension;
 import java.util.Collection;
@@ -15,16 +16,17 @@ public class Reactions extends Extension {
     }
 
     public Collection<String> getReactions() {
-        return Collections2.filter(
-                Collections2.transform(
-                        getExtensions(Reaction.class),
-                        reaction -> reaction != null ? reaction.getContent() : null),
-                r -> {
-                    if (Strings.isNullOrEmpty(r)) {
-                        return false;
-                    }
-                    return EmojiManager.isEmoji(r);
-                });
+        return ImmutableSet.copyOf(
+                Collections2.filter(
+                        Collections2.transform(
+                                getExtensions(Reaction.class),
+                                reaction -> reaction != null ? reaction.getContent() : null),
+                        r -> {
+                            if (Strings.isNullOrEmpty(r)) {
+                                return false;
+                            }
+                            return EmojiManager.isEmoji(r);
+                        }));
     }
 
     public String getId() {
