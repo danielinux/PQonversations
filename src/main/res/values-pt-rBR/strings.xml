@@ -515,7 +515,7 @@
     <string name="presence_online">On-line</string>
     <string name="presence_away">Afastado</string>
     <string name="presence_xa">Não disponível</string>
-    <string name="presence_dnd">Ocupado</string>
+    <string name="presence_dnd">Não Perturbe</string>
     <string name="secure_password_generated">Foi gerada uma senha segura</string>
     <string name="device_does_not_support_battery_op">Seu dispositivo não suporta a desativação da otimização de bateria</string>
     <string name="registration_please_wait">Falha ao cadastrar: Tente novamente mais tarde</string>
