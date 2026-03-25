@@ -515,7 +515,7 @@
     <string name="presence_online">На мрежи</string>
     <string name="presence_away">Одсутан/на</string>
     <string name="presence_xa">Недоступан/на</string>
-    <string name="presence_dnd">Заузет/а</string>
+    <string name="presence_dnd">Не узнемиравај</string>
     <string name="secure_password_generated">Јака лозинка је направљена</string>
     <string name="device_does_not_support_battery_op">Твој уређај не подржава искључивање оптимизације батерије</string>
     <string name="registration_please_wait">Регистрација није успела: покушај поново касније</string>
@@ -622,7 +622,7 @@
     <string name="yesterday">Јуче</string>
     <string name="server_info_partial">делимично</string>
     <string name="attach_record_video">Сними видео</string>
-    <string name="copy_to_clipboard">Копирај у клипборд</string>
+    <string name="copy_to_clipboard">Копирај</string>
     <string name="message_copied_to_clipboard">Порука копирана у клипборд</string>
     <string name="message">Порука</string>
     <string name="draft">Нацрт:</string>
@@ -1204,4 +1204,5 @@
     <string name="pref_include_silent_modes">Обухвати и нечујне режиме</string>
     <string name="pref_include_silent_modes_summary">Такође шаљи \"Не узнемиравај\" и када су обавештења утишана или је телефон на вибрацији.</string>
     <string name="presence_offline">Ван мреже</string>
+    <string name="rtp_state_no_internet">Нема интернета</string>
 </resources>
