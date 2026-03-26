@@ -538,7 +538,7 @@
     <string name="presence_online">В сети</string>
     <string name="presence_away">Отошёл</string>
     <string name="presence_xa">Недоступен</string>
-    <string name="presence_dnd">Занят</string>
+    <string name="presence_dnd">Не беспокоить</string>
     <string name="secure_password_generated">Пароль был сгенерирован</string>
     <string name="device_does_not_support_battery_op">Ваше устройство не поддерживает отключение оптимизации энергопотребления</string>
     <string name="registration_please_wait">Регистрация не выполнена: повторите попытку позднее</string>
@@ -673,7 +673,7 @@
     <string name="certificate_does_not_contain_jid">Сертификат не содержит XMPP-адрес</string>
     <string name="server_info_partial">частичный</string>
     <string name="attach_record_video">Записать видео</string>
-    <string name="copy_to_clipboard">Копировать в буфер обмена</string>
+    <string name="copy_to_clipboard">Копировать</string>
     <string name="message_copied_to_clipboard">Сообщение скопировано в буфер обмена</string>
     <string name="message">Сообщение</string>
     <string name="private_messages_are_disabled">Личные сообщения выключены</string>
@@ -1219,4 +1219,5 @@
     <string name="pref_include_silent_modes">Включая беззвучный режим</string>
     <string name="pref_include_silent_modes_summary">Также устанавливать статус \"Не беспокоить\" в приложении, когда на устройстве отключены уведомления или оно находится в режиме вибрации</string>
     <string name="presence_offline">Не в сети</string>
+    <string name="rtp_state_no_internet">Нет подключения к интернету</string>
 </resources>
