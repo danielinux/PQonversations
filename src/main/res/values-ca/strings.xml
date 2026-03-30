@@ -961,4 +961,6 @@
     <string name="corresponding_chats_closed">S\'han arxivat els xats corresponents.</string>
     <string name="error_trustkey_general">%1$s no pot enviar missatges xifrats a %2$s. Això pot ser degut al fet que el vostre contacte utilitza un servidor o un client antic que no és compatible amb OMEMO.</string>
     <string name="pref_dynamic_colors">Colors dinàmics</string>
+    <string name="rtp_state_no_internet">Sense connexió a internet</string>
+    <string name="pref_dynamic_colors_summary">Colors del sistema (Material You)</string>
 </resources>
