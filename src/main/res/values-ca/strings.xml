@@ -963,4 +963,46 @@
     <string name="pref_dynamic_colors">Colors dinàmics</string>
     <string name="rtp_state_no_internet">Sense connexió a internet</string>
     <string name="pref_dynamic_colors_summary">Colors del sistema (Material You)</string>
+    <string name="no_microphone_permission">Concedeix a %1$s accés al micròfon</string>
+    <string name="copy_URI">Copia l\'URI</string>
+    <string name="copy_telephone_number">Copia el número de telèfon</string>
+    <string name="copy_geo_uri">Copia la ubicació</string>
+    <string name="copy_email_address">Copia l\'adreça electrònica</string>
+    <string name="copied_email_address">S\'ha copiat l\'adreça de correu electrònic al porta-retalls</string>
+    <string name="copied_phone_number">S\'ha copiat el número de telèfon al porta-retalls</string>
+    <string name="foreground_service_channel_description">Aquesta categoria de notificació s\'utilitza per mostrar una notificació permanent que indica que %1$s s\'està executant.</string>
+    <string name="missed_calls_channel_name">Trucades perdudes</string>
+    <string name="restore_omemo_key">Restaura les claus OMEMO</string>
+    <string name="restore_warning_continued">Restaura només les còpies de seguretat que hagis creat tu personalment.</string>
+    <string name="channel_discover_opt_in_message">La descoberta de canals utilitza un servei de tercers anomenat &lt;a href=https://search.jabber.network&gt;search.jabber.network&lt;/a&gt;.&lt;br&gt;&lt;br&gt;L\'ús d\'aquesta funció transmetrà la vostra adreça IP i els termes de cerca a aquest servei. Consulteu la seva &lt;a href=https://search.jabber.network/privacy&gt;Política de privadesa&lt;/a&gt; per a més informació.</string>
+    <string name="outdated_backup_file_format">Esteu provant d\'importar un format de fitxer de còpia de seguretat obsolet</string>
+    <string name="non_quicksy_backup">Quicksy només pot restaurar còpies de seguretat de comptes de quicksy.im</string>
+    <string name="enable_account_to_delete">Aquest compte està desactivat. Activa\'l per a poder eliminar-lo del servidor.</string>
+    <string name="rtp_state_content_add_video">Vols passar a trucada de vídeo?</string>
+    <string name="rtp_state_content_add">Vols afegir més pistes?</string>
+    <string name="rtp_state_reconnecting">Reconnectant</string>
+    <string name="rtp_state_contact_offline">El contacte no està disponible</string>
+    <string name="rtp_state_security_error">Problema de verificació</string>
+    <string name="reconnecting_call">Es recupera la trucada</string>
+    <string name="reconnecting_video_call">Es torna a connectar la trucada de vídeo</string>
+    <string name="incoming_call_duration_timestamp">Trucada entrant (%s) · %s</string>
+    <string name="outgoing_call_duration_timestamp">Trucada sortint (%s) · %s</string>
+    <string name="missed_call_timestamp">Trucada perduda · %s</string>
+    <string name="outgoing_call_timestamp">Trucada sortint · %s</string>
+    <plurals name="n_missed_calls_from_x">
+        <item quantity="one">%1$d trucada perduda de %2$s</item>
+        <item quantity="many">%1$d trucades perdudes de %2$s</item>
+        <item quantity="other">%1$d trucades perdudes de %2$s</item>
+    </plurals>
+    <plurals name="n_missed_calls">
+        <item quantity="one">%d trucada perduda</item>
+        <item quantity="many">%d trucades perdudes</item>
+        <item quantity="other">%d trucades perdudes</item>
+    </plurals>
+    <plurals name="n_missed_calls_from_m_contacts">
+        <item quantity="one">%1$d trucades perdudes de %2$d</item>
+        <item quantity="many">%1$d trucades perdudes de %2$d</item>
+        <item quantity="other">%1$d trucades perdudes de %2$d</item>
+    </plurals>
+    <string name="switch_to_chat">Canvia al xat</string>
 </resources>
