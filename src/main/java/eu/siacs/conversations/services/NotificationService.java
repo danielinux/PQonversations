@@ -21,7 +21,6 @@ import android.media.AudioManager;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
-import android.os.SystemClock;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.text.SpannableString;
@@ -106,7 +105,9 @@ public class NotificationService {
     private static final int INCOMING_CALL_NOTIFICATION_ID = NOTIFICATION_ID_MULTIPLIER * 8;
     public static final int ONGOING_CALL_NOTIFICATION_ID = NOTIFICATION_ID_MULTIPLIER * 10;
     public static final int MISSED_CALL_NOTIFICATION_ID = NOTIFICATION_ID_MULTIPLIER * 12;
-    private static final int DELIVERY_FAILED_NOTIFICATION_ID = NOTIFICATION_ID_MULTIPLIER * 13;
+    private static final int DELIVERY_FAILED_SUMMARY_NOTIFICATION_ID =
+            NOTIFICATION_ID_MULTIPLIER * 13;
+    private static final int DELIVERY_FAILED_NOTIFICATION_ID = NOTIFICATION_ID_MULTIPLIER * 14;
     public static final int ONGOING_VIDEO_TRANSCODING_NOTIFICATION_ID =
             NOTIFICATION_ID_MULTIPLIER * 14;
     private final XmppConnectionService mXmppConnectionService;
@@ -116,7 +117,6 @@ public class NotificationService {
             new LinkedHashMap<>();
     private Conversation mOpenConversation;
     private boolean mIsInForeground;
-    private long mLastNotification;
 
     private static final String INCOMING_CALLS_NOTIFICATION_CHANNEL = "incoming_calls_channel";
     private static final String INCOMING_CALLS_NOTIFICATION_CHANNEL_PREFIX =
@@ -526,8 +526,6 @@ public class NotificationService {
             return;
         }
         final PendingIntent pendingIntent = createContentIntent(conversation);
-        final int notificationId =
-                generateRequestCode(conversation, 0) + DELIVERY_FAILED_NOTIFICATION_ID;
         final int failedDeliveries = conversation.countFailedDeliveries();
         final Notification notification =
                 new Builder(mXmppConnectionService, "delivery_failed")
@@ -558,8 +556,14 @@ public class NotificationService {
                         .setGroupSummary(true)
                         .setAutoCancel(true)
                         .build();
-        notify(notificationId, notification);
-        notify(DELIVERY_FAILED_NOTIFICATION_ID, summaryNotification);
+        notify(conversation.getUuid(), DELIVERY_FAILED_NOTIFICATION_ID, notification);
+        notify(DELIVERY_FAILED_SUMMARY_NOTIFICATION_ID, summaryNotification);
+    }
+
+    public void clearFailedDelivery(final Message message) {
+        if (message.getConversation() instanceof Conversation conversation) {
+            this.cancel(conversation.getUuid(), DELIVERY_FAILED_NOTIFICATION_ID);
+        }
     }
 
     public synchronized void startRinging(
@@ -942,9 +946,6 @@ public class NotificationService {
         if (notifications.isEmpty()) {
             cancel(NOTIFICATION_ID);
         } else {
-            if (notify) {
-                this.markLastNotification();
-            }
             final Builder mBuilder;
             if (notifications.size() == 1 && Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
                 mBuilder =
@@ -1816,10 +1817,6 @@ public class NotificationService {
         return ((int) (dp * metrics.density));
     }
 
-    private void markLastNotification() {
-        this.mLastNotification = SystemClock.elapsedRealtime();
-    }
-
     Notification createForegroundNotification() {
         final Notification.Builder mBuilder = new Notification.Builder(mXmppConnectionService);
         mBuilder.setContentTitle(mXmppConnectionService.getString(R.string.app_name));
@@ -2073,17 +2070,17 @@ public class NotificationService {
                 NotificationManagerCompat.from(mXmppConnectionService);
         try {
             notificationManager.cancel(id);
-        } catch (RuntimeException e) {
+        } catch (final RuntimeException e) {
             Log.d(Config.LOGTAG, "unable to cancel notification", e);
         }
     }
 
-    private void cancel(String tag, int id) {
+    private void cancel(final String tag, final int id) {
         final NotificationManagerCompat notificationManager =
                 NotificationManagerCompat.from(mXmppConnectionService);
         try {
             notificationManager.cancel(tag, id);
-        } catch (RuntimeException e) {
+        } catch (final RuntimeException e) {
             Log.d(Config.LOGTAG, "unable to cancel notification", e);
         }
     }

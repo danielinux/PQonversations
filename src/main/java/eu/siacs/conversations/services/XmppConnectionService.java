@@ -3671,6 +3671,7 @@ public class XmppConnectionService extends Service {
     }
 
     public void resendFailedMessages(final Message message, final boolean forceP2P) {
+        this.mNotificationService.clearFailedDelivery(message);
         message.setTime(System.currentTimeMillis());
         markMessage(message, Message.STATUS_WAITING);
         this.sendMessage(message, true, false, forceP2P);
