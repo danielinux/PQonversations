@@ -249,7 +249,9 @@ public class EnterPhoneNumberActivity extends XmppActivity
 
     private void onPhoneNumberEntered(Phonenumber.PhoneNumber phoneNumber) {
         setRequestingVerificationState(true);
-        xmppConnectionService.getQuickConversationsService().requestVerification(phoneNumber);
+        xmppConnectionService
+                .getQuickConversationsService()
+                .requestVerificationDebounce(phoneNumber);
     }
 
     private void setRequestingVerificationState(boolean requesting) {
