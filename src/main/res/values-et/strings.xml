@@ -1189,4 +1189,7 @@
     <string name="pref_include_silent_modes">Kaasa seadme vaiksed olekud</string>
     <string name="pref_include_silent_modes_summary">Märgi olekuks „Ära sega mind“ ka siis, kui teavitused on summutatud või nutiseade kasutab teavituseks vaid värinat.</string>
     <string name="rtp_state_no_internet">Internetiühendus puudub</string>
+    <string name="send">Saada</string>
+    <string name="pref_auto_send_recording">Salvestiste automaatne saatmine</string>
+    <string name="pref_auto_send_recording_summary">Peale salvestamise lõppu saada häälsõnumid automaatselt ära.</string>
 </resources>
