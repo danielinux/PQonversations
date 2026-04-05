@@ -118,7 +118,9 @@ public class EasyOnboardingManager extends AbstractManager {
         return Futures.transformAsync(
                 future,
                 stage -> {
+                    Preconditions.checkNotNull(stage);
                     if (stage instanceof AdHocCommandsManager.Executing executing) {
+                        // ejabberd uses a two-step process where we supply the username first
                         final var data = executing.data();
                         if (data == null) {
                             throw new IllegalStateException("Missing data in executing stage");
@@ -134,8 +136,14 @@ public class EasyOnboardingManager extends AbstractManager {
                         final var rosterSubscription =
                                 Objects.nonNull(data.getFieldByName("roster-subscription"));
                         return createAccount(address, sessionId, rosterSubscription);
+                    } else if (stage instanceof AdHocCommandsManager.Completed completed) {
+                        // prosody gives us 'completed' directly
+                        // the prosody command also doesn't have support for `roster-subscription`
+                        return Futures.immediateFuture(getEasyOnboardingInvite(completed));
                     } else {
-                        throw new IllegalStateException("Unexpected stage");
+                        throw new IllegalStateException(
+                                String.format(
+                                        "Unexpected stage: %s", stage.getClass().getSimpleName()));
                     }
                 },
                 MoreExecutors.directExecutor());

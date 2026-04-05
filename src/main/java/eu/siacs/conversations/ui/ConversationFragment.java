@@ -3048,8 +3048,7 @@ public class ConversationFragment extends XmppFragment
     }
 
     public void updateSendButton() {
-        boolean hasAttachments =
-                mediaPreviewAdapter != null && mediaPreviewAdapter.hasAttachments();
+        final var hasAttachments = mediaPreviewAdapter.hasAttachments();
         final Conversation c = this.conversation;
         final var connection = c.getAccount().getXmppConnection();
         final Presence.Availability status;
