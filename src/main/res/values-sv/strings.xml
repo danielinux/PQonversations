@@ -1184,4 +1184,7 @@
     <string name="pref_include_silent_modes_summary">Signalera också \"Stör ej\" när aviseringar är avstängda, eller när telefonen är på vibrationsläget.</string>
     <string name="presence_offline">Offline</string>
     <string name="rtp_state_no_internet">Ingen Internetförbindelse</string>
+    <string name="send">Skicka</string>
+    <string name="pref_auto_send_recording">Skicka inspelningar automatiskt</string>
+    <string name="pref_auto_send_recording_summary">Skicka röstmeddelanden automatiskt när du är klar med inspelningen.</string>
 </resources>
