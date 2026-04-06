@@ -1188,4 +1188,7 @@
     <string name="pref_include_silent_modes_summary">Semnalează \"Nu deranjați\" și atunci când notificările sunt dezactivate sau telefonul este pe vibrație.</string>
     <string name="presence_offline">Deconectat</string>
     <string name="rtp_state_no_internet">Fără conexiune Internet</string>
+    <string name="send">Trimite</string>
+    <string name="pref_auto_send_recording">Trimite automat înregistrările</string>
+    <string name="pref_auto_send_recording_summary">Mesajele vocale sunt trimise automat atunci când terminați înregistrarea.</string>
 </resources>
