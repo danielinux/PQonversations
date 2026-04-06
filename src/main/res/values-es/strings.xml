@@ -1183,4 +1183,7 @@
     <string name="pref_sync_system_dnd_summary">Establecer automáticamente tu estado a \"No interrumpir\" cuando el modo \"No interrumpir\" de Android esté activo.</string>
     <string name="presence_offline">Sin conexión</string>
     <string name="rtp_state_no_internet">Sin conexión a internet</string>
+    <string name="pref_auto_send_recording_summary">Enviar automáticamente los mensajes de voz al finalizar la grabación.</string>
+    <string name="pref_auto_send_recording">Envío automático de grabaciones</string>
+    <string name="send">Enviar</string>
 </resources>
