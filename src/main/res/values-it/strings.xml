@@ -1185,4 +1185,7 @@
     <string name="pref_sync_system_dnd_summary">Imposta automaticamente il tuo stato su \"Non disturbare\" quando la stessa modalità di Android è attiva.</string>
     <string name="pref_include_silent_modes">Includi modalità silenziose</string>
     <string name="pref_include_silent_modes_summary">Indica \"Non disturbare\" anche quando le notifiche sono silenziate o il telefono è su vibrazione.</string>
+    <string name="send">Invia</string>
+    <string name="pref_auto_send_recording">Auto-invia registrazioni</string>
+    <string name="pref_auto_send_recording_summary">Invia i messaggi vocali automaticamente quando finisce la registrazione.</string>
 </resources>
