@@ -1007,7 +1007,7 @@
     <string name="pref_category_sending">发送</string>
     <string name="pref_category_receiving">接收</string>
     <string name="pref_connection_summary">主机名和端口、Tor</string>
-    <string name="pref_connection_summary_w_cd">主机名和端口、Tor、P2P、频道发现</string>
+    <string name="pref_connection_summary_w_cd">主机名和端口、Tor、频道发现</string>
     <string name="pref_keyboard_options">键盘</string>
     <string name="pref_category_application">应用程序</string>
     <string name="pref_category_interaction">互动</string>
@@ -1015,7 +1015,7 @@
     <string name="pref_title_interface">界面</string>
     <string name="pref_category_operating_system">操作系统</string>
     <string name="pref_summary_security">端到端加密、验证前盲目信任、中间人攻击检测</string>
-    <string name="pref_privacy_summary">输入通知、最后上线、在线状态</string>
+    <string name="pref_privacy_summary">输入通知、最后上线、P2P 中继</string>
     <string name="pref_category_engagement_notifications">参与通知</string>
     <string name="pref_up_long_summary">在充当 UnifiedPush 分发程序时，将利用持久、可靠且省电的 XMPP 连接来唤醒其他兼容 UnifiedPush 的应用，如 Tusky、Ltt.rs、FluffyChat 等。</string>
     <string name="pref_allow_screenshots_summary">在切换应用时显示应用内容并允许截屏</string>
@@ -1159,4 +1159,5 @@
     <string name="send">发送</string>
     <string name="pref_auto_send_recording">自动发送录制内容</string>
     <string name="pref_auto_send_recording_summary">录制完成后自动发送语音消息。</string>
+    <string name="pref_presence_settings_summary">设备锁定时离开、同步系统勿扰模式</string>
 </resources>
