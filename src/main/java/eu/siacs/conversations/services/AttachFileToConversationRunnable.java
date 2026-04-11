@@ -92,7 +92,6 @@ public class AttachFileToConversationRunnable implements Runnable, TranscoderLis
             Log.d(Config.LOGTAG, "created parent directory for video file");
         }
 
-        // final boolean highQuality = "720".equals(appSettings.getVideoCompression());
         final DefaultVideoStrategy selectedVideoTranscoderStrategy;
         final DefaultAudioStrategy derivedAudioTranscoderStrategy;
         switch(appSettings.getVideoCompression()) {
@@ -116,6 +115,7 @@ public class AttachFileToConversationRunnable implements Runnable, TranscoderLis
                 selectedVideoTranscoderStrategy = TranscoderStrategies.VIDEO_480P;
                 derivedAudioTranscoderStrategy = TranscoderStrategies.AUDIO_MQ;
                 break;
+
         }
 
         final Future<Void> transcoderFuture;
