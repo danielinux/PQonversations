@@ -1035,8 +1035,8 @@
     <string name="detect_mim_summary">Channel binding poate detecta unele atacuri de tip machine-in-the-middle</string>
     <string name="pref_category_server_connection">Conexiune server</string>
     <string name="pref_category_operating_system">Sistem de operare</string>
-    <string name="pref_privacy_summary">Notificări de tastare, Văzut ultima dată, Disponibilitate</string>
-    <string name="pref_connection_summary_w_cd">Nume gazdă &amp; Port, Tor, P2P, Descoperire canale</string>
+    <string name="pref_privacy_summary">Notificări de tastare, Văzut(ă) ultima dată, Relee P2P</string>
+    <string name="pref_connection_summary_w_cd">Gazdă &amp; Port, Tor, Descoperire canale</string>
     <string name="pref_category_e2ee">Criptare de la un capăt-la-altul (E2E)</string>
     <string name="pref_keyboard_options">Tastatură</string>
     <string name="pref_category_engagement_notifications">Notificări de implicare</string>
@@ -1191,4 +1191,5 @@
     <string name="send">Trimite</string>
     <string name="pref_auto_send_recording">Trimite automat înregistrările</string>
     <string name="pref_auto_send_recording_summary">Mesajele vocale sunt trimise automat atunci când terminați înregistrarea.</string>
+    <string name="pref_presence_settings_summary">Plecat(ă) la blocare, Sincronizare Nu Deranja</string>
 </resources>
