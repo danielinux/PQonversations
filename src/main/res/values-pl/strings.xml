@@ -1041,13 +1041,13 @@
     <string name="pref_title_trust_system_ca_store_summary">Ufaj systemowym certyfikatom CA</string>
     <string name="pref_category_server_connection">Połączenie z serwerem</string>
     <string name="pref_category_operating_system">System operacyjny</string>
-    <string name="pref_privacy_summary">Powiadomienie o pisaniu, ostatnia aktywność, dostępność</string>
+    <string name="pref_privacy_summary">Powiadomienia o pisaniu, ostatnia aktywność, przekaźniki P2P</string>
     <string name="pref_connection_summary">Nazwa hosta i port, Tor</string>
     <string name="no_certificate_selected">Nie wybrano certyfikatu klienta!</string>
     <string name="appearance">Wygląd</string>
     <string name="detect_mim">Wymagaj przywiązania kanału</string>
     <string name="detect_mim_summary">Przywiązanie kanału może wykryć niektóre ataki machine­‐in­‐the­‐middle</string>
-    <string name="pref_connection_summary_w_cd">Nazwa hosta i port, Tor, P2P, odkrywanie kanałów</string>
+    <string name="pref_connection_summary_w_cd">Nazwa hosta i port, Tor, odkrywanie kanałów</string>
     <string name="pref_keyboard_options">Klawiatura</string>
     <string name="pref_category_engagement_notifications">Powiadomienia o aktywności</string>
     <string name="pref_category_application">Aplikacja</string>
@@ -1200,4 +1200,5 @@
     <string name="send">Wyślij</string>
     <string name="pref_auto_send_recording">Automatycznie wysyłaj nagrania</string>
     <string name="pref_auto_send_recording_summary">Wysyła wiadomości głosowe automatycznie gdy zakończysz nagrywanie.</string>
+    <string name="pref_presence_settings_summary">„Zaraz wracam” przy blokadzie urządzenia, synchronizacja systemowego „nie przeszkadzać”</string>
 </resources>
