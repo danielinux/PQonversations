@@ -1130,8 +1130,8 @@
     <string name="pref_title_trust_system_ca_store">Certifikatutfärdare</string>
     <string name="detect_mim">Kräv kanalbindning</string>
     <string name="detect_mim_summary">Kanalbindning kan upptäcka vissa machine-in-the-middle-attacker</string>
-    <string name="pref_privacy_summary">Skrivindikatorer, senast sedd, tillgänglighet</string>
-    <string name="pref_connection_summary_w_cd">Värdnamn och port, Tor, P2P, kanalupptäckt</string>
+    <string name="pref_privacy_summary">Skrivindikatorer, senast sedd, P2P-reläer</string>
+    <string name="pref_connection_summary_w_cd">Värdnamn och port, Tor, kanalupptäckt</string>
     <string name="pref_category_engagement_notifications">Interaktionsnotiser</string>
     <string name="pref_up_long_summary">När du agerar som UnifiedPush-distributör, kommer den ihållande, pålitliga och batterivänliga XMPP-anslutningen att användas för att väcka andra UnifiedPush-kompatibla appar, som Tusky, Ltt.rs, FluffyChat och fler.</string>
     <string name="pref_backup_summary">Skapa engångsföreteelser, schemalägg återkommande, lagringsplats</string>
@@ -1187,4 +1187,5 @@
     <string name="send">Skicka</string>
     <string name="pref_auto_send_recording">Skicka inspelningar automatiskt</string>
     <string name="pref_auto_send_recording_summary">Skicka röstmeddelanden automatiskt när du är klar med inspelningen.</string>
+    <string name="pref_presence_settings_summary">Borta vid enhetslåsning, Synkronisera system Stör ej</string>
 </resources>
