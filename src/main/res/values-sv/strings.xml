@@ -733,7 +733,7 @@
     <string name="group_chat_members">Deltagare</string>
     <string name="media_browser">Mediebläddrare</string>
     <string name="pref_video_compression">Videokvalitet</string>
-    <string name="video_360p">Medium (360p)</string>
+    <string name="video_360p">Låg (360p)</string>
     <string name="video_720p">Hög (720p)</string>
     <string name="cancelled">avbruten</string>
     <string name="already_drafting_message">Du håller redan på att skriva ett meddelande.</string>
@@ -1019,7 +1019,7 @@
     <string name="restore_omemo_key">Återställ OMEMO-nycklar</string>
     <string name="switch_to_chat">Byt till chatt</string>
     <string name="pref_backup_recurring">Återkommande säkerhetskopiering</string>
-    <string name="pref_connection_summary">Värdnamn &amp; Port, Tor</string>
+    <string name="pref_connection_summary">Värdnamn och port, Tor</string>
     <string name="pref_fullscreen_notification">Fullskärmsaviseringar</string>
     <string name="welcome_header_quicksy">Välkommen till Quicksy!</string>
     <string name="copy_email_address">Kopiera e-postadress</string>
@@ -1130,7 +1130,7 @@
     <string name="pref_title_trust_system_ca_store">Certifikatutfärdare</string>
     <string name="detect_mim">Kräv kanalbindning</string>
     <string name="detect_mim_summary">Kanalbindning kan upptäcka vissa machine-in-the-middle-attacker</string>
-    <string name="pref_privacy_summary">Skrivindikatorer, senast sedd, P2P-reläer</string>
+    <string name="pref_privacy_summary">Skrivindikeringar, senast sedd, P2P-reläer</string>
     <string name="pref_connection_summary_w_cd">Värdnamn och port, Tor, kanalupptäckt</string>
     <string name="pref_category_engagement_notifications">Interaktionsnotiser</string>
     <string name="pref_up_long_summary">När du agerar som UnifiedPush-distributör, kommer den ihållande, pålitliga och batterivänliga XMPP-anslutningen att användas för att väcka andra UnifiedPush-kompatibla appar, som Tusky, Ltt.rs, FluffyChat och fler.</string>
@@ -1181,11 +1181,13 @@
     <string name="pref_sync_system_dnd">Synkronisera systemets stör-ej-läge</string>
     <string name="pref_sync_system_dnd_summary">Ställ automatiskt in din status till \"Stör ej\" när Androids stör-ej-läge är aktivt.</string>
     <string name="pref_include_silent_modes">Inkludera tysta lägen</string>
-    <string name="pref_include_silent_modes_summary">Signalera också \"Stör ej\" när aviseringar är avstängda, eller när telefonen är på vibrationsläget.</string>
+    <string name="pref_include_silent_modes_summary">Signalera även \"Stör ej\" när aviseringar är avstängda, eller när telefonen är inställd på vibrationsläget.</string>
     <string name="presence_offline">Offline</string>
     <string name="rtp_state_no_internet">Ingen Internetförbindelse</string>
     <string name="send">Skicka</string>
     <string name="pref_auto_send_recording">Skicka inspelningar automatiskt</string>
     <string name="pref_auto_send_recording_summary">Skicka röstmeddelanden automatiskt när du är klar med inspelningen.</string>
-    <string name="pref_presence_settings_summary">Borta vid enhetslåsning, Synkronisera system Stör ej</string>
+    <string name="pref_presence_settings_summary">Frånvarande när enheten är låst, synkronisera systemets \"stör ej\"-läge</string>
+    <string name="video_480p">Medium (480p)</string>
+    <string name="video_1080p">Väldigt hög (1080p)</string>
 </resources>
