@@ -91,7 +91,7 @@
     <string name="send_unencrypted">Açık metin olarak gönder</string>
     <string name="decryption_failed">Deşifre edilemedi. Uygun bir özel anahtarınız olmayabilir.</string>
     <string name="openkeychain_required">OpenKeychain</string>
-    <string name="openkeychain_required_long">%1$s mesajları şifrelemek, deşifre etmek ve genel anahtarlarınızı yönetmek için &lt;b&gt;OpenKeychain&lt;/b&gt; kullanmaktadır.&lt;br&gt;&lt;br&gt;lt GPLv3+ altında lisanslıdır ve F-Droid ve Google Play\'de mevcuttur.&lt;br&gt;&lt;br&gt;&lt;small&gt;(Lütfen devamında %1$s\'ı yeniden başlatın.)&lt;/small&gt;</string>
+    <string name="openkeychain_required_long"><![CDATA[%1$s mesajları şifrelemek, deşifre etmek ve genel anahtarlarınızı yönetmek için <b>OpenKeychain</b> kullanmaktadır.<br><br>lt GPLv3+ altında lisanslıdır ve F-Droid ve Google Play\'de mevcuttur.<br><br><small>(Lütfen devamında %1$s\'ı yeniden başlatın.)</small>]]></string>
     <string name="restart">Yeniden başlat</string>
     <string name="install">Kur</string>
     <string name="openkeychain_not_installed">Lütfen OpenKeychain’i kur</string>
