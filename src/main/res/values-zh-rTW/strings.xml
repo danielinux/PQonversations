@@ -790,7 +790,7 @@
     <string name="unable_to_perform_this_action">無法執行此動作</string>
     <string name="open_join_dialog">加入公用頻道…</string>
     <string name="sharing_application_not_grant_permission">分享應用程式未授予此檔案的存取權。</string>
-    <string name="group_chats_and_channels"><![CDATA[群組聊天 & 頻道]]> </string>
+    <string name="group_chats_and_channels"><![CDATA[群組聊天 & 頻道]]></string>
     <string name="local_server">本機伺服器</string>
     <string name="pref_channel_discovery_summary">大多數使用者應該選擇「jabber.network」以從整個公用 XMPP 生態系統中取得更好的建議。</string>
     <string name="pref_channel_discovery">頻道探索方法</string>
