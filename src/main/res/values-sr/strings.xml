@@ -955,7 +955,7 @@
     <string name="pref_more_notification_settings_summary">Хитност, Звук, Вибрација</string>
     <string name="pref_video_compression">Видео Квалитет</string>
     <string name="pref_video_compression_summary">Нижи квалитет значи да су фајлови мањи</string>
-    <string name="video_360p">Средњи (360p)</string>
+    <string name="video_360p">Ниски (360p)</string>
     <string name="cancelled">прекинуто</string>
     <string name="already_drafting_message">Већ правиш нацрт поруке.</string>
     <string name="feature_not_implemented">Функција није имплементирана</string>
@@ -1209,4 +1209,8 @@
     <string name="pref_auto_send_recording">Аутоматски шаљи снимке</string>
     <string name="pref_auto_send_recording_summary">Шаљи гласовне поруке аутоматски кад завршиш снимање.</string>
     <string name="pref_presence_settings_summary">Одсутност при закључаном екрану, синхронизација са DND</string>
+    <string name="video_480p">Средњи (480p)</string>
+    <string name="video_1080p">Веома висок (1080p)</string>
+    <string name="pref_save_to_gallery">Чувај у галерији</string>
+    <string name="pref_save_to_gallery_summary">Аутоматски чувај садржаје у јавним фолдерима како би се појавили у галерији и фајл менаџеру.</string>
 </resources>
