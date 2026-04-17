@@ -1195,4 +1195,6 @@
     <string name="pref_presence_settings_summary">Olekud - „Olen ära“ lukustamisel ja süsteemne „Ära sega“</string>
     <string name="video_480p">Keskmine (480p)</string>
     <string name="video_1080p">Väga kõrge (1080p)</string>
+    <string name="pref_save_to_gallery">Salvesta galeriisse</string>
+    <string name="pref_save_to_gallery_summary">Salvesta meediafailid automaatselt avalikesse kaustadesse, et need kuvataks su galeriis ja failihalduris.</string>
 </resources>
