@@ -1226,4 +1226,6 @@
     <string name="pref_presence_settings_summary">\"Отошёл\" при блокировке экрана, синхронизация с системным режимом DND</string>
     <string name="video_480p">Среднее (480p)</string>
     <string name="video_1080p">Очень высокое (1080p)</string>
+    <string name="pref_save_to_gallery">Сохранять в галерею</string>
+    <string name="pref_save_to_gallery_summary">Автоматически сохранять медиафайлы в общедоступных папках, чтобы они отображались в галерее и файловом менеджере</string>
 </resources>
