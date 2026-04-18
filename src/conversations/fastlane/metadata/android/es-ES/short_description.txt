@@ -1,1 +1,1 @@
-Un cliente XMPP encriptado y fácil de usar para tu dispositivo móvil
+Mensajería instantánea XMPP encriptada y fácil de usar, diseñada para tus dispositivos móviles
