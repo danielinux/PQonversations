@@ -1194,4 +1194,6 @@
     <string name="pref_presence_settings_summary">Plecat(ă) la blocare, Sincronizare Nu Deranja</string>
     <string name="video_480p">Medie (480p)</string>
     <string name="video_1080p">Foarte mare (1080p)</string>
+    <string name="pref_save_to_gallery">Salvează în galerie</string>
+    <string name="pref_save_to_gallery_summary">Stocați automat fișierele în dosare publice, astfel încât acestea să apară în galeria și managerul dvs. de fișiere.</string>
 </resources>
