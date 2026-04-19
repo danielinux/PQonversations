@@ -1182,4 +1182,6 @@
     <string name="send">Dërgoje</string>
     <string name="pref_auto_send_recording">Regjistrimet dërgoji vetvetiu</string>
     <string name="pref_auto_send_recording_summary">Dërgoni mesazhe zanore automatikisht, kur përfundoni regjistrimin.</string>
+    <string name="pref_save_to_gallery">Ruaje në Galeri</string>
+    <string name="pref_save_to_gallery_summary">Depozito automatikisht media në dosje publike, që të shfaqen në galerinë tuaj dhe te përgjegjës kartelash.</string>
 </resources>
