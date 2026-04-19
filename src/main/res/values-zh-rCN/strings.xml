@@ -95,9 +95,9 @@
     <string name="offering">正在提供…</string>
     <string name="waiting">正在等待…</string>
     <string name="no_pgp_key">未找到 OpenPGP 密钥</string>
-    <string name="contact_has_no_pgp_key">无法加密您的消息，因为您的联系人未宣告其公钥。\n\n<small>请让您的联系人设置 OpenPGP。</small></string>
+    <string name="contact_has_no_pgp_key">无法加密您的消息，因为您的联系人未发布其公钥。\n\n<small>请让您的联系人设置 OpenPGP。</small></string>
     <string name="no_pgp_keys">未找到 OpenPGP 密钥</string>
-    <string name="contacts_have_no_pgp_keys">无法加密您的消息，因为您的联系人未宣告其公钥。\n\n<small>请让您的联系人设置 OpenPGP。</small></string>
+    <string name="contacts_have_no_pgp_keys">无法加密您的消息，因为您的联系人未发布其公钥。\n\n<small>请让您的联系人设置 OpenPGP。</small></string>
     <string name="pref_general">常规</string>
     <string name="pref_accept_files">接受文件</string>
     <string name="pref_accept_files_summary">自动接受小于此大小的文件…</string>
@@ -167,7 +167,7 @@
     <string name="mgmt_account_publish_avatar">发布头像</string>
     <string name="mgmt_account_publish_pgp">发布 OpenPGP 公钥</string>
     <string name="unpublish_pgp">移除 OpenPGP 公钥</string>
-    <string name="unpublish_pgp_message">您确定要从在线状态宣告中移除您的 OpenPGP 公钥吗？\n您的联系人将无法再向您发送 OpenPGP 加密消息。</string>
+    <string name="unpublish_pgp_message">您确定要从在线状态发布中移除您的 OpenPGP 公钥吗？\n您的联系人将无法再向您发送 OpenPGP 加密消息。</string>
     <string name="openpgp_has_been_published">OpenPGP 公钥已发布。</string>
     <string name="mgmt_account_enable">启用账号</string>
     <string name="mgmt_account_delete_confirm_text">您确定要删除账号吗？删除您的账号会清空全部聊天记录</string>
@@ -192,7 +192,7 @@
     <string name="server_info_push">XEP-0357：推送</string>
     <string name="server_info_available">有效</string>
     <string name="server_info_unavailable">无效</string>
-    <string name="missing_public_keys">缺少公钥宣告</string>
+    <string name="missing_public_keys">缺少公钥发布</string>
     <string name="install_openkeychain">加密消息。请安装 OpenKeychain 进行解密。</string>
     <string name="openpgp_messages_found">发现新的 OpenPGP 加密消息</string>
     <string name="openpgp_key_id">OpenPGP 密钥 ID</string>
@@ -340,7 +340,7 @@
     <string name="copy_omemo_clipboard_description">将 OMEMO 指纹复制到剪贴板</string>
     <string name="regenerate_omemo_key">重新生成 OMEMO 密钥</string>
     <string name="clear_other_devices">清除设备</string>
-    <string name="clear_other_devices_desc">您确定要从 OMEMO 宣告中清除所有其他设备吗？下次您的设备连接时将会重新宣告自身，但可能无法接收在此期间发送的消息。</string>
+    <string name="clear_other_devices_desc">您确定要从 OMEMO 发布中清除所有其他设备吗？下次您的设备连接时将会重新发布自身信息，但可能无法接收在此期间发送的消息。</string>
     <string name="error_no_keys_to_trust_server_error">此联系人没有可用的密钥。\n无法从服务器获取新密钥。可能是您的联系人的服务器出现了问题？</string>
     <string name="error_no_keys_to_trust_presence">此联系人没有可用的密钥。\n请确保双方都有在线状态订阅。</string>
     <string name="error_trustkeys_title">出了点问题</string>
