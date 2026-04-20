@@ -846,7 +846,6 @@
     <string name="pref_channel_discovery">Μέθοδος εύρεσης καναλιού</string>
     <string name="backup">Αντίγραφο ασφαλείας</string>
     <string name="category_about">Σχετικά με</string>
-    <string name="please_enable_an_account">Παρακαλώ ενεργοποιήστε έναν λογαριασμό</string>
     <string name="make_call">Νέα κλήση</string>
     <string name="rtp_state_incoming_call">Εισερχόμενη κλήση</string>
     <string name="rtp_state_incoming_video_call">Εισερχόμενη βιντεοκλήση</string>

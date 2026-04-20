@@ -849,7 +849,6 @@
     <string name="pref_channel_discovery">Спосіб пошуку каналів</string>
     <string name="backup">Резервне копіювання</string>
     <string name="category_about">Про застосунок</string>
-    <string name="please_enable_an_account">Будь ласка, активуйте обліковий запис</string>
     <string name="make_call">Виклик</string>
     <string name="rtp_state_incoming_call">Вхідний виклик</string>
     <string name="rtp_state_incoming_video_call">Вхідний відеовиклик</string>

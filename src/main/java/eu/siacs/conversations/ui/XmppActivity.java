@@ -113,8 +113,6 @@ public abstract class XmppActivity extends ActionBarActivity {
 
     private boolean isCameraFeatureAvailable = false;
 
-    protected boolean mUsingEnterKey = false;
-    protected boolean mUseTor = false;
     protected boolean mShowLastUserInteraction = false;
     protected Toast mToast;
     public Runnable onOpenPGPKeyPublished =
@@ -237,8 +235,6 @@ public abstract class XmppActivity extends ActionBarActivity {
             this.onBackendConnected();
         }
         final var appSettings = new AppSettings(this);
-        this.mUsingEnterKey = appSettings.isDisplayEnterKey();
-        this.mUseTor = appSettings.isUseTor();
         this.mShowLastUserInteraction = appSettings.isBroadcastLastActivity();
     }
 

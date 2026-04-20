@@ -914,7 +914,6 @@
     <string name="make_call">Fazer chamada</string>
     <string name="rtp_state_application_failure">Falha na aplicação</string>
     <string name="download_failed_could_not_establish_tls">Não foi possível estabelecer conexão TLS</string>
-    <string name="please_enable_an_account">Por favor ative uma conta</string>
     <string name="rtp_state_incoming_video_call">Videochamada recebida</string>
     <string name="rtp_state_connecting">Conectando</string>
     <string name="rtp_state_connected">Conectado</string>

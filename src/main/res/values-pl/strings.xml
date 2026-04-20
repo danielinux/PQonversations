@@ -871,7 +871,6 @@
     <string name="pref_channel_discovery">Metoda odkrywania kanałów</string>
     <string name="backup">Kopia zapasowa</string>
     <string name="category_about">O aplikacji</string>
-    <string name="please_enable_an_account">Proszę włączyć konto</string>
     <string name="make_call">Zadzwoń</string>
     <string name="rtp_state_incoming_call">Połączenie przychodzące</string>
     <string name="rtp_state_incoming_video_call">Wideorozmowa przychodząca</string>

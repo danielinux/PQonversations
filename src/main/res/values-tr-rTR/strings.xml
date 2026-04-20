@@ -860,7 +860,6 @@
     <string name="pref_channel_discovery">Kanal keşif yöntemi</string>
     <string name="backup">Yedekle</string>
     <string name="category_about">Hakkında</string>
-    <string name="please_enable_an_account">Lütfen bir hesabı etkinleştirin</string>
     <string name="make_call">Arama yap</string>
     <string name="rtp_state_incoming_call">Gelen arama</string>
     <string name="rtp_state_incoming_video_call">Gelen görüntülü arama</string>

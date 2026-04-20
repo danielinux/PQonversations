@@ -881,7 +881,6 @@
     <string name="pref_channel_discovery">Metoda ôdkrywanio kanałōw</string>
     <string name="backup">Kopijo ibryczno</string>
     <string name="category_about">Ô aplikacyji</string>
-    <string name="please_enable_an_account">Włōncz kōnto</string>
     <string name="make_call">Zazwōń</string>
     <string name="rtp_state_incoming_call">Przichodzi połōnczynie</string>
     <string name="rtp_state_incoming_video_call">Przichodzi połōnczynie wideo</string>

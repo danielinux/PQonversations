@@ -1019,7 +1019,6 @@
     <string name="pref_channel_discovery_summary">Већина корисника би требало да одабере ‘jabber.network’ за боље предлоге из целокупног јавног XMPP екосистема.</string>
     <string name="pref_channel_discovery">Начин проналаска канала</string>
     <string name="category_about">О апликацији</string>
-    <string name="please_enable_an_account">Укључи неки налог</string>
     <string name="make_call">Обави позив</string>
     <string name="rtp_state_incoming_call">Долазни позив</string>
     <string name="rtp_state_incoming_video_call">Долазни видео позив</string>

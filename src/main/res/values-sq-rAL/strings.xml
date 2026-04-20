@@ -657,7 +657,6 @@
     <string name="pref_channel_discovery">Metodë zbulimi kanalesh</string>
     <string name="backup">Kopjeruajtje</string>
     <string name="category_about">Mbi</string>
-    <string name="please_enable_an_account">Ju lutemi, aktivizoni një llogari</string>
     <string name="make_call">Bëni thirrje</string>
     <string name="rtp_state_incoming_call">Thirrje ardhëse</string>
     <string name="rtp_state_incoming_video_call">Thirrje video ardhëse</string>

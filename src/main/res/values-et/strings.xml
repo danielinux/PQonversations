@@ -871,7 +871,6 @@
     <string name="pref_channel_discovery">Kanalite tuvastamise meetod</string>
     <string name="backup">Varukoopia</string>
     <string name="category_about">Rakenduse teave</string>
-    <string name="please_enable_an_account">Palun võta mõni kasutajakonto kasutusele</string>
     <string name="make_call">Helista</string>
     <string name="rtp_state_incoming_call">Saabuv kõne</string>
     <string name="rtp_state_incoming_video_call">Saabuv videokõne</string>

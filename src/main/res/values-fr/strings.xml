@@ -858,7 +858,6 @@
     <string name="pref_channel_discovery">Méthode de découverte des salons</string>
     <string name="backup">Sauvegarde</string>
     <string name="category_about">À propos</string>
-    <string name="please_enable_an_account">Veuillez activer votre compte</string>
     <string name="make_call">Appeler</string>
     <string name="rtp_state_incoming_call">Appel entrant</string>
     <string name="rtp_state_incoming_video_call">Appel vidéo entrant</string>

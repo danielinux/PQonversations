@@ -198,7 +198,7 @@ public class HttpConnectionManager extends AbstractConnectionManager {
                             public void onResponse(@NonNull Call call, @NonNull Response response) {
                                 if (response.isSuccessful()) {
                                     // TODO check 'Sunset' HTTP response Header (rfc8594) to see if
-                                    // it is at least ~24 hours in the futuer
+                                    // it is at least ~24 hours in the future
                                     future.set(url);
                                 } else {
                                     future.setException(

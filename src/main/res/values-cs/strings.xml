@@ -851,7 +851,6 @@
     <string name="pref_channel_discovery">Metoda objevování kanálů</string>
     <string name="backup">Záloha</string>
     <string name="category_about">O</string>
-    <string name="please_enable_an_account">Prosíme, povolte účet</string>
     <string name="make_call">Volat</string>
     <string name="rtp_state_incoming_call">Příchozí hovor</string>
     <string name="rtp_state_incoming_video_call">Příchozí videohovor</string>

@@ -844,7 +844,6 @@
     <string name="pref_channel_discovery_summary">ほとんどのユーザーは、公開 XMPP エコシステム全体からより適切な提案を得るために「jabber.network」を選択する必要があります。</string>
     <string name="pref_channel_discovery">談話室の探索方法</string>
     <string name="backup">バックアップ</string>
-    <string name="please_enable_an_account">アカウントを有効化してください</string>
     <string name="make_call">通話をする</string>
     <string name="rtp_state_incoming_call">着信通話</string>
     <string name="rtp_state_incoming_video_call">ビデオ通話の着信</string>

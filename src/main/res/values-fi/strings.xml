@@ -796,7 +796,6 @@
     <string name="pref_channel_discovery">Kanavien löytötapa</string>
     <string name="backup">Varmuuskopio</string>
     <string name="category_about">Tietoa</string>
-    <string name="please_enable_an_account">Ota jokin tili käyttöön</string>
     <string name="make_call">Soita puhelu</string>
     <string name="rtp_state_incoming_call">Saapuva puhelu</string>
     <string name="rtp_state_incoming_video_call">Saapuva videopuhelu</string>

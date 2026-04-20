@@ -853,7 +853,6 @@
     <string name="pref_channel_discovery">Metode for kanalsøgning</string>
     <string name="backup">Backup</string>
     <string name="category_about">Om</string>
-    <string name="please_enable_an_account">Aktiver venligst en konto</string>
     <string name="make_call">Lav opkald</string>
     <string name="rtp_state_incoming_call">Indkommende opkald</string>
     <string name="rtp_state_incoming_video_call">Indkommende videoopkald</string>

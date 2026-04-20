@@ -817,7 +817,6 @@
     <string name="pref_channel_discovery">Metod för kanalupptäckt</string>
     <string name="backup">Säkerhetskopiering</string>
     <string name="category_about">Om</string>
-    <string name="please_enable_an_account">Var god och aktivera ett konto</string>
     <string name="make_call">Ring ett samtal</string>
     <string name="rtp_state_incoming_call">Inkommande samtal</string>
     <string name="rtp_state_incoming_video_call">Inkommande videosamtal</string>

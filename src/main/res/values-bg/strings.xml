@@ -845,7 +845,6 @@
     <string name="pref_channel_discovery">Метод за откриване на канали</string>
     <string name="backup">Резервно копие</string>
     <string name="category_about">Относно</string>
-    <string name="please_enable_an_account">Моля, активирайте профил</string>
     <string name="make_call">Направете обаждане</string>
     <string name="rtp_state_incoming_call">Входящо обаждане</string>
     <string name="rtp_state_incoming_video_call">Входящо видео-обаждане</string>

@@ -1660,10 +1660,38 @@ public class ConversationFragment extends XmppFragment
         requireActivity().invalidateOptionsMenu();
     }
 
-    private void checkPermissionAndTriggerAudioCall() {
-        if (requireXmppActivity().mUseTor || conversation.getAccount().isOnion()) {
-            Toast.makeText(requireContext(), R.string.disable_tor_to_make_call, Toast.LENGTH_SHORT)
+    private boolean isAccountInsufficientState() {
+        final var account = conversation.getAccount();
+        if (account.isConnectionEnabled()) {
+            if (new AppSettings(requireContext()).isUseTor() || account.isOnion()) {
+                Toast.makeText(
+                                requireContext(),
+                                R.string.disable_tor_to_make_call,
+                                Toast.LENGTH_SHORT)
+                        .show();
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            new MaterialAlertDialogBuilder(requireContext())
+                    .setMessage(R.string.this_account_is_disabled)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(
+                            R.string.enable,
+                            (dialog, which) -> {
+                                account.setOption(Account.OPTION_SOFT_DISABLED, false);
+                                account.setOption(Account.OPTION_DISABLED, false);
+                                requireXmppActivity().xmppConnectionService.updateAccount(account);
+                            })
+                    .create()
                     .show();
+            return true;
+        }
+    }
+
+    private void checkPermissionAndTriggerAudioCall() {
+        if (isAccountInsufficientState()) {
             return;
         }
         final List<String> permissions;
@@ -1681,9 +1709,7 @@ public class ConversationFragment extends XmppFragment
     }
 
     private void checkPermissionAndTriggerVideoCall() {
-        if (requireXmppActivity().mUseTor || conversation.getAccount().isOnion()) {
-            Toast.makeText(requireContext(), R.string.disable_tor_to_make_call, Toast.LENGTH_SHORT)
-                    .show();
+        if (isAccountInsufficientState()) {
             return;
         }
         final List<String> permissions;

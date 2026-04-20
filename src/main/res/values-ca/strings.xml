@@ -832,7 +832,6 @@
     <string name="pref_channel_discovery">Mètode de descobriment de canals</string>
     <string name="backup">Còpia de seguretat</string>
     <string name="category_about">Sobre</string>
-    <string name="please_enable_an_account">Si us plau, habiliti un compte</string>
     <string name="make_call">Fer una trucada</string>
     <string name="rtp_state_incoming_call">Trucada entrant</string>
     <string name="rtp_state_incoming_video_call">Trucada de vídeo entrant</string>

@@ -869,7 +869,6 @@
     <string name="pref_channel_discovery">Metoda de descoperire a canalelor</string>
     <string name="backup">Copie de siguranță</string>
     <string name="category_about">Despre</string>
-    <string name="please_enable_an_account">Va rugăm să activați un cont</string>
     <string name="make_call">Apelează</string>
     <string name="rtp_state_incoming_call">Apel primit</string>
     <string name="rtp_state_incoming_video_call">Apel video primit</string>

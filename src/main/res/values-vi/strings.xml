@@ -842,7 +842,6 @@
     <string name="pref_channel_discovery">Phương pháp khám phá kênh</string>
     <string name="backup">Sao lưu</string>
     <string name="category_about">Giới thiệu</string>
-    <string name="please_enable_an_account">Vui lòng bật một tài khoản</string>
     <string name="make_call">Tạo cuộc gọi</string>
     <string name="rtp_state_incoming_call">Cuộc gọi đến</string>
     <string name="rtp_state_incoming_video_call">Cuộc gọi video đến</string>

@@ -885,7 +885,6 @@
     <string name="pref_channel_discovery">Способ поиска каналов</string>
     <string name="backup">Резервное копирование</string>
     <string name="category_about">О приложении</string>
-    <string name="please_enable_an_account">Активируйте аккаунт</string>
     <string name="make_call">Позвонить</string>
     <string name="rtp_state_incoming_call">Входящий вызов</string>
     <string name="rtp_state_incoming_video_call">Входящий видеовызов</string>

@@ -969,7 +969,6 @@
         <item quantity="other">%1$d gemiste oproepen van %2$s</item>
     </plurals>
     <string name="make_call">Oproepen</string>
-    <string name="please_enable_an_account">Schakel een account in</string>
     <string name="rtp_state_incoming_video_call">Inkomende video-oproep</string>
     <string name="rtp_state_content_add_video">Overschakelen naar videogesprek?</string>
     <string name="rtp_state_content_add">Extra sporen toevoegen?</string>

@@ -707,7 +707,6 @@
     <string name="pref_channel_discovery">Kanalak aurkitzeko modua</string>
     <string name="backup">Babeskopia</string>
     <string name="category_about">Honi buruz</string>
-    <string name="please_enable_an_account">Mesedez kontu bat gaitu</string>
     <string name="rtp_state_declined_or_busy">Lanpetuta</string>
     <plurals name="view_users">
         <item quantity="one">Parte-hartzaile %1$d ikusi</item>

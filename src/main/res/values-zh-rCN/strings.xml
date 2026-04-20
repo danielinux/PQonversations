@@ -840,7 +840,6 @@
     <string name="pref_channel_discovery">频道发现方法</string>
     <string name="backup">备份</string>
     <string name="category_about">关于</string>
-    <string name="please_enable_an_account">请启用账号</string>
     <string name="make_call">发起通话</string>
     <string name="rtp_state_incoming_call">来电</string>
     <string name="rtp_state_incoming_video_call">视频通话来电</string>

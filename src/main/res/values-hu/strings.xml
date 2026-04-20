@@ -811,7 +811,6 @@
     <string name="pref_channel_discovery">Csatornafelderítés módszere</string>
     <string name="backup">Biztonsági mentés</string>
     <string name="category_about">Névjegy</string>
-    <string name="please_enable_an_account">Engedélyezzen egy fiókot</string>
     <string name="make_call">Hívás indítása</string>
     <string name="rtp_state_incoming_call">Bejövő hívás</string>
     <string name="rtp_state_incoming_video_call">Bejövő videohívás</string>

@@ -796,7 +796,6 @@
     <string name="pref_channel_discovery">頻道探索方法</string>
     <string name="backup">備份</string>
     <string name="category_about">關於</string>
-    <string name="please_enable_an_account">請啟用一個帳戶</string>
     <string name="make_call">進行通話</string>
     <string name="rtp_state_incoming_call">撥入電話</string>
     <string name="rtp_state_incoming_video_call">撥入的視訊通話</string>

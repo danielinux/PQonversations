@@ -856,7 +856,6 @@
     <string name="pref_channel_discovery">Método de descoberta de canais</string>
     <string name="backup">Backup</string>
     <string name="category_about">Sobre</string>
-    <string name="please_enable_an_account">Ative uma conta</string>
     <string name="make_call">Fazer chamada</string>
     <string name="rtp_state_incoming_call">Recebendo chamada</string>
     <string name="rtp_state_incoming_video_call">Recebendo chamada de vídeo</string>

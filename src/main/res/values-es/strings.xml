@@ -864,7 +864,6 @@
     <string name="pref_channel_discovery">Método para la búsqueda de Canales</string>
     <string name="backup">Copia de respaldo</string>
     <string name="category_about">Acerca de</string>
-    <string name="please_enable_an_account">Active una cuenta</string>
     <string name="make_call">Hacer una llamada</string>
     <string name="rtp_state_incoming_call">Llamada entrante</string>
     <string name="rtp_state_incoming_video_call">Videollamada entrante</string>

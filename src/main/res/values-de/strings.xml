@@ -857,7 +857,6 @@
     <string name="pref_channel_discovery">Channelsuchmethode</string>
     <string name="backup">Sicherung</string>
     <string name="category_about">Über</string>
-    <string name="please_enable_an_account">Bitte aktiviere ein Konto</string>
     <string name="make_call">Anrufen</string>
     <string name="rtp_state_incoming_call">Eingehender Anruf</string>
     <string name="rtp_state_incoming_video_call">Eingehender Videoanruf</string>
