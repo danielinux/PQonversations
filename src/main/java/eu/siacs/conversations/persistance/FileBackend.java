@@ -209,7 +209,7 @@ public class FileBackend {
         }
     }
 
-    public static String getAuthority(Context context) {
+    private static String getAuthority(final Context context) {
         return context.getPackageName() + FILE_PROVIDER;
     }
 

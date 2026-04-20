@@ -29,6 +29,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
 
 public class MediaPreviewAdapter
         extends RecyclerView.Adapter<MediaPreviewAdapter.MediaPreviewViewHolder> {
@@ -37,8 +38,12 @@ public class MediaPreviewAdapter
 
     private final ConversationFragment conversationFragment;
 
-    public MediaPreviewAdapter(final ConversationFragment fragment) {
+    private final Consumer<Attachment> onAttachmentRemoved;
+
+    public MediaPreviewAdapter(
+            final ConversationFragment fragment, final Consumer<Attachment> onAttachmentRemoved) {
         this.conversationFragment = fragment;
+        this.onAttachmentRemoved = onAttachmentRemoved;
     }
 
     @NonNull
@@ -67,6 +72,7 @@ public class MediaPreviewAdapter
                     mediaPreviews.remove(pos);
                     notifyItemRemoved(pos);
                     conversationFragment.toggleInputMethod();
+                    onAttachmentRemoved.accept(attachment);
                 });
         holder.binding.mediaPreview.setOnClickListener(v -> view(context, attachment));
     }

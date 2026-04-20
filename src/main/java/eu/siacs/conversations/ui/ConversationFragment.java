@@ -212,7 +212,21 @@ public class ConversationFragment extends XmppFragment
     private final PendingItem<ScrollState> pendingScrollState = new PendingItem<>();
     private final PendingItem<String> pendingLastMessageUuid = new PendingItem<>();
     private final PendingItem<Message> pendingMessage = new PendingItem<>();
-    private final MediaPreviewAdapter mediaPreviewAdapter = new MediaPreviewAdapter(this);
+    private final MediaPreviewAdapter mediaPreviewAdapter =
+            new MediaPreviewAdapter(
+                    this,
+                    attachment -> {
+                        final var file = FileBackend.getFile(attachment.getUri());
+                        if (file.isPresent()
+                                && new FileBackend.Cache(requireContext())
+                                        .isCachedFile(file.get())) {
+                            if (file.get().delete()) {
+                                Log.d(
+                                        Config.LOGTAG,
+                                        "deleted temporary file " + file.get().getAbsolutePath());
+                            }
+                        }
+                    });
     private InputSettings inputSettings = new InputSettings(true, false, false, true);
     public Uri mPendingEditorContent = null;
     protected MessageAdapter messageListAdapter;

@@ -49,8 +49,8 @@ public class ShareUtil {
     private static final Collection<String> SCHEMES_COPY_PATH_ONLY =
             Arrays.asList("xmpp", "mailto", "tel");
 
-    public static void share(XmppActivity activity, Message message) {
-        Intent shareIntent = new Intent();
+    public static void share(final XmppActivity activity, final Message message) {
+        final var shareIntent = new Intent();
         shareIntent.setAction(Intent.ACTION_SEND);
         if (message.isGeoUri()) {
             shareIntent.putExtra(Intent.EXTRA_TEXT, message.getBody());

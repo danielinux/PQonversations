@@ -14,12 +14,13 @@ import java.io.File;
 
 public class ViewUtil {
 
-    public static void view(Context context, Attachment attachment) {
+    public static void view(final Context context, final Attachment attachment) {
         File file = new File(attachment.getUri().getPath());
         final String mime = attachment.getMime() == null ? "*/*" : attachment.getMime();
         view(context, file, mime);
     }
 
+    // TODO make this method take a message
     public static void view(final Context context, final File file) {
         if (!file.exists()) {
             Toast.makeText(context, R.string.file_deleted, Toast.LENGTH_SHORT).show();
