@@ -6,6 +6,7 @@ import android.database.Cursor;
 import android.graphics.Color;
 import android.util.Log;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableSet;
@@ -937,6 +938,38 @@ public class Message extends AbstractEntity
 
         public long getSize() {
             return size == null ? 0 : size;
+        }
+
+        public static FileParams of(final String body) {
+            final var fileParams = new FileParams();
+            final String[] parts =
+                    Strings.isNullOrEmpty(body)
+                            ? new String[0]
+                            : Splitter.on('|').splitToList(body).toArray(new String[0]);
+            switch (parts.length) {
+                case 1:
+                    try {
+                        fileParams.size = Long.parseLong(parts[0]);
+                    } catch (final NumberFormatException e) {
+                        fileParams.url = URL.tryParse(parts[0]);
+                    }
+                    break;
+                case 5:
+                    fileParams.runtime = parseInt(parts[4]);
+                case 4:
+                    fileParams.width = parseInt(parts[2]);
+                    fileParams.height = parseInt(parts[3]);
+                case 2:
+                    fileParams.url = URL.tryParse(parts[0]);
+                    fileParams.size = Longs.tryParse(parts[1]);
+                    break;
+                case 3:
+                    fileParams.size = Longs.tryParse(parts[0]);
+                    fileParams.width = parseInt(parts[1]);
+                    fileParams.height = parseInt(parts[2]);
+                    break;
+            }
+            return fileParams;
         }
     }
 

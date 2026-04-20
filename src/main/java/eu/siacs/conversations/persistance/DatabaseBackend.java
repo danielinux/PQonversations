@@ -1475,12 +1475,10 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                         null,
                         null,
                         null);
-        while (cursor != null && cursor.moveToNext()) {
+        while (cursor.moveToNext()) {
             uuids.add(cursor.getString(0));
         }
-        if (cursor != null) {
-            cursor.close();
-        }
+        cursor.close();
         markFileAsDeleted(uuids);
         return uuids;
     }
@@ -1551,6 +1549,27 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         }
         cursor.close();
         return filesPaths;
+    }
+
+    public Set<String> getExistingUrlsForPath(final String account, final String path) {
+        final var builder = new ImmutableList.Builder<Message.FileParams>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        final String sql =
+                "select body from messages join conversations on"
+                    + " messages.conversationUuid=conversations.uuid where relativeFilePath=? and"
+                    + " conversations.accountUuid=? and messages.status<>0 ORDER BY"
+                    + " messages.timeSent desc LIMIT 3";
+        final String[] args = {path, account};
+        try (final Cursor cursor = db.rawQuery(sql, args)) {
+            while (cursor.moveToNext()) {
+                builder.add(Message.FileParams.of(cursor.getString(0)));
+            }
+        }
+        final var parameters = builder.build();
+        return ImmutableSet.copyOf(
+                Collections2.transform(
+                        Collections2.filter(parameters, p -> Objects.requireNonNull(p).url != null),
+                        p -> Objects.requireNonNull(p).url));
     }
 
     public Message getMessageWithServerMsgId(

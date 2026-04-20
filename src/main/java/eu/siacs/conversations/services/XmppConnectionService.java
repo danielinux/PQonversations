@@ -47,6 +47,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
@@ -1475,15 +1476,70 @@ public class XmppConnectionService extends Service {
         Log.d(
                 Config.LOGTAG,
                 account.getJid().asBareJid() + ": send file message. forceP2P=" + forceP2P);
-        if ((account.httpUploadAvailable(fileBackend.getFile(message, false).length())
-                        || message.getConversation().getMode() == Conversation.MODE_MULTI)
-                && !forceP2P) {
-            mHttpConnectionManager.createNewUploadConnection(message, delay);
-        } else {
+        if (forceP2P) {
             account.getXmppConnection()
                     .getManager(JingleManager.class)
                     .startJingleFileTransfer(message);
+            return;
         }
+        final var file = fileBackend.getFile(message, false);
+        final var candidates = getExistingUrlsForPath(account.getUuid(), file.getAbsolutePath());
+        final var availableCandidates =
+                Futures.transformAsync(
+                        candidates,
+                        urls -> mHttpConnectionManager.checkAvailability(account, urls),
+                        MoreExecutors.directExecutor());
+        Futures.addCallback(
+                availableCandidates,
+                new FutureCallback<>() {
+                    @Override
+                    public void onSuccess(final Set<String> available) {
+                        if (available.isEmpty()) {
+                            if (account.httpUploadAvailable(file.length())
+                                    || message.getConversation().getMode()
+                                            == Conversation.MODE_MULTI) {
+                                mHttpConnectionManager.createNewUploadConnection(message, delay);
+                            } else {
+                                account.getXmppConnection()
+                                        .getManager(JingleManager.class)
+                                        .startJingleFileTransfer(message);
+                            }
+                        } else {
+                            final var url = Iterables.getFirst(available, null);
+                            if (url == null) {
+                                markMessage(message, Message.STATUS_SEND_FAILED);
+                            } else {
+                                sendFileMessageExistingEndpoint(message, delay, url);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(@NonNull Throwable t) {
+                        Log.e(Config.LOGTAG, "could not check for existing http uploads", t);
+                        markMessage(message, Message.STATUS_SEND_FAILED);
+                    }
+                },
+                MoreExecutors.directExecutor());
+    }
+
+    private void sendFileMessageExistingEndpoint(
+            final Message message, final boolean delay, final String url) {
+        Log.d(Config.LOGTAG, "reusing existing endpoint " + url);
+        if (!message.isPrivateMessage()) {
+            message.setCounterpart(message.getConversation().getAddress().asBareJid());
+        }
+        markMessage(message, Message.STATUS_UNSEND);
+        fileBackend.updateFileParams(message, url);
+        updateMessage(message);
+        resendMessage(message, delay);
+    }
+
+    private ListenableFuture<Set<String>> getExistingUrlsForPath(
+            final String account, final String path) {
+        return Futures.submit(
+                () -> databaseBackend.getExistingUrlsForPath(account, path),
+                mDatabaseReaderExecutor);
     }
 
     public ListenableFuture<Void> encryptIfNeededAndSend(final Message message) {
