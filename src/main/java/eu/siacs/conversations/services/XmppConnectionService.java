@@ -391,6 +391,10 @@ public class XmppConnectionService extends Service {
 
     public ListenableFuture<Void> attachImageToConversation(
             final Conversation conversation, final Uri uri, final String type) {
+        final var messageUuid = FileBackend.getMessageUuid(this, uri);
+        if (messageUuid.isPresent()) {
+            return attachFileToConversation(conversation, uri, type);
+        }
         final String mimeType = MimeUtils.guessMimeTypeFromUriAndMime(this, uri, type);
         final String compressPictures = getCompressPicturesPreference();
 

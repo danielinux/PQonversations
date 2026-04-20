@@ -2218,7 +2218,7 @@ public class ConversationFragment extends XmppFragment
         } else {
             final var file =
                     requireXmppActivity().xmppConnectionService.getFileBackend().getFile(message);
-            ViewUtil.view(requireContext(), file);
+            ViewUtil.view(requireContext(), file, message.getUuid());
         }
     }
 

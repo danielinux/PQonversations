@@ -1391,7 +1391,7 @@ public class MessageAdapter extends ArrayAdapter<Message> {
             return;
         }
         final var file = activity.xmppConnectionService.getFileBackend().getFile(message);
-        ViewUtil.view(activity, file);
+        ViewUtil.view(activity, file, message.getUuid());
     }
 
     private void showLocation(Message message) {

@@ -4,44 +4,45 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.util.Log;
 import android.widget.Toast;
-import eu.siacs.conversations.Config;
+import com.google.common.base.Strings;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.persistance.FileBackend;
 import eu.siacs.conversations.utils.MimeUtils;
 import java.io.File;
+import java.util.Objects;
 
 public class ViewUtil {
 
     public static void view(final Context context, final Attachment attachment) {
-        File file = new File(attachment.getUri().getPath());
-        final String mime = attachment.getMime() == null ? "*/*" : attachment.getMime();
-        view(context, file, mime);
+        File file = new File(Objects.requireNonNull(attachment.getUri().getPath()));
+        view(context, file, attachment.getUuid().toString(), nullToWildcard(attachment.getMime()));
     }
 
-    // TODO make this method take a message
-    public static void view(final Context context, final File file) {
+    public static void view(final Context context, final File file, final String uuid) {
         if (!file.exists()) {
             Toast.makeText(context, R.string.file_deleted, Toast.LENGTH_SHORT).show();
             return;
         }
-        final var mime = MimeUtils.getMimeType(file);
-        if (mime == null) {
-            view(context, file, "*/*");
-        } else {
-            view(context, file, mime);
-        }
+        final var mime = nullToWildcard(MimeUtils.getMimeType(file));
+        view(context, file, uuid, mime);
     }
 
-    private static void view(final Context context, final File file, final String mime) {
-        Log.d(Config.LOGTAG, "viewing " + file.getAbsolutePath() + " " + mime);
+    public static String nullToWildcard(final String mime) {
+        return Strings.isNullOrEmpty(mime) ? "*/*" : mime;
+    }
+
+    private static void view(
+            final Context context, final File file, final String uuid, final String mime) {
         final Intent openIntent = new Intent(Intent.ACTION_VIEW);
         final Uri uri;
         try {
-            uri = FileBackend.getUriForFile(context, file);
+            uri =
+                    FileBackend.getUriForFile(context, file)
+                            .buildUpon()
+                            .appendQueryParameter("uuid", uuid)
+                            .build();
         } catch (final SecurityException e) {
-            Log.d(Config.LOGTAG, "No permission to access " + file.getAbsolutePath(), e);
             Toast.makeText(
                             context,
                             context.getString(

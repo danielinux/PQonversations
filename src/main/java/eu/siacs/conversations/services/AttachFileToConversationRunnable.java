@@ -14,6 +14,7 @@ import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.entities.Message;
+import eu.siacs.conversations.persistance.DatabaseBackend;
 import eu.siacs.conversations.persistance.FileBackend;
 import eu.siacs.conversations.utils.MimeUtils;
 import eu.siacs.conversations.utils.TranscoderStrategies;
@@ -187,6 +188,23 @@ public class AttachFileToConversationRunnable implements Runnable, TranscoderLis
 
     @Override
     public void run() {
+        final var messageUuid = FileBackend.getMessageUuid(mXmppConnectionService, uri);
+        if (messageUuid.isPresent()) {
+            final var m =
+                    DatabaseBackend.getInstance(mXmppConnectionService)
+                            .getIndividualMessage(messageUuid.get());
+            final var storageLocation = m != null ? m.getRelativeFilePath() : null;
+            if (storageLocation != null) {
+                final var sanityCheck =
+                        FileBackend.getUriForFile(mXmppConnectionService, storageLocation.file());
+                if (sanityCheck.getPath() != null && sanityCheck.getPath().equals(uri.getPath())) {
+                    Log.d(Config.LOGTAG, "using existing file " + storageLocation);
+                    message.setRelativeFilePath(storageLocation);
+                    mXmppConnectionService.getFileBackend().updateFileParams(message);
+                    return;
+                }
+            }
+        }
         if (this.isVideoMessage()) {
             try {
                 processAsVideo();

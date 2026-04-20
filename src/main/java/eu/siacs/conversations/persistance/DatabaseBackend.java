@@ -23,6 +23,7 @@ import eu.siacs.conversations.crypto.axolotl.SQLiteAxolotlStore;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Contact;
 import eu.siacs.conversations.entities.Conversation;
+import eu.siacs.conversations.entities.IndividualMessage;
 import eu.siacs.conversations.entities.Message;
 import eu.siacs.conversations.entities.PresenceTemplate;
 import eu.siacs.conversations.services.QuickConversationsService;
@@ -1586,6 +1587,21 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         final Message message;
         if (cursor.moveToFirst()) {
             message = Message.fromCursor(context, cursor, conversation);
+        } else {
+            message = null;
+        }
+        cursor.close();
+        return message;
+    }
+
+    public Message getIndividualMessage(final String uuid) {
+        final var db = this.getReadableDatabase();
+        final String sql = "select * from messages where uuid=? LIMIT 1";
+        final String[] args = {uuid};
+        final Cursor cursor = db.rawQuery(sql, args);
+        final Message message;
+        if (cursor.moveToFirst()) {
+            message = IndividualMessage.fromCursor(context, cursor, null);
         } else {
             message = null;
         }

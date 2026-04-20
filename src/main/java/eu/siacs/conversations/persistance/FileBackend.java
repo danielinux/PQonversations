@@ -209,6 +209,24 @@ public class FileBackend {
         }
     }
 
+    public static Optional<String> getMessageUuid(final Context context, final Uri uri) {
+        final var scheme = uri.getScheme();
+        final var authority = uri.getAuthority();
+        if (Strings.isNullOrEmpty(authority) || Strings.isNullOrEmpty(scheme)) {
+            return Optional.absent();
+        }
+        if (scheme.equals("content") && getAuthority(context).equals(authority)) {
+            final var uuid = uri.getQueryParameter("uuid");
+            if (Strings.isNullOrEmpty(uuid)) {
+                return Optional.absent();
+            } else {
+                return Optional.of(uuid);
+            }
+        } else {
+            return Optional.absent();
+        }
+    }
+
     private static String getAuthority(final Context context) {
         return context.getPackageName() + FILE_PROVIDER;
     }
