@@ -19,7 +19,6 @@ import eu.siacs.conversations.persistance.FileBackend;
 import eu.siacs.conversations.utils.MimeUtils;
 import eu.siacs.conversations.utils.TranscoderStrategies;
 import java.io.FileNotFoundException;
-import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -80,8 +79,10 @@ public class AttachFileToConversationRunnable implements Runnable, TranscoderLis
                 .getFileBackend()
                 .setupRelativeFilePath(message, String.format("%s.%s", message.getUuid(), "mp4"));
         final var file = mXmppConnectionService.getFileBackend().getFile(message);
-        if (Objects.requireNonNull(file.getParentFile()).mkdirs()) {
-            Log.d(Config.LOGTAG, "created parent directory for video file");
+        final var parent = file.getParentFile();
+        if (parent != null && parent.mkdirs()) {
+            Log.d(Config.LOGTAG, "created parent directory: " + parent.getAbsolutePath());
+            mXmppConnectionService.restartFileObserver();
         }
 
         final DefaultVideoStrategy selectedVideoTranscoderStrategy;

@@ -1470,7 +1470,9 @@ public class JingleFileTransferConnection extends AbstractJingleConnection
         private OutputStream openFileOutputStream() throws FileNotFoundException {
             final var directory = this.file.getParentFile();
             if (directory != null && directory.mkdirs()) {
-                Log.d(Config.LOGTAG, "created directory " + directory.getAbsolutePath());
+                Log.d(Config.LOGTAG, "created parent directory: " + directory.getAbsolutePath());
+                // TODO technically this should restart the file observer. maybe do this when file
+                // receiver is initiated
             }
             final var fileOutputStream = new FileOutputStream(this.file);
             if (this.transportSecurity == null) {

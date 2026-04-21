@@ -243,7 +243,7 @@ public class ManageAccountActivity extends XmppActivity
         }
         if (writeGranted(grantResults, permissions)) {
             if (xmppConnectionService != null) {
-                xmppConnectionService.restartFileObserver();
+                xmppConnectionService.restartFileObserverAndCheckForDeletedFiles();
             }
         }
     }

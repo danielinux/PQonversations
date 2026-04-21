@@ -31,7 +31,6 @@ import androidx.exifinterface.media.ExifInterface;
 import com.google.common.base.Optional;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.io.ByteStreams;
 import eu.siacs.conversations.AppSettings;
@@ -69,22 +68,6 @@ public class FileBackend {
     private static final String FILE_PROVIDER = ".files";
     private static final float IGNORE_PADDING = 0.15f;
     private final XmppConnectionService mXmppConnectionService;
-
-    private static final List<String> STORAGE_TYPES;
-
-    static {
-        final ImmutableList.Builder<String> builder =
-                new ImmutableList.Builder<String>()
-                        .add(
-                                Environment.DIRECTORY_DOWNLOADS,
-                                Environment.DIRECTORY_PICTURES,
-                                Environment.DIRECTORY_MOVIES,
-                                Environment.DIRECTORY_DOCUMENTS);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.add(Environment.DIRECTORY_RECORDINGS);
-        }
-        STORAGE_TYPES = builder.build();
-    }
 
     public FileBackend(XmppConnectionService service) {
         this.mXmppConnectionService = service;
@@ -624,9 +607,10 @@ public class FileBackend {
     }
 
     private void copyFileToPrivateStorage(final File file, final Uri uri) throws FileCopyException {
-        final var parentDirectory = file.getParentFile();
-        if (parentDirectory != null && parentDirectory.mkdirs()) {
-            Log.d(Config.LOGTAG, "created directory " + parentDirectory.getAbsolutePath());
+        final var parent = file.getParentFile();
+        if (parent != null && parent.mkdirs()) {
+            Log.d(Config.LOGTAG, "created parent directory: " + parent.getAbsolutePath());
+            mXmppConnectionService.restartFileObserver();
         }
         try {
             if (file.createNewFile()) {
@@ -728,7 +712,8 @@ public class FileBackend {
             throws FileCopyException, ImageCompressionException {
         final File parent = file.getParentFile();
         if (parent != null && parent.mkdirs()) {
-            Log.d(Config.LOGTAG, "created parent directory");
+            Log.d(Config.LOGTAG, "created parent directory: " + parent.getAbsolutePath());
+            mXmppConnectionService.restartFileObserver();
         }
         InputStream is = null;
         OutputStream os = null;
@@ -907,20 +892,6 @@ public class FileBackend {
         final var filesDir = mXmppConnectionService.getFilesDir();
         final var attachments = new File(filesDir, "attachments");
         return new File(attachments, filename);
-    }
-
-    public static boolean inConversationsDirectory(final Context context, String path) {
-        final File fileDirectory = new File(path).getParentFile();
-        for (final String type : STORAGE_TYPES) {
-            final File typeDirectory =
-                    new File(
-                            Environment.getExternalStoragePublicDirectory(type),
-                            context.getString(R.string.app_name));
-            if (typeDirectory.equals(fileDirectory)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public void setupRelativeFilePath(

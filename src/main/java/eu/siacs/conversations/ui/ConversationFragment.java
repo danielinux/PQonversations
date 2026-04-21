@@ -1997,7 +1997,7 @@ public class ConversationFragment extends XmppFragment
             final var service = getXmppConnectionService();
             if (service != null) {
                 service.getBitmapCache().evictAll();
-                service.restartFileObserver();
+                service.restartFileObserverAndCheckForDeletedFiles();
             }
             refresh();
         }

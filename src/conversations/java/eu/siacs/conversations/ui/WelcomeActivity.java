@@ -220,7 +220,7 @@ public class WelcomeActivity extends QrCodeProcessingActivity
         }
         if (writeGranted(grantResults, permissions)) {
             if (xmppConnectionService != null) {
-                xmppConnectionService.restartFileObserver();
+                xmppConnectionService.restartFileObserverAndCheckForDeletedFiles();
             }
         }
     }

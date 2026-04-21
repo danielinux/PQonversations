@@ -25,7 +25,6 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.IBinder;
 import android.os.Messenger;
 import android.os.PowerManager;
@@ -253,13 +252,7 @@ public class XmppConnectionService extends Service {
     private final QuickConversationsService mQuickConversationsService =
             new QuickConversationsService(this);
     private final ConversationsFileObserver fileObserver =
-            new ConversationsFileObserver(
-                    Environment.getExternalStorageDirectory().getAbsolutePath()) {
-                @Override
-                public void onEvent(final int event, final File file) {
-                    markFileDeleted(file);
-                }
-            };
+            new ConversationsFileObserver(this, this::markFileDeleted);
     private boolean destroyed = false;
 
     private int unreadCount = -1;
@@ -1096,7 +1089,7 @@ public class XmppConnectionService extends Service {
         FILE_OBSERVER_EXECUTOR.execute(fileBackend::deleteHistoricAvatarPath);
         if (Compatibility.hasStoragePermission(this)) {
             Log.d(Config.LOGTAG, "starting file observer");
-            FILE_OBSERVER_EXECUTOR.execute(this.fileObserver::startWatching);
+            FILE_OBSERVER_EXECUTOR.execute(this.fileObserver::restartWatching);
             FILE_OBSERVER_EXECUTOR.execute(this::checkForDeletedFiles);
         }
         this.pgpServiceConnection =
@@ -1250,10 +1243,14 @@ public class XmppConnectionService extends Service {
         super.onDestroy();
     }
 
+    public void restartFileObserverAndCheckForDeletedFiles() {
+        this.restartFileObserver();
+        FILE_OBSERVER_EXECUTOR.execute(this::checkForDeletedFiles);
+    }
+
     public void restartFileObserver() {
         Log.d(Config.LOGTAG, "restarting file observer");
         FILE_OBSERVER_EXECUTOR.execute(this.fileObserver::restartWatching);
-        FILE_OBSERVER_EXECUTOR.execute(this::checkForDeletedFiles);
     }
 
     public void toggleScreenEventReceiver() {
