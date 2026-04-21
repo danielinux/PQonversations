@@ -500,7 +500,7 @@
     <string name="selection_too_large">Der ausgewählte Bereich ist zu groß</string>
     <string name="no_accounts">(Keine aktivierten Konten)</string>
     <string name="this_field_is_required">Dieses Feld ist erforderlich</string>
-    <string name="correct_message">Ändern</string>
+    <string name="correct_message">Bearbeiten</string>
     <string name="send_corrected_message">Geänderte Nachricht senden</string>
     <string name="no_keys_just_confirm">Du hast den Fingerabdruck dieser Person bereits verifiziert. Durch Auswählen von \"Fertig\" bestätigst du nur, dass %s Teil dieses Gruppenchats ist.</string>
     <string name="this_account_is_disabled">Du hast dieses Konto deaktiviert</string>
