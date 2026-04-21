@@ -1,1 +1,1 @@
-Jabber/XMPP con registro y detección sencillos
+Cliente Jabber/XMPP fácil de implementar y usar
