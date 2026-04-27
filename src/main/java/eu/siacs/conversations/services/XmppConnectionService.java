@@ -160,6 +160,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -1018,24 +1019,40 @@ public class XmppConnectionService extends Service {
 
     public void expireOldMessages(final boolean resetHasMessagesLeftOnServer) {
         mLastExpiryRun.set(SystemClock.elapsedRealtime());
-        mDatabaseWriterExecutor.execute(
-                () -> {
-                    long timestamp = getAutomaticMessageDeletionDate();
-                    if (timestamp > 0) {
-                        databaseBackend.expireOldMessages(timestamp);
-                        synchronized (XmppConnectionService.this.conversations) {
-                            for (Conversation conversation :
-                                    XmppConnectionService.this.conversations) {
-                                conversation.expireOldMessages(timestamp);
-                                if (resetHasMessagesLeftOnServer) {
-                                    conversation.messagesLoaded.set(true);
-                                    conversation.setHasMessagesLeftOnServer(true);
+        final ListenableFuture<List<DatabaseBackend.FilePathInfo>> filesFuture =
+                Futures.submit(
+                        () -> {
+                            final long timestamp = getAutomaticMessageDeletionDate();
+                            if (timestamp <= 0) {
+                                return Collections.emptyList();
+                            }
+                            final var files = databaseBackend.expireOldMessages(timestamp);
+                            synchronized (this.conversations) {
+                                for (final var conversation : this.conversations) {
+                                    conversation.expireOldMessages(timestamp);
+                                    if (resetHasMessagesLeftOnServer) {
+                                        conversation.messagesLoaded.set(true);
+                                        conversation.setHasMessagesLeftOnServer(true);
+                                    }
                                 }
                             }
-                        }
-                        updateConversationUi();
+                            return files;
+                        },
+                        mDatabaseWriterExecutor);
+        final var future =
+                Futures.transform(filesFuture, this::deleteFiles, FILE_ATTACHMENT_EXECUTOR);
+        Futures.addCallback(
+                future,
+                new FutureCallback<>() {
+                    @Override
+                    public void onSuccess(Integer c) {
+                        Log.d(Config.LOGTAG, "expired old messages including " + c + " files");
                     }
-                });
+
+                    @Override
+                    public void onFailure(Throwable t) {}
+                },
+                MoreExecutors.directExecutor());
     }
 
     @SuppressLint("TrulyRandom")
@@ -1822,7 +1839,8 @@ public class XmppConnectionService extends Service {
                                     Config.LOGTAG,
                                     "deleting messages that are older than "
                                             + AbstractGenerator.getTimestamp(deletionDate));
-                            databaseBackend.expireOldMessages(deletionDate);
+                            final var files = databaseBackend.expireOldMessages(deletionDate);
+                            FILE_ATTACHMENT_EXECUTOR.execute(() -> deleteFiles(files));
                         }
                         Log.d(Config.LOGTAG, "restoring roster...");
                         for (final Account account : accounts) {
@@ -3355,6 +3373,7 @@ public class XmppConnectionService extends Service {
         return PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
     }
 
+    // TODO move to AppSettings. Migrate to Optional
     public long getAutomaticMessageDeletionDate() {
         final long timeout =
                 getLongPreference(
@@ -3751,12 +3770,50 @@ public class XmppConnectionService extends Service {
         conversation.clearMessages();
         conversation.setHasMessagesLeftOnServer(false); // avoid messages getting loaded through mam
         conversation.setLastClearHistory(clearDate, reference);
-        Runnable runnable =
-                () -> {
-                    databaseBackend.deleteMessagesInConversation(conversation);
-                    databaseBackend.updateConversation(conversation);
-                };
-        mDatabaseWriterExecutor.execute(runnable);
+        final var filesFuture =
+                Futures.submit(
+                        () -> databaseBackend.deleteMessagesInConversation(conversation),
+                        mDatabaseWriterExecutor);
+        final var numFilesDeleted =
+                Futures.transform(filesFuture, this::deleteFiles, FILE_ATTACHMENT_EXECUTOR);
+        Futures.addCallback(
+                numFilesDeleted,
+                new FutureCallback<>() {
+                    @Override
+                    public void onSuccess(Integer result) {
+                        Log.d(
+                                Config.LOGTAG,
+                                "deleted history for "
+                                        + conversation.getAddress()
+                                        + " with "
+                                        + result
+                                        + " files");
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {}
+                },
+                MoreExecutors.directExecutor());
+    }
+
+    private int deleteFiles(final Collection<DatabaseBackend.FilePathInfo> files) {
+        final var count = new AtomicInteger();
+        for (final var fileInfo : java.util.Objects.requireNonNull(files)) {
+            if (Strings.isNullOrEmpty(fileInfo.path) || fileInfo.deleted) {
+                continue;
+            }
+            if (fileInfo.path.charAt(0) == '/') {
+                final var file = new File(fileInfo.path);
+                synchronized (FILENAMES_TO_IGNORE_DELETION) {
+                    FILENAMES_TO_IGNORE_DELETION.add(file.getAbsolutePath());
+                }
+                if (file.delete()) {
+                    final var num = count.getAndIncrement();
+                    Log.d(Config.LOGTAG, "deleted file #" + num + " " + file.getAbsolutePath());
+                }
+            }
+        }
+        return count.get();
     }
 
     public boolean sendBlockRequest(

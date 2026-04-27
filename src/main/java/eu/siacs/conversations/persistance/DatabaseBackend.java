@@ -1489,14 +1489,20 @@ public class DatabaseBackend extends SQLiteOpenHelper {
     }
 
     public List<FilePathInfo> getFilePathInfo() {
+        final var selection = "type in (1,2,5) and relativeFilePath  is not null";
+        return getFilePathInfoInternal(selection, null);
+    }
+
+    private List<FilePathInfo> getFilePathInfoInternal(
+            final String selection, final String[] selectionArgs) {
         final var builder = new ImmutableList.Builder<FilePathInfo>();
         final SQLiteDatabase db = this.getReadableDatabase();
         try (final Cursor cursor =
                 db.query(
                         Message.TABLENAME,
                         new String[] {Message.UUID, Message.RELATIVE_FILE_PATH, Message.DELETED},
-                        "type in (1,2,5) and " + Message.RELATIVE_FILE_PATH + " is not null",
-                        null,
+                        selection,
+                        selectionArgs,
                         null,
                         null,
                         null)) {
@@ -1894,12 +1900,16 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                 account.getJid().asBareJid() + ": persisted roster in " + duration + "ms");
     }
 
-    public void deleteMessagesInConversation(Conversation conversation) {
+    public List<FilePathInfo> deleteMessagesInConversation(final Conversation conversation) {
         long start = SystemClock.elapsedRealtime();
         final SQLiteDatabase db = this.getWritableDatabase();
         db.beginTransaction();
         final String[] args = {conversation.getUuid()};
-        int num = db.delete(Message.TABLENAME, Message.CONVERSATION + "=?", args);
+        final var selection =
+                "conversationUuid=? AND type in (1,2,5) AND relativeFilePath is not null AND"
+                        + " sharedStorage=false";
+        final var filePathInfos = getFilePathInfoInternal(selection, args);
+        final int num = db.delete(Message.TABLENAME, Message.CONVERSATION + "=?", args);
         db.setTransactionSuccessful();
         db.endTransaction();
         Log.d(
@@ -1911,15 +1921,22 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                         + " in "
                         + (SystemClock.elapsedRealtime() - start)
                         + "ms");
+        updateConversation(conversation);
+        return filePathInfos;
     }
 
-    public void expireOldMessages(long timestamp) {
+    public List<FilePathInfo> expireOldMessages(final long timestamp) {
         final String[] args = {String.valueOf(timestamp)};
-        SQLiteDatabase db = this.getReadableDatabase();
+        final var db = this.getWritableDatabase();
+        final var selection =
+                "type in (1,2,5) AND relativeFilePath is not null AND sharedStorage=false AND"
+                        + " timeSent<?";
+        final var files = getFilePathInfoInternal(selection, args);
         db.beginTransaction();
         db.delete(Message.TABLENAME, "timeSent<?", args);
         db.setTransactionSuccessful();
         db.endTransaction();
+        return files;
     }
 
     public MamReference getLastMessageReceived(Account account) {
