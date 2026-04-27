@@ -21,6 +21,7 @@ import java.io.OutputStream;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import org.openintents.openpgp.OpenPgpMetadata;
 import org.openintents.openpgp.util.OpenPgpApi;
 
@@ -184,8 +185,8 @@ public class PgpDecryptionService {
                     final File inputFile =
                             mXmppConnectionService.getFileBackend().getFile(message, false);
                     final File outputFile =
-                            mXmppConnectionService.getFileBackend().getFile(message, true);
-                    if (outputFile.getParentFile().mkdirs()) {
+                            mXmppConnectionService.getFileBackend().getFile(message);
+                    if (Objects.requireNonNull(outputFile.getParentFile()).mkdirs()) {
                         Log.d(
                                 Config.LOGTAG,
                                 "created parent directories for " + outputFile.getAbsolutePath());

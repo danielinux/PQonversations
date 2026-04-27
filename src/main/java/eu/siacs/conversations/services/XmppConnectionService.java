@@ -44,6 +44,7 @@ import com.google.common.base.Objects;
 import com.google.common.base.Optional;
 import com.google.common.base.Strings;
 import com.google.common.collect.Collections2;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -1168,38 +1169,39 @@ public class XmppConnectionService extends Service {
             return;
         }
         final long start = SystemClock.elapsedRealtime();
-        final List<DatabaseBackend.FilePathInfo> relativeFilePaths =
-                databaseBackend.getFilePathInfo();
-        final List<DatabaseBackend.FilePathInfo> changed = new ArrayList<>();
-        for (final DatabaseBackend.FilePathInfo filePath : relativeFilePaths) {
+        final var relativeFilePaths = databaseBackend.getFilePathInfo();
+        final var modifiedBuilder = new ImmutableList.Builder<DatabaseBackend.FilePathInfo>();
+        for (final var filePath : relativeFilePaths) {
             if (destroyed) {
                 Log.d(
                         Config.LOGTAG,
                         "Stop checking for deleted files because service has been destroyed");
                 return;
             }
-            if (filePath.path != null
-                    && !filePath.path.isEmpty()
-                    && filePath.path.charAt(0) == '/') {
+            if (Strings.isNullOrEmpty(filePath.path)) {
+                continue;
+            }
+            if (filePath.path.charAt(0) == '/') {
                 final File file = new File(filePath.path);
                 if (filePath.setDeleted(!file.exists())) {
-                    changed.add(filePath);
+                    modifiedBuilder.add(filePath);
                 }
             }
         }
+        final var modified = modifiedBuilder.build();
         final long duration = SystemClock.elapsedRealtime() - start;
         Log.d(
                 Config.LOGTAG,
                 "found "
-                        + changed.size()
-                        + " changed files on start up. total="
+                        + modified.size()
+                        + " modified files on start up. total="
                         + relativeFilePaths.size()
                         + ". ("
                         + duration
                         + "ms)");
-        if (changed.size() > 0) {
-            databaseBackend.markFilesAsChanged(changed);
-            markChangedFiles(changed);
+        if (!modified.isEmpty()) {
+            databaseBackend.markFilesAsChanged(modified);
+            markChangedFiles(modified);
         }
     }
 
@@ -1918,20 +1920,14 @@ public class XmppConnectionService extends Service {
                 return;
             }
         }
-        final boolean isInternalFile = false; // fileBackend.isInternalFile(file);
-        final List<String> uuids = databaseBackend.markFileAsDeleted(file, isInternalFile);
+        final var uuids = databaseBackend.markFileAsDeleted(file);
         Log.d(
                 Config.LOGTAG,
-                "deleted file "
-                        + file.getAbsolutePath()
-                        + " internal="
-                        + isInternalFile
-                        + ", database hits="
-                        + uuids.size());
+                "deleted file " + file.getAbsolutePath() + ", database hits=" + uuids.size());
         markUuidsAsDeletedFiles(uuids);
     }
 
-    private void markUuidsAsDeletedFiles(List<String> uuids) {
+    private void markUuidsAsDeletedFiles(final List<String> uuids) {
         boolean deleted = false;
         for (Conversation conversation : getConversations()) {
             deleted |= conversation.markAsDeleted(uuids);
@@ -1944,7 +1940,7 @@ public class XmppConnectionService extends Service {
         }
     }
 
-    private void markChangedFiles(List<DatabaseBackend.FilePathInfo> infos) {
+    private void markChangedFiles(final List<DatabaseBackend.FilePathInfo> infos) {
         boolean changed = false;
         for (Conversation conversation : getConversations()) {
             changed |= conversation.markAsChanged(infos);

@@ -88,8 +88,7 @@ public class PgpEngine {
         }
 
         if (message.needsUploading()) {
-            final var inputFile =
-                    this.mXmppConnectionService.getFileBackend().getFile(message, true);
+            final var inputFile = this.mXmppConnectionService.getFileBackend().getFile(message);
             final var outputFile =
                     this.mXmppConnectionService.getFileBackend().getFile(message, false);
             final InputStream is;

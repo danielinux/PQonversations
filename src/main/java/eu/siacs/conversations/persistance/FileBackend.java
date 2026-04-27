@@ -518,24 +518,21 @@ public class FileBackend {
         }
     }
 
-    public File getFile(Message message) {
+    public File getFile(final Message message) {
         return getFile(message, true);
     }
 
-    public File getFile(final Message message, final boolean decrypted) {
+    public File getFile(final Message message, final boolean cleartext) {
         final boolean encrypted =
-                !decrypted
+                !cleartext
                         && (message.getEncryption() == Message.ENCRYPTION_PGP
                                 || message.getEncryption() == Message.ENCRYPTION_DECRYPTED);
         final var storageLocation = message.getRelativeFilePath();
-        // TODO if storage location is null trigger getLegacy with path=UUID and mime type from
-        // message
-        // TODO log this to make sure it's not happening accidentally
-        // TODO use getLegacyFileForFilename(uuid, mime);
         final File file;
         if (storageLocation != null) {
             file = storageLocation.file();
         } else {
+            Log.w(Config.LOGTAG, "accessing old file w/o storage location. inferring from UUID");
             file =
                     getLegacyFileForFilename(
                             mXmppConnectionService, message.getUuid(), message.getMimeType());

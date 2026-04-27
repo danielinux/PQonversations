@@ -1440,33 +1440,12 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         return db.rawQuery(SQL.toString(), selectionArgs);
     }
 
-    public List<String> markFileAsDeleted(final File file, final boolean internal) {
-        SQLiteDatabase db = this.getReadableDatabase();
-        String selection;
-        String[] selectionArgs;
-        if (internal) {
-            final String name = file.getName();
-            if (name.endsWith(".pgp")) {
-                selection =
-                        "("
-                                + Message.RELATIVE_FILE_PATH
-                                + " IN(?,?) OR ("
-                                + Message.RELATIVE_FILE_PATH
-                                + "=? and encryption in(1,4))) and type in (1,2,5)";
-                selectionArgs =
-                        new String[] {
-                            file.getAbsolutePath(), name, name.substring(0, name.length() - 4)
-                        };
-            } else {
-                selection = Message.RELATIVE_FILE_PATH + " IN(?,?) and type in (1,2,5)";
-                selectionArgs = new String[] {file.getAbsolutePath(), name};
-            }
-        } else {
-            selection = Message.RELATIVE_FILE_PATH + "=? and type in (1,2,5)";
-            selectionArgs = new String[] {file.getAbsolutePath()};
-        }
+    public List<String> markFileAsDeleted(final File file) {
+        final var db = this.getReadableDatabase();
+        final var selection = Message.RELATIVE_FILE_PATH + "=? and type in (1,2,5)";
+        final var selectionArgs = new String[] {file.getAbsolutePath()};
         final List<String> uuids = new ArrayList<>();
-        Cursor cursor =
+        try (final var cursor =
                 db.query(
                         Message.TABLENAME,
                         new String[] {Message.UUID},
@@ -1474,29 +1453,29 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                         selectionArgs,
                         null,
                         null,
-                        null);
-        while (cursor.moveToNext()) {
-            uuids.add(cursor.getString(0));
+                        null)) {
+            while (cursor.moveToNext()) {
+                uuids.add(cursor.getString(0));
+            }
         }
-        cursor.close();
         markFileAsDeleted(uuids);
         return uuids;
     }
 
-    public void markFileAsDeleted(List<String> uuids) {
+    private void markFileAsDeleted(final List<String> uuids) {
         SQLiteDatabase db = this.getReadableDatabase();
         final ContentValues contentValues = new ContentValues();
         final String where = Message.UUID + "=?";
         contentValues.put(Message.DELETED, 1);
         db.beginTransaction();
-        for (String uuid : uuids) {
+        for (final String uuid : uuids) {
             db.update(Message.TABLENAME, contentValues, where, new String[] {uuid});
         }
         db.setTransactionSuccessful();
         db.endTransaction();
     }
 
-    public void markFilesAsChanged(List<FilePathInfo> files) {
+    public void markFilesAsChanged(final List<FilePathInfo> files) {
         SQLiteDatabase db = this.getReadableDatabase();
         final String where = Message.UUID + "=?";
         db.beginTransaction();
@@ -1510,8 +1489,9 @@ public class DatabaseBackend extends SQLiteOpenHelper {
     }
 
     public List<FilePathInfo> getFilePathInfo() {
+        final var builder = new ImmutableList.Builder<FilePathInfo>();
         final SQLiteDatabase db = this.getReadableDatabase();
-        final Cursor cursor =
+        try (final Cursor cursor =
                 db.query(
                         Message.TABLENAME,
                         new String[] {Message.UUID, Message.RELATIVE_FILE_PATH, Message.DELETED},
@@ -1519,17 +1499,14 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                         null,
                         null,
                         null,
-                        null);
-        final List<FilePathInfo> list = new ArrayList<>();
-        while (cursor != null && cursor.moveToNext()) {
-            list.add(
-                    new FilePathInfo(
-                            cursor.getString(0), cursor.getString(1), cursor.getInt(2) > 0));
+                        null)) {
+            while (cursor.moveToNext()) {
+                builder.add(
+                        new FilePathInfo(
+                                cursor.getString(0), cursor.getString(1), cursor.getInt(2) > 0));
+            }
         }
-        if (cursor != null) {
-            cursor.close();
-        }
-        return list;
+        return builder.build();
     }
 
     public List<FilePath> getRelativeFilePaths(String account, Jid jid, int limit) {

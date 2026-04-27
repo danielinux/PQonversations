@@ -172,7 +172,7 @@ public class HttpDownloadConnection implements Transferable {
     }
 
     private void decryptFile(final TransportSecurity transportSecurity) throws IOException {
-        final var outputFile = mXmppConnectionService.getFileBackend().getFile(message, true);
+        final var outputFile = mXmppConnectionService.getFileBackend().getFile(message);
 
         final var directory = outputFile.getParentFile();
         if (directory != null && directory.mkdirs()) {
@@ -213,7 +213,7 @@ public class HttpDownloadConnection implements Transferable {
         }
         this.mXmppConnectionService.updateConversationUi();
         final boolean notifyAfterScan = notify;
-        final var file = mXmppConnectionService.getFileBackend().getFile(message, true);
+        final var file = mXmppConnectionService.getFileBackend().getFile(message);
         mXmppConnectionService
                 .getFileBackend()
                 .updateMediaScanner(
