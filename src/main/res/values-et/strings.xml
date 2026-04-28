@@ -1196,4 +1196,17 @@
     <string name="video_1080p">Väga kõrge (1080p)</string>
     <string name="pref_save_to_gallery">Salvesta galeriisse</string>
     <string name="pref_save_to_gallery_summary">Salvesta meediafailid automaatselt avalikesse kaustadesse, et need kuvataks su galeriis ja failihalduris.</string>
+    <plurals name="delete_files_dialog">
+        <item quantity="one">Kustuta fail</item>
+        <item quantity="other">Kustuta %d faili</item>
+    </plurals>
+    <plurals name="delete_files_dialog_msg">
+        <item quantity="one">Kas oled kindel, et soovid selle faili kustutada?</item>
+        <item quantity="other">Kas oled kindel, et soovid need failid kustutada?</item>
+    </plurals>
+    <plurals name="attachments_saved">
+        <item quantity="one">%d multimeediafail on salvestatud</item>
+        <item quantity="other">%d multimeediafaili on salvestatud</item>
+    </plurals>
+    <string name="attachments_not_saved">Multimeediafailide salvestamine ei õnnestunud</string>
 </resources>
