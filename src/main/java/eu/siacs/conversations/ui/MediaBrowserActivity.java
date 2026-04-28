@@ -48,15 +48,28 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
             new ActionMode.Callback() {
 
                 @Override
-                public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+                public boolean onCreateActionMode(final ActionMode mode, final Menu menu) {
+                    mode.getMenuInflater().inflate(R.menu.media_browser_action_mode, menu);
                     actionMode = mode;
-                    mode.setTitle(String.valueOf(mMediaAdapter.countSelections()));
                     return true;
                 }
 
                 @Override
                 public boolean onPrepareActionMode(final ActionMode mode, final Menu menu) {
-                    mode.getMenuInflater().inflate(R.menu.media_browser_action_mode, menu);
+                    mode.setTitle(String.valueOf(mMediaAdapter.countSelections()));
+                    final var service = xmppConnectionService;
+                    if (service == null) {
+                        return true;
+                    }
+                    final var fileBackend = service.getFileBackend();
+                    final var storageLocations =
+                            fileBackend.inferStorageLocation(
+                                    mMediaAdapter.getSelectedAttachments());
+                    final var internal =
+                            Collections2.filter(
+                                    storageLocations, sl -> sl != null && !sl.sharedStorage());
+                    final var saveMenuItem = menu.findItem(R.id.action_save);
+                    saveMenuItem.setVisible(!internal.isEmpty());
                     return true;
                 }
 
@@ -132,13 +145,10 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
         if (actionMode == null) {
             if (this.mMediaAdapter.toggleSelection(attachment)) {
                 this.actionMode = startSupportActionMode(this.actionModeCallBack);
-                if (this.actionMode != null) {
-                    this.actionMode.setTitle(String.valueOf(this.mMediaAdapter.countSelections()));
-                }
             }
         } else {
             if (this.mMediaAdapter.toggleSelection(attachment)) {
-                actionMode.setTitle(String.valueOf(this.mMediaAdapter.countSelections()));
+                actionMode.invalidate();
             } else {
                 actionMode.finish();
             }
@@ -316,10 +326,14 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
     }
 
     @Override
-    public void onMediaLoaded(List<Attachment> attachments) {
+    public void onMediaLoaded(final List<Attachment> attachments) {
         runOnUiThread(
                 () -> {
+                    final var actionMode = this.actionMode;
                     mMediaAdapter.setAttachments(attachments);
+                    if (actionMode != null) {
+                        actionMode.invalidate();
+                    }
                 });
     }
 

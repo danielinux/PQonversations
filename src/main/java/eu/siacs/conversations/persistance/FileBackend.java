@@ -1209,8 +1209,7 @@ public class FileBackend {
         final BitmapFactory.Options options = new BitmapFactory.Options();
         try {
             options.inSampleSize = calcSampleSize(context, image, size);
-        } catch (final IOException | SecurityException e) {
-            // TODO this can throw NPE?
+        } catch (final Exception e) {
             Log.d(Config.LOGTAG, "unable to calculate sample size for " + image, e);
             return null;
         }
@@ -1225,7 +1224,7 @@ public class FileBackend {
                 final var bitmap = rotate(originalBitmap, getRotation(context, image));
                 return cropCenterSquare(bitmap, size);
             }
-        } catch (final SecurityException | IOException e) {
+        } catch (final Exception e) {
             Log.d(Config.LOGTAG, "unable to open file " + image, e);
             return null;
         }

@@ -237,8 +237,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
                     .setBackgroundColor(
                             MaterialColors.getColor(
                                     holder.binding.getRoot(),
-                                    com.google.android.material.R.attr
-                                            .colorSurfaceContainerHighest));
+                                    com.google.android.material.R.attr.colorPrimaryFixed));
         } else {
             holder.binding.selectionIndicator.setVisibility(ImageView.INVISIBLE);
             holder.binding.getRoot().setBackground(null);
