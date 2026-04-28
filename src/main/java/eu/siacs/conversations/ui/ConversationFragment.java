@@ -2357,7 +2357,7 @@ public class ConversationFragment extends XmppFragment
                         if (context == null) {
                             return;
                         }
-                        Toast.makeText(context, R.string.attachments_not_saved, Toast.LENGTH_LONG)
+                        Toast.makeText(context, R.string.could_not_save_files, Toast.LENGTH_LONG)
                                 .show();
                     }
                 },

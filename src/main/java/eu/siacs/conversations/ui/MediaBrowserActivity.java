@@ -189,7 +189,7 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
                         Log.e(Config.LOGTAG, "could not save attachments", t);
                         Toast.makeText(
                                         getApplicationContext(),
-                                        R.string.attachments_not_saved,
+                                        R.string.could_not_save_files,
                                         Toast.LENGTH_LONG)
                                 .show();
                     }
