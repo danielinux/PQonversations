@@ -175,7 +175,7 @@
     <string name="unpublish_pgp_message">Bist du sicher, dass du deinen öffentlichen OpenPGP-Schlüssel aus deiner Anwesenheitsmitteilung entfernen möchtest?\nDeine Kontakte können dir dann keine OpenPGP-verschlüsselten Nachrichten senden.</string>
     <string name="openpgp_has_been_published">Öffentlicher OpenPGP-Schlüssel veröffentlicht.</string>
     <string name="mgmt_account_enable">Konto aktivieren </string>
-    <string name="mgmt_account_delete_confirm_text">Bist du sicher, dass du dein Konto möchtest? Dies wird deinen gesamten Chatverlauf entfernen</string>
+    <string name="mgmt_account_delete_confirm_text">Bist du sicher, dass du dein Konto löschen möchtest? Dies wird deinen gesamten Chatverlauf entfernen</string>
     <string name="attach_record_voice">Sprache aufzeichnen</string>
     <string name="account_settings_jabber_id">XMPP-Adresse</string>
     <string name="block_jabber_id">XMPP-Adresse sperren</string>
