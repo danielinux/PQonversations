@@ -118,7 +118,7 @@
     <string name="pref_notification_grace_period">Periodo de gracia</string>
     <string name="pref_notification_grace_period_summary">El tiempo que se silencian las notificaciones tras detectar actividad en otro de tus dispositivos.</string>
     <string name="pref_advanced_options">Avanzado</string>
-    <string name="pref_never_send_crash_summary">Al enviar informes de fallos, ayudas en el desarrollo continuo</string>
+    <string name="pref_never_send_crash_summary">Al enviar los trazas de pila, estás ayudando al equipo de desarrollo</string>
     <string name="pref_confirm_messages">Marcas de lectura</string>
     <string name="pref_confirm_messages_summary">Al activarlo, tus contactos verán cuándo has leído sus mensajes.</string>
     <string name="pref_prevent_screenshots">Impedir capturas de pantalla</string>
@@ -1190,4 +1190,20 @@
     <string name="video_1080p">Muy alta (1080p)</string>
     <string name="pref_save_to_gallery">Guardar en la galería</string>
     <string name="pref_save_to_gallery_summary">Almacena automáticamente los archivos multimedia en carpetas públicas para que aparezcan en tu galería y administrador de archivos.</string>
+    <plurals name="delete_files_dialog">
+        <item quantity="one">Eliminar archivo</item>
+        <item quantity="many">Eliminar %d archivos</item>
+        <item quantity="other">Eliminar %d archivos</item>
+    </plurals>
+    <plurals name="delete_files_dialog_msg">
+        <item quantity="one">¿Estás seguro de que quieres eliminar este archivo?</item>
+        <item quantity="many">¿Estás seguro de que quieres eliminar estos archivos?</item>
+        <item quantity="other">¿Estás seguro de que quieres eliminar estos archivos?</item>
+    </plurals>
+    <plurals name="attachments_saved">
+        <item quantity="one">%d archivo multimedia guardado</item>
+        <item quantity="many">%d archivos multimedia guardados</item>
+        <item quantity="other">%d archivos multimedia guardados</item>
+    </plurals>
+    <string name="could_not_save_files">No se han podido guardar los archivos</string>
 </resources>
