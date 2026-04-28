@@ -1185,11 +1185,10 @@
         <item quantity="other">Willst du diese Dateien wirklich löschen?</item>
     </plurals>
     <plurals name="attachments_saved">
-        <item quantity="one">Datei gespeichert</item>
-        <item quantity="other">Dateien gespeichert</item>
+        <item quantity="one">%d Datei gespeichert</item>
+        <item quantity="other">%d Dateien gespeichert</item>
     </plurals>
     <plurals name="attachments_not_saved">
-        <item quantity="one">Datei konnte nicht gespeichert werden</item>
-        <item quantity="other">Dateien konnten nicht gespeichert werden</item>
+        <item quantity="one">Dateien konnten nicht gespeichert werden</item>
     </plurals>
 </resources>
