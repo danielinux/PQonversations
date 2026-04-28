@@ -1239,10 +1239,10 @@
         <item quantity="other">Ви впевнені, що хочете вилучити ці файли?</item>
     </plurals>
     <plurals name="attachments_saved">
-        <item quantity="one">Медіафайл збережено</item>
-        <item quantity="few">Медіафайли збережено</item>
-        <item quantity="many">Медіафайли збережено</item>
-        <item quantity="other">Медіафайли збережено</item>
+        <item quantity="one">%d файл збережено</item>
+        <item quantity="few">%d файли збережено</item>
+        <item quantity="many">%d файлів збережено</item>
+        <item quantity="other">%d файлів збережено</item>
     </plurals>
     <plurals name="attachments_not_saved">
         <item quantity="one">Не вдалося зберегти медіафайл</item>
@@ -1250,4 +1250,5 @@
         <item quantity="many">Не вдалося зберегти медіафайли</item>
         <item quantity="other">Не вдалося зберегти медіафайли</item>
     </plurals>
+    <string name="could_not_save_files">Не вдалося зберегти файли</string>
 </resources>
