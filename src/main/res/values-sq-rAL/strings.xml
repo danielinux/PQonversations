@@ -1183,4 +1183,24 @@
     <string name="pref_auto_send_recording_summary">Dërgoni mesazhe zanore automatikisht, kur përfundoni regjistrimin.</string>
     <string name="pref_save_to_gallery">Ruaje në Galeri</string>
     <string name="pref_save_to_gallery_summary">Depozito automatikisht media në dosje publike, që të shfaqen në galerinë tuaj dhe te përgjegjës kartelash.</string>
+    <plurals name="delete_files_dialog">
+        <item quantity="one">Fshije kartelën</item>
+        <item quantity="other">Fshiji %d kartelat</item>
+    </plurals>
+    <plurals name="delete_files_dialog_msg">
+        <item quantity="one">Jeni i sigurt se doni të fshihet kjo kartelë?</item>
+        <item quantity="other">Jeni i sigurt se doni të fshihen këto kartela?</item>
+    </plurals>
+    <plurals name="attachments_saved">
+        <item quantity="one">U ruajt %d kartelë media</item>
+        <item quantity="other">U ruajtën %d kartela media</item>
+    </plurals>
+    <string name="could_not_save_files">S’u ruajtën dot kartela</string>
+    <string name="filter_type_images">Figura</string>
+    <string name="filter_type_videos">Video</string>
+    <string name="filter_type_audio">Audio</string>
+    <string name="filter_type_documents">Dokumente</string>
+    <string name="filter_type_other">Tjetër</string>
+    <string name="filter_media">Filtroni media</string>
+    <string name="apply_filter">Aplikoje</string>
 </resources>
