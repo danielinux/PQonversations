@@ -1162,4 +1162,9 @@
     <plurals name="attachments_saved">
         <item quantity="other">已保存 %d 个媒体文件</item>
     </plurals>
+    <string name="filter_type_images">图片</string>
+    <string name="filter_type_videos">视频</string>
+    <string name="filter_type_audio">音频</string>
+    <string name="filter_type_documents">文档</string>
+    <string name="filter_type_other">其他</string>
 </resources>
