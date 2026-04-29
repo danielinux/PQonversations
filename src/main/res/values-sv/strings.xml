@@ -1204,4 +1204,11 @@
         <item quantity="other">%d media filer sparade</item>
     </plurals>
     <string name="could_not_save_files">Kunde inte spara filer</string>
+    <string name="filter_type_images">Bilder</string>
+    <string name="filter_type_videos">Videor</string>
+    <string name="filter_type_audio">Ljud</string>
+    <string name="filter_type_documents">Dokument</string>
+    <string name="filter_type_other">Annat</string>
+    <string name="filter_media">Filtrera media</string>
+    <string name="apply_filter">Tillämpa</string>
 </resources>
