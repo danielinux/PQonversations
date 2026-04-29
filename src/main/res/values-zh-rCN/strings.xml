@@ -68,7 +68,7 @@
     <string name="problem_connecting_to_accounts">无法连接到多个账号</string>
     <string name="touch_to_fix">点按即可管理账号</string>
     <string name="attach_file">附加文件</string>
-    <string name="not_in_roster">联系人不在您的联系人列表中，添加吗？</string>
+    <string name="not_in_roster">此联系人不在您的联系人列表中，要添加吗？</string>
     <string name="add_contact">添加联系人</string>
     <string name="send_failed">发送失败</string>
     <string name="preparing_image">正在准备发送图片</string>
@@ -1152,4 +1152,14 @@
     <string name="video_1080p">超高（1080p）</string>
     <string name="pref_save_to_gallery">保存到图库</string>
     <string name="pref_save_to_gallery_summary">自动将媒体文件存储在公共文件夹中，以便它们显示在您的图库和文件管理器中。</string>
+    <string name="could_not_save_files">无法保存文件</string>
+    <plurals name="delete_files_dialog">
+        <item quantity="other">删除 %d 个文件</item>
+    </plurals>
+    <plurals name="delete_files_dialog_msg">
+        <item quantity="other">您确定要删除所选文件吗？</item>
+    </plurals>
+    <plurals name="attachments_saved">
+        <item quantity="other">已保存 %d 个媒体文件</item>
+    </plurals>
 </resources>
