@@ -1209,4 +1209,11 @@
         <item quantity="other">%d multimeediafaili on salvestatud</item>
     </plurals>
     <string name="could_not_save_files">Failide salvestamine ei õnnestunud</string>
+    <string name="filter_type_images">Pildid</string>
+    <string name="filter_type_videos">Videod</string>
+    <string name="filter_type_audio">Helifailid</string>
+    <string name="filter_type_documents">Dokumendid</string>
+    <string name="filter_type_other">Muu</string>
+    <string name="filter_media">Filtreeri meediumi</string>
+    <string name="apply_filter">Rakenda</string>
 </resources>
