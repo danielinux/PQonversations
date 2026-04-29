@@ -1188,8 +1188,5 @@
         <item quantity="one">%d Datei gespeichert</item>
         <item quantity="other">%d Dateien gespeichert</item>
     </plurals>
-    <plurals name="attachments_not_saved">
-        <item quantity="one">Dateien konnten nicht gespeichert werden</item>
-    </plurals>
     <string name="could_not_save_files">Dateien konnten nicht gespeichert werden</string>
 </resources>
