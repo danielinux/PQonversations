@@ -1196,12 +1196,12 @@
         <item quantity="other">Ta bort %d filer</item>
     </plurals>
     <plurals name="delete_files_dialog_msg">
-        <item quantity="one">Är du säker på att du vill ta bort den här filen?</item>
-        <item quantity="other">Är du säker på att du vill ta bort dessa filer?</item>
+        <item quantity="one">Är du säker på att du vill radera den här filen?</item>
+        <item quantity="other">Är du säker på att du vill ta bort de här filerna?</item>
     </plurals>
     <plurals name="attachments_saved">
-        <item quantity="one">%d media fil sparad</item>
-        <item quantity="other">%d media filer sparade</item>
+        <item quantity="one">%d mediafil sparad</item>
+        <item quantity="other">%d mediafiler sparade</item>
     </plurals>
     <string name="could_not_save_files">Kunde inte spara filer</string>
     <string name="filter_type_images">Bilder</string>
