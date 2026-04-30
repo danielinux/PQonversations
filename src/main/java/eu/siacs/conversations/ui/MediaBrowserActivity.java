@@ -485,7 +485,7 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
     private void setFilteredAttachments(final List<Attachment> attachments) {
         final var applied = this.appliedFilter;
         if (EnumSet.complementOf(applied).isEmpty()) {
-            mMediaAdapter.setAttachments(attachments);
+            mMediaAdapter.submitList(attachments);
         } else {
             final var filters = Maps.filterKeys(FILTERS, applied::contains).values();
             final var filteredAttachments =
@@ -508,7 +508,7 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
                             + attachments.size()
                             + "->"
                             + filteredAttachments.size());
-            mMediaAdapter.setAttachments(filteredAttachments);
+            mMediaAdapter.submitList(filteredAttachments);
         }
     }
 

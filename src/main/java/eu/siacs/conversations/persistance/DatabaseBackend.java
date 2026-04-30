@@ -1440,11 +1440,12 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         return db.rawQuery(SQL.toString(), selectionArgs);
     }
 
+    // TODO refactor out getting UUIDs for file; use that for delete on moderation
     public List<String> markFileAsDeleted(final File file) {
         final var db = this.getReadableDatabase();
         final var selection = Message.RELATIVE_FILE_PATH + "=? and type in (1,2,5)";
         final var selectionArgs = new String[] {file.getAbsolutePath()};
-        final List<String> uuids = new ArrayList<>();
+        final var builder = new ImmutableList.Builder<String>();
         try (final var cursor =
                 db.query(
                         Message.TABLENAME,
@@ -1455,9 +1456,10 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                         null,
                         null)) {
             while (cursor.moveToNext()) {
-                uuids.add(cursor.getString(0));
+                builder.add(cursor.getString(0));
             }
         }
+        final var uuids = builder.build();
         markFileAsDeleted(uuids);
         return uuids;
     }

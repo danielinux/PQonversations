@@ -15,6 +15,8 @@ import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
 import androidx.core.widget.ImageViewCompat;
 import androidx.databinding.DataBindingUtil;
+import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.color.MaterialColors;
 import com.google.common.base.Preconditions;
@@ -30,7 +32,6 @@ import eu.siacs.conversations.ui.util.ViewUtil;
 import eu.siacs.conversations.utils.MimeUtils;
 import eu.siacs.conversations.worker.ExportBackupWorker;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
@@ -42,7 +43,22 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHolder> {
+public class MediaAdapter extends ListAdapter<Attachment, MediaAdapter.MediaViewHolder> {
+
+    private static final DiffUtil.ItemCallback<Attachment> DIFF =
+            new DiffUtil.ItemCallback<>() {
+                @Override
+                public boolean areItemsTheSame(
+                        @NonNull Attachment oldItem, @NonNull Attachment newItem) {
+                    return Objects.equals(oldItem.getUuid(), newItem.getUuid());
+                }
+
+                @Override
+                public boolean areContentsTheSame(
+                        @NonNull Attachment oldItem, @NonNull Attachment newItem) {
+                    return Objects.equals(oldItem, newItem);
+                }
+            };
 
     public static final List<String> DOCUMENT_MIMES =
             new ImmutableList.Builder<String>()
@@ -88,7 +104,6 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
                     "application/x-tar");
     public static final List<String> CODE_MIMES = Arrays.asList("text/html", "text/xml");
 
-    private final ArrayList<Attachment> attachments = new ArrayList<>();
     private final Set<UUID> selectedAttachments = new HashSet<>();
 
     private final XmppActivity activity;
@@ -99,6 +114,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
     private int mediaSize = 0;
 
     public MediaAdapter(final XmppActivity activity, final @DimenRes int mediaSize) {
+        super(DIFF);
         this.activity = activity;
         this.mediaSize = Math.round(activity.getResources().getDimension(mediaSize));
         this.onAttachmentClicked = attachment -> ViewUtil.view(activity, attachment);
@@ -222,7 +238,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
 
     @Override
     public void onBindViewHolder(@NonNull MediaViewHolder holder, int position) {
-        final Attachment attachment = attachments.get(position);
+        final var attachment = getItem(position);
         if (attachment.renderThumbnail()) {
             loadPreview(attachment, holder.binding.media);
         } else {
@@ -256,14 +272,9 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
         }
     }
 
-    public void setAttachments(final List<Attachment> attachments) {
-        this.attachments.clear();
-        this.attachments.addAll(attachments);
-        notifyDataSetChanged();
-    }
-
     public boolean toggleSelection(final Attachment attachment) {
-        final var position = this.attachments.indexOf(attachment);
+        final var attachments = getCurrentList();
+        final var position = attachments.indexOf(attachment);
         final var uuid = attachment.getUuid();
         final boolean hasSelections;
         if (this.selectedAttachments.remove(uuid)) {
@@ -280,8 +291,9 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
 
     public void clearSelection() {
         synchronized (this.selectedAttachments) {
-            for (int i = 0; i < this.attachments.size(); ++i) {
-                final var attachment = this.attachments.get(i);
+            final var attachments = getCurrentList();
+            for (int i = 0; i < attachments.size(); ++i) {
+                final var attachment = attachments.get(i);
                 if (this.selectedAttachments.remove(attachment.getUuid())) {
                     notifyItemChanged(i);
                 }
@@ -325,19 +337,15 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.MediaViewHol
         imageView.setBackgroundColor(Color.TRANSPARENT);
     }
 
-    @Override
-    public int getItemCount() {
-        return attachments.size();
-    }
-
     public int countSelections() {
         return this.selectedAttachments.size();
     }
 
     public List<Attachment> getSelectedAttachments() {
+        final var attachments = getCurrentList();
         return ImmutableList.copyOf(
                 Collections2.filter(
-                        this.attachments,
+                        attachments,
                         a ->
                                 this.selectedAttachments.contains(
                                         Objects.requireNonNull(a).getUuid())));

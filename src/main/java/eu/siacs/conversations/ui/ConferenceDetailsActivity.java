@@ -492,7 +492,7 @@ public class ConferenceDetailsActivity extends XmppActivity
         runOnUiThread(
                 () -> {
                     final int limit = GridManager.getCurrentColumnCount(binding.media);
-                    mMediaAdapter.setAttachments(
+                    mMediaAdapter.submitList(
                             attachments.subList(0, Math.min(limit, attachments.size())));
                     binding.mediaWrapper.setVisibility(
                             attachments.isEmpty() ? View.GONE : View.VISIBLE);
