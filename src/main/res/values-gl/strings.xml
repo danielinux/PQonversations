@@ -1176,4 +1176,24 @@
     <string name="video_1080p">Moi alta (1080p)</string>
     <string name="pref_save_to_gallery">Gardar na Galería</string>
     <string name="pref_save_to_gallery_summary">Gardar de xeito automático o multimedia en cartafoles públicos para que aparezan na túa galería e xestor de ficheiros.</string>
+    <plurals name="delete_files_dialog">
+        <item quantity="one">Eliminar ficheiro</item>
+        <item quantity="other">Eliminar %d ficheiros</item>
+    </plurals>
+    <plurals name="delete_files_dialog_msg">
+        <item quantity="one">Tes certeza de querer eliminar este ficheiro?</item>
+        <item quantity="other">Tes certeza de querer eliminar estes ficheiros?</item>
+    </plurals>
+    <plurals name="attachments_saved">
+        <item quantity="one">%d ficheiro multimedia gardado</item>
+        <item quantity="other">%d ficheiros multimedia gardados</item>
+    </plurals>
+    <string name="could_not_save_files">Non se puideron gardar os ficheiros</string>
+    <string name="filter_type_images">Imaxes</string>
+    <string name="filter_type_videos">Vídeos</string>
+    <string name="filter_type_audio">Son</string>
+    <string name="filter_type_documents">Documentos</string>
+    <string name="filter_type_other">Outros</string>
+    <string name="filter_media">Filtrar multimedia</string>
+    <string name="apply_filter">Aplicar</string>
 </resources>
