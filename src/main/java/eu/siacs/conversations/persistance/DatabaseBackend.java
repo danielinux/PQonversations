@@ -1440,8 +1440,13 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         return db.rawQuery(SQL.toString(), selectionArgs);
     }
 
-    // TODO refactor out getting UUIDs for file; use that for delete on moderation
     public List<String> markFileAsDeleted(final File file) {
+        final var uuids = getMessagesWithFile(file);
+        markFileAsDeleted(uuids);
+        return uuids;
+    }
+
+    public List<String> getMessagesWithFile(final File file) {
         final var db = this.getReadableDatabase();
         final var selection = Message.RELATIVE_FILE_PATH + "=? and type in (1,2,5)";
         final var selectionArgs = new String[] {file.getAbsolutePath()};
@@ -1459,9 +1464,7 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                 builder.add(cursor.getString(0));
             }
         }
-        final var uuids = builder.build();
-        markFileAsDeleted(uuids);
-        return uuids;
+        return builder.build();
     }
 
     private void markFileAsDeleted(final List<String> uuids) {
@@ -1481,7 +1484,7 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         SQLiteDatabase db = this.getReadableDatabase();
         final String where = Message.UUID + "=?";
         db.beginTransaction();
-        for (FilePathInfo info : files) {
+        for (final var info : files) {
             final ContentValues contentValues = new ContentValues();
             contentValues.put(Message.DELETED, info.deleted ? 1 : 0);
             db.update(Message.TABLENAME, contentValues, where, new String[] {info.uuid.toString()});
@@ -1559,41 +1562,34 @@ public class DatabaseBackend extends SQLiteOpenHelper {
     public Message getMessageWithServerMsgId(
             final Conversation conversation, final String messageId) {
         final var db = this.getReadableDatabase();
-        final String sql =
-                "select * from messages where conversationUuid=? and serverMsgId=? LIMIT 1";
+        final var sql = "select * from messages where conversationUuid=? and serverMsgId=? LIMIT 1";
         final String[] args = {conversation.getUuid(), messageId};
-        final Cursor cursor = db.rawQuery(sql, args);
-        if (cursor == null) {
-            return null;
-        }
         final Message message;
-        if (cursor.moveToFirst()) {
-            message = Message.fromCursor(context, cursor, conversation);
-        } else {
-            message = null;
+        try (final Cursor cursor = db.rawQuery(sql, args)) {
+            if (cursor.moveToFirst()) {
+                message = Message.fromCursor(context, cursor, conversation);
+            } else {
+                message = null;
+            }
         }
-        cursor.close();
         return message;
     }
 
     public Message getMessageWithUuidOrRemoteId(
             final Conversation conversation, final String messageId) {
         final var db = this.getReadableDatabase();
-        final String sql =
+        final var sql =
                 "select * from messages where conversationUuid=? and (uuid=? OR remoteMsgId=?)"
                         + " LIMIT 1";
         final String[] args = {conversation.getUuid(), messageId, messageId};
-        final Cursor cursor = db.rawQuery(sql, args);
-        if (cursor == null) {
-            return null;
-        }
         final Message message;
-        if (cursor.moveToFirst()) {
-            message = Message.fromCursor(context, cursor, conversation);
-        } else {
-            message = null;
+        try (final Cursor cursor = db.rawQuery(sql, args)) {
+            if (cursor.moveToFirst()) {
+                message = Message.fromCursor(context, cursor, conversation);
+            } else {
+                message = null;
+            }
         }
-        cursor.close();
         return message;
     }
 
