@@ -147,6 +147,10 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
                         saveSelectedAttachments();
                         return true;
                     }
+                    if (item.getItemId() == R.id.action_select_all) {
+                        selectAllAttachments();
+                        return true;
+                    }
                     return false;
                 }
 
@@ -355,6 +359,16 @@ public class MediaBrowserActivity extends XmppActivity implements OnMediaLoaded 
         builder.setNegativeButton(R.string.cancel, null);
         builder.setPositiveButton(R.string.confirm, (dialog, which) -> deleteMediaFiles(files));
         builder.create().show();
+    }
+
+    private void selectAllAttachments() {
+        final var actionMode = this.actionMode;
+        if (actionMode == null) {
+            // if action mode does not exist we can get here
+            return;
+        }
+        this.mMediaAdapter.selectAll();
+        actionMode.invalidate();
     }
 
     private void deleteMediaFiles(final Collection<File> files) {

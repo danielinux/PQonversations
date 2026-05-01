@@ -301,7 +301,22 @@ public class MediaAdapter extends ListAdapter<Attachment, MediaAdapter.MediaView
         }
     }
 
-    private void setMediaSize(int mediaSize) {
+    public void selectAll() {
+        synchronized (this.selectedAttachments) {
+            final var attachments = getCurrentList();
+            for (int i = 0; i < attachments.size(); ++i) {
+                final var attachment = attachments.get(i);
+                if (this.selectedAttachments.contains(attachment.getUuid())) {
+                    continue;
+                }
+                if (this.selectedAttachments.add(attachment.getUuid())) {
+                    notifyItemChanged(i);
+                }
+            }
+        }
+    }
+
+    private void setMediaSize(final int mediaSize) {
         this.mediaSize = mediaSize;
     }
 
