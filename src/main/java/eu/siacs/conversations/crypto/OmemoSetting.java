@@ -34,10 +34,15 @@ import com.google.common.base.Strings;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.entities.Message;
 
+// Class kept under the legacy name for binary compat with prefs/intents that
+// reference it. The "default encryption for new conversations" is now X3DHPQ;
+// the legacy "OMEMO always/off" preference values are reinterpreted to keep
+// existing installs working: "default_off" keeps clear text, anything else
+// becomes X3DHPQ as the new-conversation default.
 public class OmemoSetting {
 
     private static boolean always = false;
-    private static int encryption = Message.ENCRYPTION_AXOLOTL;
+    private static int encryption = Message.ENCRYPTION_X3DHPQ;
 
     public static boolean isAlways() {
         return always;
@@ -53,15 +58,20 @@ public class OmemoSetting {
         switch (Strings.nullToEmpty(value)) {
             case "always":
                 always = true;
-                encryption = Message.ENCRYPTION_AXOLOTL;
+                encryption = Message.ENCRYPTION_X3DHPQ;
                 break;
             case "default_off":
                 always = false;
                 encryption = Message.ENCRYPTION_NONE;
                 break;
-            default:
+            case "axolotl":
+                // legacy fallback for installs that explicitly want OMEMO
                 always = false;
                 encryption = Message.ENCRYPTION_AXOLOTL;
+                break;
+            default:
+                always = false;
+                encryption = Message.ENCRYPTION_X3DHPQ;
                 break;
         }
     }

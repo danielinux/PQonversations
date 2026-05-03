@@ -36,6 +36,7 @@ import eu.siacs.conversations.android.Device;
 import eu.siacs.conversations.crypto.PgpDecryptionService;
 import eu.siacs.conversations.crypto.XmppDomainVerifier;
 import eu.siacs.conversations.crypto.axolotl.AxolotlService;
+import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
 import eu.siacs.conversations.crypto.sasl.ChannelBinding;
 import eu.siacs.conversations.crypto.sasl.ChannelBindingMechanism;
 import eu.siacs.conversations.crypto.sasl.DowngradeProtection;
@@ -212,6 +213,8 @@ public class XmppConnection implements Runnable {
     private final Consumer<Account.State> accountStateProcessor;
     private final BiFunction<Jid, String, Boolean> messageAcknowledgedProcessor;
     private AxolotlService axolotlService;
+    // x3dhpq service instance, created alongside axolotlService at construction time
+    private X3dhpqService x3dhpqService;
     private final PgpDecryptionService pgpDecryptionService;
     private final Runnable bindProcessor;
     private final PendingItem<String> pendingResumeId = new PendingItem<>();
@@ -237,6 +240,7 @@ public class XmppConnection implements Runnable {
         this.messageAcknowledgedProcessor = new MessageAcknowledgedProcessor(service, this);
         this.managers = Managers.get(service, this);
         this.setAxolotlService(new AxolotlService(account, service));
+        this.x3dhpqService = new X3dhpqService(account, service);
         this.pgpDecryptionService = new PgpDecryptionService(service);
     }
 
@@ -2904,6 +2908,10 @@ public class XmppConnection implements Runnable {
 
     public AxolotlService getAxolotlService() {
         return this.axolotlService;
+    }
+
+    public X3dhpqService getX3dhpqService() {
+        return this.x3dhpqService;
     }
 
     public PgpDecryptionService getPgpDecryptionService() {

@@ -2,6 +2,7 @@ package eu.siacs.conversations.generator;
 
 import eu.siacs.conversations.crypto.axolotl.AxolotlService;
 import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
+import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.entities.Conversational;
@@ -75,6 +76,34 @@ public class MessageGenerator extends AbstractGenerator {
         packet.addChild("encryption", "urn:xmpp:eme:0")
                 .setAttribute("name", "OMEMO")
                 .setAttribute("namespace", AxolotlService.PEP_PREFIX);
+        return packet;
+    }
+
+    private static final String X3DHPQ_FALLBACK_MESSAGE =
+            "[This message is x3dhpq encrypted]";
+
+    /** Generate a message packet carrying an x3dhpq encrypted envelope. */
+    public im.conversations.android.xmpp.model.stanza.Message generateX3dhpqMessage(
+            Message message, XmppX3dhpqMessage envelope) {
+        final im.conversations.android.xmpp.model.stanza.Message packet = preparePacket(message);
+        if (envelope == null) {
+            return null;
+        }
+        // add the typed envelope extension (C1 model class)
+        final var envelopeExt = envelope.toExtension();
+        packet.addExtension(envelopeExt);
+        packet.setBody(X3DHPQ_FALLBACK_MESSAGE);
+        packet.addChild("encryption", "urn:xmpp:eme:0")
+                .setAttribute("name", "x3dhpq")
+                .setAttribute("namespace", "urn:xmppqr:x3dhpq:envelope:0");
+        // Diagnostic dump so the receiving peer's complaints (e.g. wrong "from"
+        // attribution in dino's UI) can be cross-checked against the actual wire.
+        try {
+            android.util.Log.d(eu.siacs.conversations.Config.LOGTAG,
+                    "x3dhpq: outbound envelope xml="
+                            + im.conversations.android.xmpp.StreamElementWriter
+                                    .asStringUnchecked(envelopeExt));
+        } catch (final Throwable t) { /* logging-only; never fail the send */ }
         return packet;
     }
 

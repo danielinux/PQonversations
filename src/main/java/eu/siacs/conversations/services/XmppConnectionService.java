@@ -65,6 +65,7 @@ import eu.siacs.conversations.crypto.PgpEngine;
 import eu.siacs.conversations.crypto.axolotl.AxolotlService;
 import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
 import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
+import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Blockable;
 import eu.siacs.conversations.entities.Contact;
@@ -1675,6 +1676,33 @@ public class XmppConnectionService extends Service {
                         } else {
                             packet = mMessageGenerator.generateAxolotlChat(message, axolotlMessage);
                         }
+                    }
+                    break;
+                case Message.ENCRYPTION_X3DHPQ:
+                    // x3dhpq hybrid post-quantum encryption path (mirrors OMEMO branch above)
+                    Log.d(Config.LOGTAG,
+                            account.getJid().asBareJid()
+                                    + ": x3dhpq send path entered for message to "
+                                    + message.getCounterpart());
+                    if (!message.needsUploading()) {
+                        final XmppX3dhpqMessage x3dhpqMessage =
+                                account.getX3dhpqService().preparePayloadMessage(message);
+                        if (x3dhpqMessage == null) {
+                            // bundle missing; message stays WAITING and will retry on bundle arrival
+                            Log.d(Config.LOGTAG,
+                                    account.getJid().asBareJid()
+                                            + ": x3dhpq message marked WAITING (bundle missing)");
+                            message.setStatus(Message.STATUS_WAITING);
+                        } else {
+                            packet = mMessageGenerator.generateX3dhpqMessage(message, x3dhpqMessage);
+                            Log.d(Config.LOGTAG,
+                                    account.getJid().asBareJid()
+                                            + ": x3dhpq packet built for "
+                                            + message.getCounterpart());
+                        }
+                    } else {
+                        Log.d(Config.LOGTAG,
+                                "x3dhpq: skipping send — message needs uploading first");
                     }
                     break;
             }

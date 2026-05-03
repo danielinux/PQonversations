@@ -661,6 +661,7 @@ public class ConversationFragment extends XmppFragment
                     }
                     switch (menuItem.getItemId()) {
                         case R.id.encryption_choice_axolotl:
+                        case R.id.encryption_choice_x3dhpq:
                         case R.id.encryption_choice_pgp:
                         case R.id.encryption_choice_none:
                             handleEncryptionSelection(menuItem);
@@ -1831,6 +1832,15 @@ public class ConversationFragment extends XmppFragment
                                 + "Enabled axolotl for Contact "
                                 + conversation.getContact().getAddress());
                 updated = conversation.setNextEncryption(Message.ENCRYPTION_AXOLOTL);
+                item.setChecked(true);
+                break;
+            case R.id.encryption_choice_x3dhpq:
+                Log.d(
+                        Config.LOGTAG,
+                        conversation.getAccount().getJid().asBareJid()
+                                + ": enabled x3dhpq for "
+                                + conversation.getContact().getAddress());
+                updated = conversation.setNextEncryption(Message.ENCRYPTION_X3DHPQ);
                 item.setChecked(true);
                 break;
             default:

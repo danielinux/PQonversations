@@ -187,6 +187,7 @@
     <string name="encryption_choice_otr">OTR</string>
     <string name="encryption_choice_pgp">OpenPGP</string>
     <string name="encryption_choice_omemo">OMEMO</string>
+    <string name="encryption_choice_x3dhpq">X3DHPQ (post-quantum)</string>
     <string name="mgmt_account_delete">Delete account</string>
     <string name="mgmt_account_disable">Temporarily disable</string>
     <string name="mgmt_account_publish_avatar">Publish avatar</string>
@@ -984,6 +985,7 @@
     <string name="your_avatar_tap_to_select_new_avatar">Your avatar. Tap to select new avatar from gallery.</string>
     <string name="avatar_for_x">Avatar for %s</string>
     <string name="encrypted_with_omemo">Encrypted with OMEMO</string>
+    <string name="encrypted_with_x3dhpq">Encrypted with X3DHPQ</string>
     <string name="encrypted_with_openpgp">Encrypted with OpenPGP</string>
     <string name="not_encrypted">Not encrypted</string>
     <string name="exit">Exit</string>

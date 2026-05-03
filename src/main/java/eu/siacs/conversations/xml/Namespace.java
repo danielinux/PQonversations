@@ -132,4 +132,13 @@ public final class Namespace {
     public static final String PRIVATE_XML_STORAGE = "jabber:iq:private";
     public static final String SERVICE_OUTAGE_STATUS = "urn:xmpp:sos:0";
     public static final String FALLBACK_INDICATION = "urn:xmpp:fallback:0";
+    // X3DHPQ post-quantum key agreement protocol namespaces
+    public static final String X3DHPQ = "urn:xmppqr:x3dhpq:0";
+    public static final String X3DHPQ_DEVICELIST = "urn:xmppqr:x3dhpq:devicelist:0";
+    public static final String X3DHPQ_BUNDLE = "urn:xmppqr:x3dhpq:bundle:0";
+    public static final String X3DHPQ_ENVELOPE = "urn:xmppqr:x3dhpq:envelope:0";
+    public static final String X3DHPQ_PAIR = "urn:xmppqr:x3dhpq:pair:0";
+    public static final String X3DHPQ_AUDIT = "urn:xmppqr:x3dhpq:audit:0";
+    public static final String X3DHPQ_RECOVERY = "urn:xmppqr:x3dhpq:recovery:0";
+    public static final String X3DHPQ_GROUP = "urn:xmppqr:x3dhpq:group:0";
 }

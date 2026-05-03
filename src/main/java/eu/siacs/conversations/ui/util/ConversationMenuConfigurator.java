@@ -82,6 +82,7 @@ public class ConversationMenuConfigurator {
         final MenuItem none = menu.findItem(R.id.encryption_choice_none);
         final MenuItem pgp = menu.findItem(R.id.encryption_choice_pgp);
         final MenuItem axolotl = menu.findItem(R.id.encryption_choice_axolotl);
+        final MenuItem x3dhpq = menu.findItem(R.id.encryption_choice_x3dhpq);
 
         final int next = conversation.getNextEncryption();
 
@@ -113,6 +114,7 @@ public class ConversationMenuConfigurator {
         pgp.setVisible(true);
         none.setVisible(true);
         axolotl.setVisible(true);
+        x3dhpq.setVisible(true);
         switch (next) {
             case Message.ENCRYPTION_PGP:
                 menuSecure.setTitle(R.string.encrypted_with_openpgp);
@@ -121,6 +123,10 @@ public class ConversationMenuConfigurator {
             case Message.ENCRYPTION_AXOLOTL:
                 menuSecure.setTitle(R.string.encrypted_with_omemo);
                 axolotl.setChecked(true);
+                break;
+            case Message.ENCRYPTION_X3DHPQ:
+                menuSecure.setTitle(R.string.encrypted_with_x3dhpq);
+                x3dhpq.setChecked(true);
                 break;
             default:
                 menuSecure.setTitle(R.string.not_encrypted);

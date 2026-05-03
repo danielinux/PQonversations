@@ -346,6 +346,11 @@ public class DiscoManager extends AbstractManager {
             features.addAll(MESSAGE_CORRECTION_FEATURES);
         }
         features.add(AxolotlService.PEP_DEVICE_LIST_NOTIFY);
+        // x3dhpq caps-based PEP subscriptions (XEP §8, §9, §11, §12)
+        features.add(notify(Namespace.X3DHPQ_DEVICELIST));
+        features.add(notify(Namespace.X3DHPQ_BUNDLE));
+        features.add(notify(Namespace.X3DHPQ_AUDIT));
+        features.add(notify(Namespace.X3DHPQ_RECOVERY));
         if (!appSettings.isUseTor() && !account.isOnion()) {
             features.addAll(PRIVACY_SENSITIVE);
             features.addAll(VOIP_NAMESPACES);

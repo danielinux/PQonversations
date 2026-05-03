@@ -10,7 +10,9 @@ import eu.siacs.conversations.xml.Element;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.forms.Data;
+import eu.siacs.conversations.xmpp.pep.PublishOptions;
 import im.conversations.android.xmpp.model.stanza.Iq;
+import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.util.Set;
@@ -139,6 +141,19 @@ public class IqGenerator extends AbstractGenerator {
         return publish(AxolotlService.PEP_VERIFICATION + ":" + deviceId, item);
     }
 
+    /**
+     * Builds a standard XEP-0060 subscribe IQ for the given node and subscriber JID.
+     */
+    public Iq generatePubSubSubscription(final Jid to, final String node, final Jid subscriberJid) {
+        final var packet = new Iq(Iq.Type.SET);
+        packet.setTo(to);
+        final Element pubsub = packet.addChild("pubsub", Namespace.PUB_SUB);
+        pubsub.addChild("subscribe")
+                .setAttribute("node", node)
+                .setAttribute("jid", subscriberJid.toString());
+        return packet;
+    }
+
     public Iq requestPubsubConfiguration(Jid jid, String node) {
         return pubsubConfiguration(jid, node, null);
     }
@@ -156,5 +171,56 @@ public class IqGenerator extends AbstractGenerator {
             configure.addChild(data);
         }
         return packet;
+    }
+
+    /**
+     * Fetches the x3dhpq devicelist from a peer's PEP node.
+     */
+    public Iq generateX3dhpqRequestDeviceList(final Jid peerJid) {
+        final var packet = retrieve(Namespace.X3DHPQ_DEVICELIST, null);
+        packet.setTo(peerJid);
+        return packet;
+    }
+
+    /**
+     * Fetches a specific device's bundle from a peer's PEP node.
+     */
+    public Iq generateX3dhpqRequestBundle(final Jid peerJid, final int deviceId) {
+        final Element itemFilter = new Element("item");
+        itemFilter.setAttribute("id", Integer.toString(deviceId));
+        final var packet = retrieve(Namespace.X3DHPQ_BUNDLE, itemFilter);
+        packet.setTo(peerJid);
+        return packet;
+    }
+
+    /**
+     * Publishes the x3dhpq device list to PEP node urn:xmppqr:x3dhpq:devicelist:0.
+     * Item id is always "current"; max_items=1 since only the latest snapshot matters.
+     */
+    public Iq generateX3dhpqPublishDeviceList(
+            final DeviceList list, final String itemId) {
+        final Element item = new Element("item");
+        item.setAttribute("id", itemId);
+        item.addChild(list); // DeviceList extends Element
+        final Bundle options = PublishOptions.openAccess();
+        options.putString("pubsub#persist_items", "true");
+        options.putString("pubsub#max_items", "1");
+        return publish(Namespace.X3DHPQ_DEVICELIST, item, options);
+    }
+
+    /**
+     * Publishes the x3dhpq bundle to PEP node urn:xmppqr:x3dhpq:bundle:0.
+     * Item id is the decimal device-id.
+     */
+    public Iq generateX3dhpqPublishBundle(
+            final im.conversations.android.xmpp.model.x3dhpq.bundle.Bundle bundle,
+            final int deviceId) {
+        final Element item = new Element("item");
+        item.setAttribute("id", Integer.toString(deviceId));
+        item.addChild(bundle); // Bundle extends Element
+        final Bundle options = PublishOptions.openAccess();
+        options.putString("pubsub#persist_items", "true");
+        options.putString("pubsub#max_items", "10"); // headroom for re-publishes
+        return publish(Namespace.X3DHPQ_BUNDLE, item, options);
     }
 }

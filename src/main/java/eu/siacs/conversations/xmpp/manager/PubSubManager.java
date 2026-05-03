@@ -9,6 +9,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.xml.Namespace;
+import eu.siacs.conversations.xmpp.manager.X3dhpqManager;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import im.conversations.android.xmpp.ExtensionFactory;
@@ -197,6 +198,14 @@ public class PubSubManager extends AbstractManager {
         }
         if (isFromBare && Namespace.AXOLOTL_DEVICE_LIST.equals(node)) {
             getManager(AxolotlManager.class).handleItems(from, items);
+        }
+        // Route x3dhpq PEP nodes (caps-based: devicelist, bundle, audit, recovery; explicit: group)
+        if (Namespace.X3DHPQ_DEVICELIST.equals(node)
+                || Namespace.X3DHPQ_BUNDLE.equals(node)
+                || Namespace.X3DHPQ_AUDIT.equals(node)
+                || Namespace.X3DHPQ_RECOVERY.equals(node)
+                || Namespace.X3DHPQ_GROUP.equals(node)) {
+            getManager(X3dhpqManager.class).handleItems(from, items);
         }
     }
 

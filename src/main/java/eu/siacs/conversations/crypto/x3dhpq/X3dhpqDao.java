@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+package eu.siacs.conversations.crypto.x3dhpq;
+
+import eu.siacs.conversations.persistance.DatabaseBackend;
+import java.util.List;
+
+/**
+ * Data-access interface consumed by LocalKeyBootstrap and X3dhpqService.
+ * DatabaseBackend implements this; tests supply a fake.
+ */
+public interface X3dhpqDao {
+
+    // --- account identity ---
+    void putX3dhpqAccountIdentity(String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint);
+    DatabaseBackend.X3dhpqAccountIdentityRow loadX3dhpqAccountIdentity(String accountUuid);
+
+    // --- local device ---
+    void putX3dhpqLocalDevice(String accountUuid, int deviceId, byte[] dikPriv, byte[] dc, long createdAt, int flags);
+    List<DatabaseBackend.X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid);
+
+    // --- signed pre-key ---
+    void putX3dhpqSignedPreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX, byte[] sigEd, byte[] sigMldsa, long createdAt);
+    DatabaseBackend.X3dhpqSignedPreKeyRow loadLatestX3dhpqSignedPreKey(String accountUuid);
+
+    // --- kem pre-key ---
+    void putX3dhpqKemPreKey(String accountUuid, int keyId, byte[] pub, byte[] priv);
+    List<Integer> listX3dhpqKemPreKeyIds(String accountUuid);
+    DatabaseBackend.X3dhpqKemPreKeyRow loadX3dhpqKemPreKey(String accountUuid, int keyId);
+
+    // --- one-time pre-key ---
+    void putX3dhpqOneTimePreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX);
+    List<Integer> listX3dhpqUnusedOneTimePreKeyIds(String accountUuid);
+    DatabaseBackend.X3dhpqOneTimePreKeyRow loadX3dhpqOneTimePreKey(String accountUuid, int keyId);
+
+    // --- remote device (peer) ---
+    void putX3dhpqRemoteDevice(String accountUuid, String peerJid, int deviceId, byte[] certMarshal, Long lastSeen);
+    List<DatabaseBackend.X3dhpqRemoteDeviceRow> listX3dhpqRemoteDevices(String accountUuid, String peerJid);
+
+    // --- remote bundle (peer) ---
+    void putX3dhpqRemoteBundle(String accountUuid, String peerJid, int deviceId, byte[] aikPubMarshal, byte[] bundleXml, long fetchedAt);
+    DatabaseBackend.X3dhpqRemoteBundleRow loadX3dhpqRemoteBundle(String accountUuid, String peerJid, int deviceId);
+
+    // --- session ---
+    void putX3dhpqSession(String accountUuid, String peerJid, int deviceId, byte[] stateBlob, long updatedAt);
+    DatabaseBackend.X3dhpqSessionRow loadX3dhpqSession(String accountUuid, String peerJid, int deviceId);
+
+    // --- one-time pre-key lifecycle ---
+    void markX3dhpqOneTimePreKeyConsumed(String accountUuid, int keyId);
+
+    // --- transactions ---
+    void beginTransaction();
+    void setTransactionSuccessful();
+    void endTransaction();
+}

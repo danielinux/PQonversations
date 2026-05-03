@@ -70,10 +70,11 @@ import org.whispersystems.libsignal.state.PreKeyRecord;
 import org.whispersystems.libsignal.state.SessionRecord;
 import org.whispersystems.libsignal.state.SignedPreKeyRecord;
 
-public class DatabaseBackend extends SQLiteOpenHelper {
+public class DatabaseBackend extends SQLiteOpenHelper
+        implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 55;
+    private static final int DATABASE_VERSION = 56;
 
     private static boolean requiresMessageIndexRebuild = false;
     private static DatabaseBackend instance = null;
@@ -255,6 +256,138 @@ public class DatabaseBackend extends SQLiteOpenHelper {
             "CREATE INDEX idx_caps ON caps_cache(caps);";
     private static final String CREATE_CAPS_CACHE_INDEX_CAPS2 =
             "CREATE INDEX idx_caps2 ON caps_cache(caps2);";
+
+    // x3dhpq table creation statements (added in DATABASE_VERSION = 56)
+    // Schema for x3dhpq tables (added in DATABASE_VERSION = 56).
+    // Live migration tested under Wave D once instrumented test infrastructure is exercised.
+    private static final String CREATE_X3DHPQ_ACCOUNT_IDENTITY =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_account_identity ("
+                    + "account_uuid TEXT PRIMARY KEY NOT NULL,"
+                    + "aik_priv_marshal BLOB NOT NULL,"   // AccountIdentityKey raw priv bytes
+                    + "aik_pub_marshal BLOB NOT NULL,"    // AccountIdentityPub.marshal() — 1987 bytes
+                    + "fingerprint TEXT NOT NULL"         // 30-char hex grouped 5+space, BLAKE2b-160
+                    + ")";
+    private static final String CREATE_X3DHPQ_LOCAL_DEVICE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_local_device ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "device_id INTEGER NOT NULL,"
+                    + "dik_priv_marshal BLOB NOT NULL,"   // DeviceIdentityKey raw priv bytes
+                    + "dc_marshal BLOB NOT NULL,"         // DeviceCertificate.marshal()
+                    + "created_at INTEGER NOT NULL,"
+                    + "flags INTEGER NOT NULL DEFAULT 0,"
+                    + "PRIMARY KEY (account_uuid, device_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_SIGNED_PRE_KEY =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_signed_pre_key ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "key_id INTEGER NOT NULL,"
+                    + "public_x25519 BLOB NOT NULL,"      // 32 bytes
+                    + "private_x25519 BLOB NOT NULL,"     // 32 bytes
+                    + "signature_ed25519 BLOB NOT NULL,"  // 64 bytes
+                    + "signature_mldsa BLOB NOT NULL,"    // 3309 bytes
+                    + "created_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, key_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_KEM_PRE_KEY =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_kem_pre_key ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "key_id INTEGER NOT NULL,"
+                    + "public_key BLOB NOT NULL,"         // ML-KEM-768 public, 1184 bytes
+                    + "private_key BLOB NOT NULL,"        // ML-KEM-768 private encoded
+                    + "PRIMARY KEY (account_uuid, key_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_ONE_TIME_PRE_KEY =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_one_time_pre_key ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "key_id INTEGER NOT NULL,"
+                    + "public_x25519 BLOB NOT NULL,"      // 32 bytes
+                    + "private_x25519 BLOB NOT NULL,"     // 32 bytes
+                    + "consumed INTEGER NOT NULL DEFAULT 0,"
+                    + "PRIMARY KEY (account_uuid, key_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_REMOTE_DEVICE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_remote_device ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "peer_jid TEXT NOT NULL,"
+                    + "device_id INTEGER NOT NULL,"
+                    + "cert_marshal BLOB NOT NULL,"       // DeviceCertificate.marshal()
+                    + "last_seen INTEGER,"
+                    + "PRIMARY KEY (account_uuid, peer_jid, device_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_REMOTE_BUNDLE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_remote_bundle ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "peer_jid TEXT NOT NULL,"
+                    + "device_id INTEGER NOT NULL,"
+                    + "aik_pub_marshal BLOB NOT NULL,"    // pinned AccountIdentityPub for the peer
+                    + "bundle_xml BLOB NOT NULL,"         // raw XML of the published bundle
+                    + "fetched_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, peer_jid, device_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_SESSION =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_session ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "peer_jid TEXT NOT NULL,"
+                    + "device_id INTEGER NOT NULL,"
+                    + "state_blob BLOB NOT NULL,"         // opaque Triple Ratchet state — Wave D defines format
+                    + "updated_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, peer_jid, device_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_SESSION_PEER_INDEX =
+            "CREATE INDEX x3dhpq_session_peer ON x3dhpq_session(account_uuid, peer_jid)";
+    private static final String CREATE_X3DHPQ_AUDIT_ENTRY =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_audit_entry ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "owner_jid TEXT NOT NULL,"          // whose audit chain this is
+                    + "seq INTEGER NOT NULL,"
+                    + "prev_hash BLOB NOT NULL,"          // 32 bytes
+                    + "action INTEGER NOT NULL,"
+                    + "payload BLOB NOT NULL,"
+                    + "timestamp INTEGER NOT NULL,"
+                    + "sig_ed25519 BLOB NOT NULL,"
+                    + "sig_mldsa BLOB NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, owner_jid, seq),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_AUDIT_OWNER_SEQ_INDEX =
+            "CREATE INDEX x3dhpq_audit_owner_seq ON x3dhpq_audit_entry(account_uuid, owner_jid, seq)";
+    private static final String CREATE_X3DHPQ_GROUP_SESSION =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_group_session ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "room_jid TEXT NOT NULL,"
+                    + "epoch INTEGER NOT NULL,"
+                    + "state_blob BLOB NOT NULL,"         // opaque GroupSession state — Wave E defines format
+                    + "updated_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, room_jid),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+    private static final String CREATE_X3DHPQ_GROUP_MEMBERSHIP =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_group_membership ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "room_jid TEXT NOT NULL,"
+                    + "journal_blob BLOB NOT NULL,"       // latest signed membership journal item
+                    + "item_id TEXT NOT NULL,"
+                    + "fetched_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, room_jid),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
 
     private static final String RESOLVER_RESULTS_TABLENAME = "resolver_results";
 
@@ -518,6 +651,20 @@ public class DatabaseBackend extends SQLiteOpenHelper {
         db.execSQL(CREATE_CAPS_CACHE_TABLE);
         db.execSQL(CREATE_CAPS_CACHE_INDEX_CAPS);
         db.execSQL(CREATE_CAPS_CACHE_INDEX_CAPS2);
+        // x3dhpq tables for post-quantum key exchange state
+        db.execSQL(CREATE_X3DHPQ_ACCOUNT_IDENTITY);
+        db.execSQL(CREATE_X3DHPQ_LOCAL_DEVICE);
+        db.execSQL(CREATE_X3DHPQ_SIGNED_PRE_KEY);
+        db.execSQL(CREATE_X3DHPQ_KEM_PRE_KEY);
+        db.execSQL(CREATE_X3DHPQ_ONE_TIME_PRE_KEY);
+        db.execSQL(CREATE_X3DHPQ_REMOTE_DEVICE);
+        db.execSQL(CREATE_X3DHPQ_REMOTE_BUNDLE);
+        db.execSQL(CREATE_X3DHPQ_SESSION);
+        db.execSQL(CREATE_X3DHPQ_SESSION_PEER_INDEX);
+        db.execSQL(CREATE_X3DHPQ_AUDIT_ENTRY);
+        db.execSQL(CREATE_X3DHPQ_AUDIT_OWNER_SEQ_INDEX);
+        db.execSQL(CREATE_X3DHPQ_GROUP_SESSION);
+        db.execSQL(CREATE_X3DHPQ_GROUP_MEMBERSHIP);
     }
 
     @Override
@@ -1102,6 +1249,23 @@ public class DatabaseBackend extends SQLiteOpenHelper {
                             + " ADD COLUMN "
                             + Message.SHARED_STORAGE
                             + " BOOLEAN NOT NULL DEFAULT 1");
+        }
+        // Schema for x3dhpq tables (added in DATABASE_VERSION = 56).
+        // Live migration tested under Wave D once instrumented test infrastructure is exercised.
+        if (oldVersion < 56 && newVersion >= 56) {
+            db.execSQL(CREATE_X3DHPQ_ACCOUNT_IDENTITY);
+            db.execSQL(CREATE_X3DHPQ_LOCAL_DEVICE);
+            db.execSQL(CREATE_X3DHPQ_SIGNED_PRE_KEY);
+            db.execSQL(CREATE_X3DHPQ_KEM_PRE_KEY);
+            db.execSQL(CREATE_X3DHPQ_ONE_TIME_PRE_KEY);
+            db.execSQL(CREATE_X3DHPQ_REMOTE_DEVICE);
+            db.execSQL(CREATE_X3DHPQ_REMOTE_BUNDLE);
+            db.execSQL(CREATE_X3DHPQ_SESSION);
+            db.execSQL(CREATE_X3DHPQ_SESSION_PEER_INDEX);
+            db.execSQL(CREATE_X3DHPQ_AUDIT_ENTRY);
+            db.execSQL(CREATE_X3DHPQ_AUDIT_OWNER_SEQ_INDEX);
+            db.execSQL(CREATE_X3DHPQ_GROUP_SESSION);
+            db.execSQL(CREATE_X3DHPQ_GROUP_MEMBERSHIP);
         }
     }
 
@@ -2757,6 +2921,734 @@ public class DatabaseBackend extends SQLiteOpenHelper {
 
         public static Collection<Jid> getAddresses(final Collection<AccountWithOptions> accounts) {
             return Collections2.transform(accounts, a -> Objects.requireNonNull(a).jid);
+        }
+    }
+
+    // ---- x3dhpq row records ----
+
+    public record X3dhpqAccountIdentityRow(
+            String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint) {}
+
+    public record X3dhpqLocalDeviceRow(
+            String accountUuid,
+            int deviceId,
+            byte[] dikPriv,
+            byte[] dc,
+            long createdAt,
+            int flags) {}
+
+    public record X3dhpqSignedPreKeyRow(
+            String accountUuid,
+            int keyId,
+            byte[] pubX25519,
+            byte[] privX25519,
+            byte[] sigEd25519,
+            byte[] sigMldsa,
+            long createdAt) {}
+
+    public record X3dhpqKemPreKeyRow(
+            String accountUuid, int keyId, byte[] publicKey, byte[] privateKey) {}
+
+    public record X3dhpqOneTimePreKeyRow(
+            String accountUuid,
+            int keyId,
+            byte[] pubX25519,
+            byte[] privX25519,
+            boolean consumed) {}
+
+    public record X3dhpqRemoteDeviceRow(
+            String accountUuid,
+            String peerJid,
+            int deviceId,
+            byte[] certMarshal,
+            Long lastSeen) {}
+
+    public record X3dhpqRemoteBundleRow(
+            String accountUuid,
+            String peerJid,
+            int deviceId,
+            byte[] aikPubMarshal,
+            byte[] bundleXml,
+            long fetchedAt) {}
+
+    public record X3dhpqSessionRow(
+            String accountUuid,
+            String peerJid,
+            int deviceId,
+            byte[] stateBlob,
+            long updatedAt) {}
+
+    public record X3dhpqAuditEntryRow(
+            String accountUuid,
+            String ownerJid,
+            long seq,
+            byte[] prevHash,
+            int action,
+            byte[] payload,
+            long timestamp,
+            byte[] sigEd25519,
+            byte[] sigMldsa) {}
+
+    public record X3dhpqGroupSessionRow(
+            String accountUuid,
+            String roomJid,
+            long epoch,
+            byte[] stateBlob,
+            long updatedAt) {}
+
+    public record X3dhpqGroupMembershipRow(
+            String accountUuid,
+            String roomJid,
+            byte[] journalBlob,
+            String itemId,
+            long fetchedAt) {}
+
+    // ---- x3dhpq transaction helpers ----
+
+    // Begins a write transaction; pair with setTransactionSuccessful()/endTransaction().
+    public void beginTransaction() {
+        getWritableDatabase().beginTransaction();
+    }
+
+    // Marks the current transaction as successful.
+    public void setTransactionSuccessful() {
+        getWritableDatabase().setTransactionSuccessful();
+    }
+
+    // Ends the current transaction; commits if setTransactionSuccessful() was called.
+    public void endTransaction() {
+        getWritableDatabase().endTransaction();
+    }
+
+    // ---- x3dhpq DAO: account_identity ----
+
+    public void putX3dhpqAccountIdentity(
+            String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("aik_priv_marshal", aikPriv);
+        v.put("aik_pub_marshal", aikPub);
+        v.put("fingerprint", fingerprint);
+        db.insertWithOnConflict(
+                "x3dhpq_account_identity", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqAccountIdentityRow loadX3dhpqAccountIdentity(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_account_identity",
+                        null,
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqAccountIdentityRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getBlob(c.getColumnIndexOrThrow("aik_priv_marshal")),
+                    c.getBlob(c.getColumnIndexOrThrow("aik_pub_marshal")),
+                    c.getString(c.getColumnIndexOrThrow("fingerprint")));
+        } finally {
+            c.close();
+        }
+    }
+
+    // ---- x3dhpq DAO: local_device ----
+
+    public void putX3dhpqLocalDevice(
+            String accountUuid,
+            int deviceId,
+            byte[] dikPriv,
+            byte[] dc,
+            long createdAt,
+            int flags) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("device_id", deviceId);
+        v.put("dik_priv_marshal", dikPriv);
+        v.put("dc_marshal", dc);
+        v.put("created_at", createdAt);
+        v.put("flags", flags);
+        db.insertWithOnConflict(
+                "x3dhpq_local_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public List<X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_local_device",
+                        null,
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        null);
+        final List<X3dhpqLocalDeviceRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                result.add(
+                        new X3dhpqLocalDeviceRow(
+                                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                                c.getInt(c.getColumnIndexOrThrow("device_id")),
+                                c.getBlob(c.getColumnIndexOrThrow("dik_priv_marshal")),
+                                c.getBlob(c.getColumnIndexOrThrow("dc_marshal")),
+                                c.getLong(c.getColumnIndexOrThrow("created_at")),
+                                c.getInt(c.getColumnIndexOrThrow("flags"))));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    // ---- x3dhpq DAO: signed_pre_key ----
+
+    public void putX3dhpqSignedPreKey(
+            String accountUuid,
+            int keyId,
+            byte[] pubX,
+            byte[] privX,
+            byte[] sigEd,
+            byte[] sigMldsa,
+            long createdAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("key_id", keyId);
+        v.put("public_x25519", pubX);
+        v.put("private_x25519", privX);
+        v.put("signature_ed25519", sigEd);
+        v.put("signature_mldsa", sigMldsa);
+        v.put("created_at", createdAt);
+        db.insertWithOnConflict(
+                "x3dhpq_signed_pre_key", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqSignedPreKeyRow loadX3dhpqSignedPreKey(String accountUuid, int keyId) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_signed_pre_key",
+                        null,
+                        "account_uuid=? AND key_id=?",
+                        new String[] {accountUuid, Integer.toString(keyId)},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return x3dhpqSignedPreKeyFromCursor(c);
+        } finally {
+            c.close();
+        }
+    }
+
+    public X3dhpqSignedPreKeyRow loadLatestX3dhpqSignedPreKey(String accountUuid) {
+        // most recently created signed pre key for this account
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_signed_pre_key",
+                        null,
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        "created_at DESC",
+                        "1");
+        try {
+            if (!c.moveToFirst()) return null;
+            return x3dhpqSignedPreKeyFromCursor(c);
+        } finally {
+            c.close();
+        }
+    }
+
+    private X3dhpqSignedPreKeyRow x3dhpqSignedPreKeyFromCursor(Cursor c) {
+        return new X3dhpqSignedPreKeyRow(
+                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                c.getInt(c.getColumnIndexOrThrow("key_id")),
+                c.getBlob(c.getColumnIndexOrThrow("public_x25519")),
+                c.getBlob(c.getColumnIndexOrThrow("private_x25519")),
+                c.getBlob(c.getColumnIndexOrThrow("signature_ed25519")),
+                c.getBlob(c.getColumnIndexOrThrow("signature_mldsa")),
+                c.getLong(c.getColumnIndexOrThrow("created_at")));
+    }
+
+    // ---- x3dhpq DAO: kem_pre_key ----
+
+    public void putX3dhpqKemPreKey(
+            String accountUuid, int keyId, byte[] pub, byte[] priv) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("key_id", keyId);
+        v.put("public_key", pub);
+        v.put("private_key", priv);
+        db.insertWithOnConflict(
+                "x3dhpq_kem_pre_key", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqKemPreKeyRow loadX3dhpqKemPreKey(String accountUuid, int keyId) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_kem_pre_key",
+                        null,
+                        "account_uuid=? AND key_id=?",
+                        new String[] {accountUuid, Integer.toString(keyId)},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqKemPreKeyRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getInt(c.getColumnIndexOrThrow("key_id")),
+                    c.getBlob(c.getColumnIndexOrThrow("public_key")),
+                    c.getBlob(c.getColumnIndexOrThrow("private_key")));
+        } finally {
+            c.close();
+        }
+    }
+
+    public List<Integer> listX3dhpqKemPreKeyIds(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_kem_pre_key",
+                        new String[] {"key_id"},
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        null);
+        final List<Integer> ids = new ArrayList<>();
+        try {
+            while (c.moveToNext()) ids.add(c.getInt(0));
+        } finally {
+            c.close();
+        }
+        return ids;
+    }
+
+    // ---- x3dhpq DAO: one_time_pre_key ----
+
+    public void putX3dhpqOneTimePreKey(
+            String accountUuid, int keyId, byte[] pubX, byte[] privX) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("key_id", keyId);
+        v.put("public_x25519", pubX);
+        v.put("private_x25519", privX);
+        v.put("consumed", 0);
+        db.insertWithOnConflict(
+                "x3dhpq_one_time_pre_key", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+    }
+
+    public X3dhpqOneTimePreKeyRow loadX3dhpqOneTimePreKey(String accountUuid, int keyId) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_one_time_pre_key",
+                        null,
+                        "account_uuid=? AND key_id=?",
+                        new String[] {accountUuid, Integer.toString(keyId)},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqOneTimePreKeyRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getInt(c.getColumnIndexOrThrow("key_id")),
+                    c.getBlob(c.getColumnIndexOrThrow("public_x25519")),
+                    c.getBlob(c.getColumnIndexOrThrow("private_x25519")),
+                    c.getInt(c.getColumnIndexOrThrow("consumed")) != 0);
+        } finally {
+            c.close();
+        }
+    }
+
+    public void markX3dhpqOneTimePreKeyConsumed(String accountUuid, int keyId) {
+        // flag key so it is not re-issued; Wave D physically deletes after session confirm
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("consumed", 1);
+        db.update(
+                "x3dhpq_one_time_pre_key",
+                v,
+                "account_uuid=? AND key_id=?",
+                new String[] {accountUuid, Integer.toString(keyId)});
+    }
+
+    public List<Integer> listX3dhpqUnusedOneTimePreKeyIds(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_one_time_pre_key",
+                        new String[] {"key_id"},
+                        "account_uuid=? AND consumed=0",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        null);
+        final List<Integer> ids = new ArrayList<>();
+        try {
+            while (c.moveToNext()) ids.add(c.getInt(0));
+        } finally {
+            c.close();
+        }
+        return ids;
+    }
+
+    // ---- x3dhpq DAO: remote_device ----
+
+    public void putX3dhpqRemoteDevice(
+            String accountUuid,
+            String peerJid,
+            int deviceId,
+            byte[] certMarshal,
+            Long lastSeen) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("peer_jid", peerJid);
+        v.put("device_id", deviceId);
+        v.put("cert_marshal", certMarshal);
+        if (lastSeen != null) v.put("last_seen", lastSeen);
+        else v.putNull("last_seen");
+        db.insertWithOnConflict(
+                "x3dhpq_remote_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqRemoteDeviceRow loadX3dhpqRemoteDevice(
+            String accountUuid, String peerJid, int deviceId) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_remote_device",
+                        null,
+                        "account_uuid=? AND peer_jid=? AND device_id=?",
+                        new String[] {accountUuid, peerJid, Integer.toString(deviceId)},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            final int lastSeenIdx = c.getColumnIndexOrThrow("last_seen");
+            final Long lastSeen = c.isNull(lastSeenIdx) ? null : c.getLong(lastSeenIdx);
+            return new X3dhpqRemoteDeviceRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getString(c.getColumnIndexOrThrow("peer_jid")),
+                    c.getInt(c.getColumnIndexOrThrow("device_id")),
+                    c.getBlob(c.getColumnIndexOrThrow("cert_marshal")),
+                    lastSeen);
+        } finally {
+            c.close();
+        }
+    }
+
+    public List<X3dhpqRemoteDeviceRow> listX3dhpqRemoteDevices(
+            String accountUuid, String peerJid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_remote_device",
+                        null,
+                        "account_uuid=? AND peer_jid=?",
+                        new String[] {accountUuid, peerJid},
+                        null,
+                        null,
+                        null);
+        final List<X3dhpqRemoteDeviceRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                final int lastSeenIdx = c.getColumnIndexOrThrow("last_seen");
+                final Long lastSeen = c.isNull(lastSeenIdx) ? null : c.getLong(lastSeenIdx);
+                result.add(
+                        new X3dhpqRemoteDeviceRow(
+                                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                                c.getString(c.getColumnIndexOrThrow("peer_jid")),
+                                c.getInt(c.getColumnIndexOrThrow("device_id")),
+                                c.getBlob(c.getColumnIndexOrThrow("cert_marshal")),
+                                lastSeen));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    // ---- x3dhpq DAO: remote_bundle ----
+
+    public void putX3dhpqRemoteBundle(
+            String accountUuid,
+            String peerJid,
+            int deviceId,
+            byte[] aikPubMarshal,
+            byte[] bundleXml,
+            long fetchedAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("peer_jid", peerJid);
+        v.put("device_id", deviceId);
+        v.put("aik_pub_marshal", aikPubMarshal);
+        v.put("bundle_xml", bundleXml);
+        v.put("fetched_at", fetchedAt);
+        db.insertWithOnConflict(
+                "x3dhpq_remote_bundle", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqRemoteBundleRow loadX3dhpqRemoteBundle(
+            String accountUuid, String peerJid, int deviceId) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_remote_bundle",
+                        null,
+                        "account_uuid=? AND peer_jid=? AND device_id=?",
+                        new String[] {accountUuid, peerJid, Integer.toString(deviceId)},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqRemoteBundleRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getString(c.getColumnIndexOrThrow("peer_jid")),
+                    c.getInt(c.getColumnIndexOrThrow("device_id")),
+                    c.getBlob(c.getColumnIndexOrThrow("aik_pub_marshal")),
+                    c.getBlob(c.getColumnIndexOrThrow("bundle_xml")),
+                    c.getLong(c.getColumnIndexOrThrow("fetched_at")));
+        } finally {
+            c.close();
+        }
+    }
+
+    // ---- x3dhpq DAO: session ----
+
+    public void putX3dhpqSession(
+            String accountUuid,
+            String peerJid,
+            int deviceId,
+            byte[] stateBlob,
+            long updatedAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("peer_jid", peerJid);
+        v.put("device_id", deviceId);
+        v.put("state_blob", stateBlob);
+        v.put("updated_at", updatedAt);
+        db.insertWithOnConflict(
+                "x3dhpq_session", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqSessionRow loadX3dhpqSession(
+            String accountUuid, String peerJid, int deviceId) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_session",
+                        null,
+                        "account_uuid=? AND peer_jid=? AND device_id=?",
+                        new String[] {accountUuid, peerJid, Integer.toString(deviceId)},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return x3dhpqSessionFromCursor(c);
+        } finally {
+            c.close();
+        }
+    }
+
+    public List<X3dhpqSessionRow> listX3dhpqSessionsForPeer(
+            String accountUuid, String peerJid) {
+        // uses x3dhpq_session_peer index for fast per-peer lookup
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_session",
+                        null,
+                        "account_uuid=? AND peer_jid=?",
+                        new String[] {accountUuid, peerJid},
+                        null,
+                        null,
+                        null);
+        final List<X3dhpqSessionRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) result.add(x3dhpqSessionFromCursor(c));
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    private X3dhpqSessionRow x3dhpqSessionFromCursor(Cursor c) {
+        return new X3dhpqSessionRow(
+                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                c.getString(c.getColumnIndexOrThrow("peer_jid")),
+                c.getInt(c.getColumnIndexOrThrow("device_id")),
+                c.getBlob(c.getColumnIndexOrThrow("state_blob")),
+                c.getLong(c.getColumnIndexOrThrow("updated_at")));
+    }
+
+    // ---- x3dhpq DAO: audit_entry ----
+
+    public void putX3dhpqAuditEntry(
+            String accountUuid,
+            String ownerJid,
+            long seq,
+            byte[] prevHash,
+            int action,
+            byte[] payload,
+            long ts,
+            byte[] sigEd,
+            byte[] sigMldsa) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("owner_jid", ownerJid);
+        v.put("seq", seq);
+        v.put("prev_hash", prevHash);
+        v.put("action", action);
+        v.put("payload", payload);
+        v.put("timestamp", ts);
+        v.put("sig_ed25519", sigEd);
+        v.put("sig_mldsa", sigMldsa);
+        db.insertWithOnConflict(
+                "x3dhpq_audit_entry", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+    }
+
+    public List<X3dhpqAuditEntryRow> loadX3dhpqAuditChain(
+            String accountUuid, String ownerJid) {
+        // ordered by seq ASC for chain replay; uses x3dhpq_audit_owner_seq index
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_audit_entry",
+                        null,
+                        "account_uuid=? AND owner_jid=?",
+                        new String[] {accountUuid, ownerJid},
+                        null,
+                        null,
+                        "seq ASC");
+        final List<X3dhpqAuditEntryRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                result.add(
+                        new X3dhpqAuditEntryRow(
+                                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                                c.getString(c.getColumnIndexOrThrow("owner_jid")),
+                                c.getLong(c.getColumnIndexOrThrow("seq")),
+                                c.getBlob(c.getColumnIndexOrThrow("prev_hash")),
+                                c.getInt(c.getColumnIndexOrThrow("action")),
+                                c.getBlob(c.getColumnIndexOrThrow("payload")),
+                                c.getLong(c.getColumnIndexOrThrow("timestamp")),
+                                c.getBlob(c.getColumnIndexOrThrow("sig_ed25519")),
+                                c.getBlob(c.getColumnIndexOrThrow("sig_mldsa"))));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    // ---- x3dhpq DAO: group_session ----
+
+    public void putX3dhpqGroupSession(
+            String accountUuid,
+            String roomJid,
+            long epoch,
+            byte[] stateBlob,
+            long updatedAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("room_jid", roomJid);
+        v.put("epoch", epoch);
+        v.put("state_blob", stateBlob);
+        v.put("updated_at", updatedAt);
+        db.insertWithOnConflict(
+                "x3dhpq_group_session", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqGroupSessionRow loadX3dhpqGroupSession(String accountUuid, String roomJid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_group_session",
+                        null,
+                        "account_uuid=? AND room_jid=?",
+                        new String[] {accountUuid, roomJid},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqGroupSessionRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getString(c.getColumnIndexOrThrow("room_jid")),
+                    c.getLong(c.getColumnIndexOrThrow("epoch")),
+                    c.getBlob(c.getColumnIndexOrThrow("state_blob")),
+                    c.getLong(c.getColumnIndexOrThrow("updated_at")));
+        } finally {
+            c.close();
+        }
+    }
+
+    // ---- x3dhpq DAO: group_membership ----
+
+    public void putX3dhpqGroupMembership(
+            String accountUuid,
+            String roomJid,
+            byte[] journalBlob,
+            String itemId,
+            long fetchedAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("room_jid", roomJid);
+        v.put("journal_blob", journalBlob);
+        v.put("item_id", itemId);
+        v.put("fetched_at", fetchedAt);
+        db.insertWithOnConflict(
+                "x3dhpq_group_membership", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqGroupMembershipRow loadX3dhpqGroupMembership(
+            String accountUuid, String roomJid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_group_membership",
+                        null,
+                        "account_uuid=? AND room_jid=?",
+                        new String[] {accountUuid, roomJid},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqGroupMembershipRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getString(c.getColumnIndexOrThrow("room_jid")),
+                    c.getBlob(c.getColumnIndexOrThrow("journal_blob")),
+                    c.getString(c.getColumnIndexOrThrow("item_id")),
+                    c.getLong(c.getColumnIndexOrThrow("fetched_at")));
+        } finally {
+            c.close();
         }
     }
 }

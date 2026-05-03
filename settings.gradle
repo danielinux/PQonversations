@@ -1,3 +1,4 @@
 include ':libs:annotation', ':libs:annotation-processor:'
+include ':libs:x3dhpq-core'
 
 rootProject.name = 'Conversations'

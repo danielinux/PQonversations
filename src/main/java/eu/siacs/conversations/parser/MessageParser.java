@@ -10,6 +10,8 @@ import eu.siacs.conversations.crypto.axolotl.BrokenSessionException;
 import eu.siacs.conversations.crypto.axolotl.NotEncryptedForThisDeviceException;
 import eu.siacs.conversations.crypto.axolotl.OutdatedSenderException;
 import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
+import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
+import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Contact;
 import eu.siacs.conversations.entities.Conversation;
@@ -40,6 +42,10 @@ import eu.siacs.conversations.xmpp.manager.StanzaIdManager;
 import im.conversations.android.xmpp.model.Extension;
 import im.conversations.android.xmpp.model.axolotl.Encrypted;
 import im.conversations.android.xmpp.model.axolotl.Payload;
+import im.conversations.android.xmpp.model.x3dhpq.envelope.Envelope;
+import im.conversations.x3dhpq.protocol.PrekeyEnvelope;
+import im.conversations.x3dhpq.protocol.Session;
+import im.conversations.x3dhpq.protocol.SessionException;
 import im.conversations.android.xmpp.model.carbons.Received;
 import im.conversations.android.xmpp.model.carbons.Sent;
 import im.conversations.android.xmpp.model.conference.DirectInvite;
@@ -141,6 +147,105 @@ public class MessageParser extends AbstractParser
             service.processReceivingKeyTransportMessage(xmppAxolotlMessage, postpone);
         }
         return null;
+    }
+
+    private Message parseX3dhpqChat(
+            final Envelope envelopeEl,
+            final Jid from,
+            final Conversation conversation,
+            final int status) {
+        if (envelopeEl == null || from == null || conversation == null) {
+            return null;
+        }
+        final X3dhpqService x3dhpqService = conversation.getAccount() != null
+                ? conversation.getAccount().getX3dhpqService() : null;
+        if (x3dhpqService == null) {
+            Log.d(Config.LOGTAG, "x3dhpq: parseX3dhpqChat skipped — service is null");
+            return null;
+        }
+        final XmppX3dhpqMessage incoming;
+        try {
+            incoming = XmppX3dhpqMessage.fromExtension(
+                    conversation.getAccount(), from, envelopeEl);
+        } catch (final Exception e) {
+            Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                    + ": invalid x3dhpq envelope: " + e.getMessage());
+            // mirror parseAxolotlChat: bad envelope → skip, don't persist a stub message
+            return null;
+        }
+
+        final int myDeviceId = x3dhpqService.getOwnDeviceId();
+        if (myDeviceId < 0) {
+            Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                    + ": x3dhpq received but local device not bootstrapped yet; skipping");
+            return null;
+        }
+        final XmppX3dhpqMessage.EncryptedKey k = incoming.findKeyForDevice(myDeviceId);
+        if (k == null) {
+            // envelope addressed to other devices only — nothing to do for us
+            return null;
+        }
+
+        final Session session;
+        try {
+            if (k.prekey != null) {
+                // first-time inbound: run PQXDH responder, build new Session
+                final PrekeyEnvelope env = new PrekeyEnvelope(
+                        k.prekey.ephemeralPub,
+                        k.prekey.kemCiphertext,
+                        k.prekey.kemKeyId,
+                        k.prekey.opkId,
+                        k.prekey.dcMarshal,
+                        k.prekey.aikEd25519Pub,
+                        k.prekey.aikMldsaPub);
+                session = x3dhpqService.acceptInboundSessionAsSession(
+                        from, incoming.senderDeviceId, env);
+            } else {
+                session = x3dhpqService.loadSession(from, incoming.senderDeviceId);
+                if (session == null) {
+                    // out-of-band: peer references a session we don't have. This is
+                    // common during MAM catchup of messages that pre-date our local
+                    // bootstrap. Skip rather than persist a fake "FAILED" message.
+                    Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                            + ": no x3dhpq session found for " + from + "/" + incoming.senderDeviceId);
+                    return null;
+                }
+            }
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                    + ": x3dhpq session setup failed: " + e.getMessage());
+            return null;
+        }
+
+        if (session == null) {
+            return null;
+        }
+
+        final byte[] plaintext;
+        try {
+            plaintext = incoming.decrypt(session, k);
+        } catch (final Exception e) {
+            // Catch broader than SessionException: any unexpected failure during
+            // decrypt (NPE, IllegalStateException, etc.) must not propagate up
+            // and crash the parser pipeline.
+            Log.w(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                    + ": x3dhpq decrypt failed: " + e.getMessage());
+            return null;
+        }
+
+        // persist updated session state after successful decrypt
+        try {
+            x3dhpqService.persistSession(from, incoming.senderDeviceId, session);
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, "x3dhpq: persistSession failed: " + e.getMessage());
+            // not fatal — message decryption succeeded
+        }
+
+        return new Message(
+                conversation,
+                new String(plaintext, java.nio.charset.StandardCharsets.UTF_8),
+                Message.ENCRYPTION_X3DHPQ,
+                status);
     }
 
     private boolean handleErrorMessage(
@@ -291,6 +396,7 @@ public class MessageParser extends AbstractParser
         final var replace = packet.getExtension(Replace.class);
         final var replacementId = replace == null ? null : replace.getId();
         final var axolotlEncrypted = packet.getOnlyExtension(Encrypted.class);
+        final var x3dhpqEnvelope = packet.getOnlyExtension(Envelope.class);
         // TODO this can probably be refactored to be final
         int status;
         final Jid counterpart;
@@ -365,6 +471,7 @@ public class MessageParser extends AbstractParser
         if ((body != null && !bodyIsFallback)
                 || pgpEncrypted != null
                 || (axolotlEncrypted != null && axolotlEncrypted.hasExtension(Payload.class))
+                || x3dhpqEnvelope != null
                 || oobUrl != null) {
             final boolean conversationIsProbablyMuc =
                     isTypeGroupChat
@@ -503,6 +610,22 @@ public class MessageParser extends AbstractParser
                 }
                 if (conversationMultiMode) {
                     message.setTrueCounterpart(origin);
+                }
+            } else if (x3dhpqEnvelope != null) {
+                // x3dhpq pairwise encrypted message (Wave D6). Wrap in a Throwable
+                // catch so any unforeseen runtime error inside the crypto stack
+                // (NPE on missing state, ML-DSA verification errors, malformed
+                // session blobs after schema bumps, etc.) cannot crash the whole
+                // process or the entire MessageParser pipeline.
+                try {
+                    message = parseX3dhpqChat(x3dhpqEnvelope, from, conversation, status);
+                } catch (final Throwable t) {
+                    Log.e(Config.LOGTAG, account.getJid().asBareJid()
+                            + ": x3dhpq parser threw: " + t.getMessage(), t);
+                    return;
+                }
+                if (message == null) {
+                    return;
                 }
             } else if (body == null && oobUrl != null) {
                 message = new Message(conversation, oobUrl, Message.ENCRYPTION_NONE, status);

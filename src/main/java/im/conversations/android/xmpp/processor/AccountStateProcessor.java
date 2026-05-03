@@ -4,6 +4,7 @@ import static eu.siacs.conversations.utils.Random.SECURE_RANDOM;
 
 import android.util.Log;
 import eu.siacs.conversations.Config;
+import eu.siacs.conversations.crypto.x3dhpq.LocalKeyBootstrap;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.http.ServiceOutageStatus;
 import eu.siacs.conversations.services.XmppConnectionService;
@@ -37,6 +38,20 @@ public class AccountStateProcessor extends XmppConnection.Delegate
         }
 
         if (account.getStatus() == Account.State.ONLINE) {
+            // register x3dhpq +notify caps once per stream (no-op; features are in DiscoManager)
+            account.getX3dhpqService().registerNotifyFeatures();
+            // bootstrap local x3dhpq key material (no-op if already bootstrapped)
+            final LocalKeyBootstrap.BootstrapResult x3dhpqBootstrap =
+                    new LocalKeyBootstrap(this.service.databaseBackend).ensureBootstrapped(account);
+            if (x3dhpqBootstrap.wasNewlyCreated) {
+                Log.d(
+                        Config.LOGTAG,
+                        account.getJid().asBareJid()
+                                + ": x3dhpq bootstrapped, fp="
+                                + x3dhpqBootstrap.fingerprint);
+            }
+            // publish devicelist + bundle on every login (PEP dedupes by item id)
+            account.getX3dhpqService().publishLocalState();
             synchronized (this.service.mLowPingTimeoutMode) {
                 if (this.service.mLowPingTimeoutMode.remove(account.getJid().asBareJid())) {
                     Log.d(
