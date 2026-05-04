@@ -35,6 +35,7 @@ public interface X3dhpqDao {
     // --- remote device (peer) ---
     void putX3dhpqRemoteDevice(String accountUuid, String peerJid, int deviceId, byte[] certMarshal, Long lastSeen);
     List<DatabaseBackend.X3dhpqRemoteDeviceRow> listX3dhpqRemoteDevices(String accountUuid, String peerJid);
+    void pruneX3dhpqRemoteDevicesNotIn(String accountUuid, String peerJid, java.util.Collection<Integer> keepIds);
 
     // --- remote bundle (peer) ---
     void putX3dhpqRemoteBundle(String accountUuid, String peerJid, int deviceId, byte[] aikPubMarshal, byte[] bundleXml, long fetchedAt);
@@ -46,6 +47,13 @@ public interface X3dhpqDao {
 
     // --- one-time pre-key lifecycle ---
     void markX3dhpqOneTimePreKeyConsumed(String accountUuid, int keyId);
+
+    // --- group session ---
+    void putX3dhpqGroupSession(String accountUuid, String roomJid, long epoch, byte[] stateBlob, long updatedAt);
+    DatabaseBackend.X3dhpqGroupSessionRow loadX3dhpqGroupSession(String accountUuid, String roomJid);
+
+    // --- all remote devices (for AIK fp → JID lookup) ---
+    List<DatabaseBackend.X3dhpqRemoteDeviceRow> listAllX3dhpqRemoteDevices(String accountUuid);
 
     // --- transactions ---
     void beginTransaction();

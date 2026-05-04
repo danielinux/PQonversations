@@ -14,6 +14,7 @@ import im.conversations.android.xmpp.model.correction.Replace;
 import im.conversations.android.xmpp.model.hints.Store;
 import im.conversations.android.xmpp.model.markers.Markable;
 import im.conversations.android.xmpp.model.unique.OriginId;
+import im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup;
 
 public class MessageGenerator extends AbstractGenerator {
     private static final String OMEMO_FALLBACK_MESSAGE =
@@ -104,6 +105,35 @@ public class MessageGenerator extends AbstractGenerator {
                             + im.conversations.android.xmpp.StreamElementWriter
                                     .asStringUnchecked(envelopeExt));
         } catch (final Throwable t) { /* logging-only; never fail the send */ }
+        return packet;
+    }
+
+    /** Generate a groupchat message packet carrying a group x3dhpq-group encrypted envelope. */
+    public im.conversations.android.xmpp.model.stanza.Message generateX3dhpqGroupMessage(
+            Message message, EnvelopeGroup groupEnv) {
+        if (groupEnv == null) return null;
+        final im.conversations.android.xmpp.model.stanza.Message packet = preparePacket(message);
+        packet.addExtension(groupEnv);
+        packet.setBody("[This message is x3dhpq group-encrypted]");
+        packet.addChild("encryption", "urn:xmpp:eme:0")
+                .setAttribute("name", "x3dhpq-group")
+                .setAttribute("namespace", "urn:xmppqr:x3dhpq:envelope:0");
+        return packet;
+    }
+
+    /**
+     * Generate a chat-type x3dhpq message carrying a SenderChainAnnouncement payload.
+     * This is a 1:1 envelope sent to a specific peer; the outer stanza type is "chat".
+     */
+    public im.conversations.android.xmpp.model.stanza.Message generateX3dhpqSenderChainMessage(
+            eu.siacs.conversations.xmpp.Jid to, XmppX3dhpqMessage envelope) {
+        if (envelope == null) return null;
+        final im.conversations.android.xmpp.model.stanza.Message packet =
+                new im.conversations.android.xmpp.model.stanza.Message();
+        packet.setType(im.conversations.android.xmpp.model.stanza.Message.Type.CHAT);
+        packet.setTo(to);
+        packet.addExtension(envelope.toExtension());
+        packet.addChild("store", "urn:xmpp:hints");
         return packet;
     }
 

@@ -1685,20 +1685,55 @@ public class XmppConnectionService extends Service {
                                     + ": x3dhpq send path entered for message to "
                                     + message.getCounterpart());
                     if (!message.needsUploading()) {
-                        final XmppX3dhpqMessage x3dhpqMessage =
-                                account.getX3dhpqService().preparePayloadMessage(message);
-                        if (x3dhpqMessage == null) {
-                            // bundle missing; message stays WAITING and will retry on bundle arrival
-                            Log.d(Config.LOGTAG,
-                                    account.getJid().asBareJid()
-                                            + ": x3dhpq message marked WAITING (bundle missing)");
-                            message.setStatus(Message.STATUS_WAITING);
+                        if (conversation.getMode() == Conversation.MODE_MULTI) {
+                            // §13 group encryption path — sender chain
+                            final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
+                                    getGroupCryptoService(account);
+                            if (gcs == null) {
+                                Log.w(Config.LOGTAG, "x3dhpq: group service unavailable");
+                                message.setStatus(Message.STATUS_WAITING);
+                                break;
+                            }
+                            try {
+                                final byte[] plaintext = message.getBody() != null
+                                        ? message.getBody().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                                        : new byte[0];
+                                final im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup groupEnv =
+                                        gcs.encryptGroupMessage(conversation.getAddress().asBareJid(), plaintext);
+                                packet = mMessageGenerator.generateX3dhpqGroupMessage(message, groupEnv);
+                            } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
+                                Log.w(Config.LOGTAG,
+                                        account.getJid().asBareJid()
+                                                + ": x3dhpq group not enabled for "
+                                                + conversation.getAddress()
+                                                + ": " + e.getMessage());
+                                // Surface UI error: room not enabled
+                                message.setStatus(Message.STATUS_SEND_FAILED);
+                                markMessage(message, Message.STATUS_SEND_FAILED,
+                                        "This room is not yet x3dhpq-enabled");
+                            } catch (Exception e) {
+                                Log.e(Config.LOGTAG,
+                                        account.getJid().asBareJid()
+                                                + ": x3dhpq group encrypt failed: " + e.getMessage());
+                                message.setStatus(Message.STATUS_SEND_FAILED);
+                            }
                         } else {
-                            packet = mMessageGenerator.generateX3dhpqMessage(message, x3dhpqMessage);
-                            Log.d(Config.LOGTAG,
-                                    account.getJid().asBareJid()
-                                            + ": x3dhpq packet built for "
-                                            + message.getCounterpart());
+                            // Pairwise 1:1 path
+                            final XmppX3dhpqMessage x3dhpqMessage =
+                                    account.getX3dhpqService().preparePayloadMessage(message);
+                            if (x3dhpqMessage == null) {
+                                // bundle missing; message stays WAITING and will retry on bundle arrival
+                                Log.d(Config.LOGTAG,
+                                        account.getJid().asBareJid()
+                                                + ": x3dhpq message marked WAITING (bundle missing)");
+                                message.setStatus(Message.STATUS_WAITING);
+                            } else {
+                                packet = mMessageGenerator.generateX3dhpqMessage(message, x3dhpqMessage);
+                                Log.d(Config.LOGTAG,
+                                        account.getJid().asBareJid()
+                                                + ": x3dhpq packet built for "
+                                                + message.getCounterpart());
+                            }
                         }
                     } else {
                         Log.d(Config.LOGTAG,
@@ -3756,6 +3791,13 @@ public class XmppConnectionService extends Service {
 
     public IqGenerator getIqGenerator() {
         return this.mIqGenerator;
+    }
+
+    public eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService getGroupCryptoService(
+            final Account account) {
+        if (account == null) return null;
+        final XmppConnection conn = account.getXmppConnection();
+        return conn == null ? null : conn.getGroupCryptoService();
     }
 
     public QuickConversationsService getQuickConversationsService() {

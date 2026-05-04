@@ -265,6 +265,28 @@ public class X3dhpqService {
             Log.w(Config.LOGTAG, LOGPREFIX + ": publishLocalState called without db/account");
             return;
         }
+        // One-shot: wipe stored pairwise sessions on first run after the
+        // ratchet bootstrap fix (initiator/responder pre-ratchet). Sessions
+        // serialised before the fix used the lazy chainSendKey=rootKey[32:64]
+        // format which the responder side cannot reproduce, so every cached
+        // session would fail to decrypt the very first message after the
+        // upgrade. The flag below is permanent (one wipe per install) so
+        // we don't keep deleting healthy sessions across restarts.
+        try {
+            final android.content.SharedPreferences prefs =
+                    androidx.preference.PreferenceManager.getDefaultSharedPreferences(
+                            mXmppConnectionService);
+            final String flagKey = "x3dhpq_session_wipe_v1_" + account.getUuid();
+            if (!prefs.getBoolean(flagKey, false)) {
+                final int wiped = mXmppConnectionService.databaseBackend
+                        .wipeAllX3dhpqSessions(account.getUuid());
+                Log.i(Config.LOGTAG, LOGPREFIX
+                        + ": wiped " + wiped + " stale x3dhpq_session rows; sessions will re-establish on next send");
+                prefs.edit().putBoolean(flagKey, true).apply();
+            }
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": session wipe-v1 failed: " + e.getMessage());
+        }
         publishDeviceList();
         publishOwnBundle();
     }
@@ -347,6 +369,7 @@ public class X3dhpqService {
                 "x3dhpq: handleInboundDeviceList for " + peer
                         + " — list contains " + devices.size() + " device(s); xml="
                         + StreamElementWriter.asStringUnchecked(list));
+        final java.util.Set<Integer> liveIds = new java.util.HashSet<>();
         for (final Device device : devices) {
             final Integer id = device.getDeviceId();
             final Cert certEl = device.getCert();
@@ -368,6 +391,7 @@ public class X3dhpqService {
                 // parse DC to validate it is well-formed before persisting
                 DeviceCertificate.unmarshal(dcBytes);
                 db.putX3dhpqRemoteDevice(accountUuid, peer, id, dcBytes, now);
+                liveIds.add(id);
                 Log.d(Config.LOGTAG,
                         "x3dhpq: stored remote_device for " + peer + "/" + id);
             } catch (Exception e) {
@@ -384,6 +408,12 @@ public class X3dhpqService {
                 requestPeerBundle(peerBareJid, id);
             }
         }
+        // The published devicelist is authoritative. Drop any cached
+        // x3dhpq_remote_device / bundle / session rows for this peer whose
+        // device id is no longer in the list — otherwise we keep sending
+        // pairwise envelopes (e.g. SenderChainAnnouncements) to ghost
+        // device ids that the peer regenerated and abandoned.
+        db.pruneX3dhpqRemoteDevicesNotIn(accountUuid, peer, liveIds);
     }
 
     /** Handles an inbound bundle: verifies DC signatures, pins AIK (TOFU), and persists. */
@@ -481,6 +511,12 @@ public class X3dhpqService {
                                 + peer + " after bundle arrival");
                 mXmppConnectionService.sendUnsentMessages(conversation);
             }
+            // Drain any group journal publishes that were waiting on this
+            // peer's AIK to land in the bundle store.
+            final var gcs = mXmppConnectionService.getGroupCryptoService(account);
+            if (gcs != null) {
+                gcs.onPeerBundleArrived(peerBareJid);
+            }
         }
     }
 
@@ -543,9 +579,18 @@ public class X3dhpqService {
                 peerBundle,
                 X3dhpqCrypto.HKDF_SHA512);
 
-        // Persist session state.
+        // Persist session state. The initiator MUST pre-ratchet against the
+        // peer's SPK pub; the responder side (dino's new_receiving_state +
+        // first-decrypt dh_ratchet_step) derives chainRecvKey from
+        // dh_ratchet_step(rk, peer_SPK_priv, our_eph_pub, zeros). ECDH
+        // symmetry makes that equal to dh_ratchet_step(rk, our_eph_priv,
+        // peer_SPK_pub, zeros) on our side. Using the lazy fromPqxdh()
+        // factory left chainSendKey at rootKey[32:64], which the responder
+        // never sees, so the AES-GCM tag mismatched on every first message
+        // and decryption returned wolfSSL rc=-180.
         final long now = System.currentTimeMillis() / 1000L;
-        db.putX3dhpqSession(accountUuid, peer, peerDeviceId, serialiseSession(result), now);
+        db.putX3dhpqSession(accountUuid, peer, peerDeviceId,
+                serialiseInitiatorSession(result, peerBundle.spkPub), now);
 
         return Optional.of(result);
     }
@@ -614,9 +659,13 @@ public class X3dhpqService {
                 env.kemCiphertext,
                 X3dhpqCrypto.HKDF_SHA512);
 
-        // Persist session state.
+        // Persist session state. The responder's "send DH" private must be
+        // its SPK private (NOT a fresh ephemeral) — the initiator pre-
+        // ratchets `dh_ratchet_step(rk, eph_priv, peer_SPK_pub, zeros)`,
+        // and we need the symmetric ECDH match on first decrypt.
         final long now = System.currentTimeMillis() / 1000L;
-        db.putX3dhpqSession(accountUuid, peer, peerDeviceId, serialiseSession(result), now);
+        db.putX3dhpqSession(accountUuid, peer, peerDeviceId,
+                serialiseResponderSession(result, spkRow.privX25519(), spkRow.pubX25519()), now);
 
         return result;
     }
@@ -626,6 +675,27 @@ public class X3dhpqService {
     static byte[] serialiseSession(final PqxdhResult r) {
         final im.conversations.x3dhpq.crypto.KeyPair ephDh = X3dhpqCrypto.x25519GenerateKeypair();
         final Session session = Session.fromPqxdh(r, ephDh.priv, ephDh.pub);
+        return session.marshal();
+    }
+
+    // Initiator session that pre-ratchets against peerSpkPub, matching the
+    // responder side's first-decrypt DH ratchet. Required for interop with
+    // dino-fork (and the Go reference): the responder derives its
+    // chainRecvKey from dh_ratchet_step(rk, peer_SPK_priv, our_eph_pub),
+    // so the initiator must seed chainSendKey from the symmetric ECDH on
+    // its side rather than leaving it as raw rootKey[32:64].
+    static byte[] serialiseInitiatorSession(final PqxdhResult r, byte[] peerSpkPub) {
+        final Session session = Session.fromPqxdhSenderWithPeerDh(r, peerSpkPub);
+        return session.marshal();
+    }
+
+    // Responder session whose initial sending DH is our SPK keypair (NOT a
+    // fresh ephemeral). The initiator pre-ratcheted against peer_SPK_pub,
+    // so when the initiator's first message arrives we run the symmetric
+    // first-decrypt DH ratchet using SPK_priv to derive the same chain.
+    static byte[] serialiseResponderSession(
+            final PqxdhResult r, byte[] mySpkPriv, byte[] mySpkPub) {
+        final Session session = Session.fromPqxdhReceiverWithDh(r, mySpkPriv, mySpkPub);
         return session.marshal();
     }
 
@@ -758,13 +828,98 @@ public class X3dhpqService {
     }
 
     /**
-     * Returns the numeric device id for our own local device, or -1 if none is registered.
+     * Sends a SenderChainAnnouncement to a specific peer device as a pairwise envelope.
+     * The announcement bytes are wrapped as {@code <payload type='sender-chain'>}.
      */
-    public int getOwnDeviceId() {
-        if (db == null || account == null) return -1;
+    public void sendSenderChainAnnouncement(
+            final Jid peerBareJid, final int peerDeviceId, final byte[] annBytes) {
+        if (db == null || account == null || mXmppConnectionService == null) return;
+        final String accountUuid = account.getUuid();
+
+        final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
+                db.listX3dhpqLocalDevices(accountUuid);
+        if (localRows.isEmpty()) return;
+        final int ownDeviceId = localRows.get(0).deviceId();
+
+        // Ensure a session exists; if not, establish one
+        final im.conversations.x3dhpq.protocol.Session session;
+        final XmppX3dhpqMessage.PrekeyMetadata prekeyMeta;
+        boolean isFirst = false;
+
+        final DatabaseBackend.X3dhpqSessionRow sessionRow =
+                db.loadX3dhpqSession(accountUuid, peerBareJid.asBareJid().toString(), peerDeviceId);
+        if (sessionRow == null || sessionRow.stateBlob() == null) {
+            final java.util.Optional<im.conversations.x3dhpq.protocol.PqxdhResult> resultOpt =
+                    establishOutboundSession(peerBareJid, peerDeviceId);
+            if (!resultOpt.isPresent()) {
+                Log.d(Config.LOGTAG, LOGPREFIX + ": sendSenderChainAnnouncement deferred — bundle missing for "
+                        + peerBareJid + "/" + peerDeviceId);
+                return;
+            }
+            final im.conversations.x3dhpq.protocol.PqxdhResult result = resultOpt.get();
+            final im.conversations.x3dhpq.protocol.PrekeyEnvelope env = result.getEnvelope();
+            prekeyMeta = env != null ? new XmppX3dhpqMessage.PrekeyMetadata(
+                    env.ephemeralPub, env.opkId, env.kemKeyId, env.kemCiphertext,
+                    env.dcMarshal, env.aikEd25519Pub, env.aikMldsaPub) : null;
+            final DatabaseBackend.X3dhpqSessionRow fresh =
+                    db.loadX3dhpqSession(accountUuid, peerBareJid.asBareJid().toString(), peerDeviceId);
+            if (fresh == null) return;
+            session = im.conversations.x3dhpq.protocol.Session.unmarshal(fresh.stateBlob());
+            isFirst = true;
+        } else {
+            session = im.conversations.x3dhpq.protocol.Session.unmarshal(sessionRow.stateBlob());
+            prekeyMeta = null;
+        }
+
+        // Build an XmppX3dhpqMessage carrying the announcement as payload
+        final XmppX3dhpqMessage xmsg = XmppX3dhpqMessage.createOutboundWithRawPayload(
+                account, account.getJid(), ownDeviceId, annBytes);
+        xmsg.addRecipient(peerBareJid, peerDeviceId, session, isFirst, prekeyMeta);
+
+        final im.conversations.android.xmpp.model.stanza.Message packet =
+                mXmppConnectionService.getMessageGenerator()
+                        .generateX3dhpqSenderChainMessage(peerBareJid, xmsg);
+        if (packet != null) {
+            mXmppConnectionService.sendMessagePacket(account, packet);
+        }
+
+        db.putX3dhpqSession(accountUuid, peerBareJid.asBareJid().toString(), peerDeviceId,
+                session.marshal(), System.currentTimeMillis() / 1000L);
+    }
+
+    /**
+     * Returns true if the conversation is a MUC with a verified group journal that includes our AIK.
+     */
+    public boolean isCapableForGroup(final Conversation conversation) {
+        if (mXmppConnectionService == null) return false;
+        final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
+                mXmppConnectionService.getGroupCryptoService(account);
+        if (gcs == null) return false;
+        return gcs.isCapableForGroup(conversation);
+    }
+
+    /**
+     * Returns the numeric device id for our own local device, or {@code null} if none is registered.
+     *
+     * <p>Device ids are uint32 values stored in a signed Java {@code int}. Negative values are therefore
+     * valid and must not be treated as "missing".
+     */
+    public Integer getOwnDeviceIdOrNull() {
+        if (db == null || account == null) return null;
         final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
                 db.listX3dhpqLocalDevices(account.getUuid());
-        return rows.isEmpty() ? -1 : rows.get(0).deviceId();
+        return rows.isEmpty() ? null : rows.get(0).deviceId();
+    }
+
+    /**
+     * Returns the numeric device id for our own local device, or -1 if none is registered.
+     *
+     * <p>Prefer {@link #getOwnDeviceIdOrNull()} when the caller must distinguish a missing row from a
+     * valid negative signed representation of a uint32 device id.
+     */
+    public int getOwnDeviceId() {
+        final Integer id = getOwnDeviceIdOrNull();
+        return id == null ? -1 : id;
     }
 
     /**

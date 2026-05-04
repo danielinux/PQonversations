@@ -119,6 +119,24 @@ public class XmppX3dhpqMessage {
     }
 
     /**
+     * Build a fresh outbound message whose payload is raw binary (e.g. a SenderChainAnnouncement).
+     * The raw bytes are AES-256-GCM encrypted with a fresh key+nonce (empty AAD).
+     * Use {@link #isSenderChainPayload()} to signal the recipient to dispatch accordingly.
+     */
+    public static XmppX3dhpqMessage createOutboundWithRawPayload(
+            Account account, Jid from, int senderDeviceId, byte[] rawPayload) {
+        final XmppX3dhpqMessage msg = createOutbound(account, from, senderDeviceId, rawPayload);
+        msg.senderChainPayload = true;
+        return msg;
+    }
+
+    private boolean senderChainPayload = false;
+
+    public boolean isSenderChainPayload() {
+        return senderChainPayload;
+    }
+
+    /**
      * Encrypt the transport key (payloadKey || payloadNonce) once per recipient device.
      * If firstMessage is true, attach the prekey metadata block so the receiver can run PQXDH.
      */
@@ -178,6 +196,9 @@ public class XmppX3dhpqMessage {
 
         final Payload payload = new Payload();
         payload.setContent(payloadCiphertext);
+        if (senderChainPayload) {
+            payload.setType("sender-chain");
+        }
         env.setPayload(payload);
 
         return env;

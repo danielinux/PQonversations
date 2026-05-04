@@ -215,6 +215,8 @@ public class XmppConnection implements Runnable {
     private AxolotlService axolotlService;
     // x3dhpq service instance, created alongside axolotlService at construction time
     private X3dhpqService x3dhpqService;
+    // Group crypto service for §13 sender-chain MUC encryption
+    private eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService groupCryptoService;
     private final PgpDecryptionService pgpDecryptionService;
     private final Runnable bindProcessor;
     private final PendingItem<String> pendingResumeId = new PendingItem<>();
@@ -241,6 +243,7 @@ public class XmppConnection implements Runnable {
         this.managers = Managers.get(service, this);
         this.setAxolotlService(new AxolotlService(account, service));
         this.x3dhpqService = new X3dhpqService(account, service);
+        this.groupCryptoService = new eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService(account, service);
         this.pgpDecryptionService = new PgpDecryptionService(service);
     }
 
@@ -2912,6 +2915,10 @@ public class XmppConnection implements Runnable {
 
     public X3dhpqService getX3dhpqService() {
         return this.x3dhpqService;
+    }
+
+    public eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService getGroupCryptoService() {
+        return this.groupCryptoService;
     }
 
     public PgpDecryptionService getPgpDecryptionService() {

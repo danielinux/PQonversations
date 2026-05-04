@@ -151,6 +151,21 @@ public class LocalKeyBootstrapTest {
         }
 
         @Override
+        public void pruneX3dhpqRemoteDevicesNotIn(
+                String accountUuid, String peerJid, java.util.Collection<Integer> keepIds) {
+            final java.util.Iterator<Map.Entry<String, DatabaseBackend.X3dhpqRemoteDeviceRow>> it =
+                    remoteDeviceRows.entrySet().iterator();
+            while (it.hasNext()) {
+                final DatabaseBackend.X3dhpqRemoteDeviceRow row = it.next().getValue();
+                if (!accountUuid.equals(row.accountUuid())) continue;
+                if (!peerJid.equals(row.peerJid())) continue;
+                if (keepIds == null || !keepIds.contains(row.deviceId())) {
+                    it.remove();
+                }
+            }
+        }
+
+        @Override
         public List<DatabaseBackend.X3dhpqRemoteDeviceRow> listX3dhpqRemoteDevices(
                 String accountUuid, String peerJid) {
             final List<DatabaseBackend.X3dhpqRemoteDeviceRow> result = new ArrayList<>();
@@ -214,6 +229,36 @@ public class LocalKeyBootstrapTest {
             final List<Integer> ids = opkIds.getOrDefault(accountUuid, new ArrayList<>());
             ids.remove(Integer.valueOf(keyId));
             consumedOpkKeys.add(accountUuid + ":" + keyId);
+        }
+
+        // group session rows; key: accountUuid + ":" + roomJid
+        final Map<String, DatabaseBackend.X3dhpqGroupSessionRow> groupSessionRows = new HashMap<>();
+
+        @Override
+        public void putX3dhpqGroupSession(
+                String accountUuid, String roomJid, long epoch, byte[] stateBlob, long updatedAt) {
+            groupSessionRows.put(
+                    accountUuid + ":" + roomJid,
+                    new DatabaseBackend.X3dhpqGroupSessionRow(
+                            accountUuid, roomJid, epoch, stateBlob, updatedAt));
+        }
+
+        @Override
+        public DatabaseBackend.X3dhpqGroupSessionRow loadX3dhpqGroupSession(
+                String accountUuid, String roomJid) {
+            return groupSessionRows.get(accountUuid + ":" + roomJid);
+        }
+
+        @Override
+        public List<DatabaseBackend.X3dhpqRemoteDeviceRow> listAllX3dhpqRemoteDevices(
+                String accountUuid) {
+            final List<DatabaseBackend.X3dhpqRemoteDeviceRow> result = new ArrayList<>();
+            for (final DatabaseBackend.X3dhpqRemoteDeviceRow row : remoteDeviceRows.values()) {
+                if (accountUuid.equals(row.accountUuid())) {
+                    result.add(row);
+                }
+            }
+            return result;
         }
 
         @Override

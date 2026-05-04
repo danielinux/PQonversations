@@ -99,13 +99,19 @@ public final class PqxdhInitiator {
         System.arraycopy(peerBundle.dikX25519Pub, 0, ad, 32, 32);
 
         // Step 10: build the prekey envelope the responder needs.
+        // The 6th field is the AIK Ed25519 pub used by the responder to
+        // verify the embedded DC signature. We must NOT pass myDikEd25519Pub
+        // here — that's a different key (the device identity key) and the DC
+        // is signed by the AIK, not the DIK. Passing the DIK caused
+        // wolfSSL ed25519_verify rc=-229 on the responder side and the
+        // session bootstrap was rejected.
         PrekeyEnvelope envelope = new PrekeyEnvelope(
                 eph.pub,
                 encap.ciphertext,
                 chosenKem.id,
                 chosenOpk != null ? chosenOpk.id : 0,
                 myDcMarshal,
-                myDikEd25519Pub,
+                myAikEd25519Pub,
                 myAikMldsaPub);
 
         // Wipe intermediate DH material from heap.

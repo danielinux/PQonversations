@@ -174,12 +174,13 @@ public class MessageParser extends AbstractParser
             return null;
         }
 
-        final int myDeviceId = x3dhpqService.getOwnDeviceId();
-        if (myDeviceId < 0) {
+        final Integer myDeviceIdObj = x3dhpqService.getOwnDeviceIdOrNull();
+        if (myDeviceIdObj == null) {
             Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
                     + ": x3dhpq received but local device not bootstrapped yet; skipping");
             return null;
         }
+        final int myDeviceId = myDeviceIdObj;
         final XmppX3dhpqMessage.EncryptedKey k = incoming.findKeyForDevice(myDeviceId);
         if (k == null) {
             // envelope addressed to other devices only — nothing to do for us
@@ -246,6 +247,112 @@ public class MessageParser extends AbstractParser
                 new String(plaintext, java.nio.charset.StandardCharsets.UTF_8),
                 Message.ENCRYPTION_X3DHPQ,
                 status);
+    }
+
+    /** Decrypt a group-encrypted message using the room's GroupCryptoService. */
+    private Message parseX3dhpqGroupChat(
+            final im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup groupEnv,
+            final Jid from,
+            final Conversation conversation,
+            final int status) {
+        if (groupEnv == null || from == null || conversation == null) return null;
+        final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
+                conversation.getAccount() != null
+                        ? mXmppConnectionService.getGroupCryptoService(conversation.getAccount())
+                        : null;
+        if (gcs == null) {
+            Log.d(Config.LOGTAG, "x3dhpq group: GroupCryptoService is null");
+            return null;
+        }
+        final byte[] plaintext;
+        try {
+            plaintext = gcs.decryptGroupMessage(conversation.getAddress().asBareJid(), groupEnv);
+        } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
+            Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                    + ": x3dhpq group not enabled for " + conversation.getAddress()
+                    + ": " + e.getMessage());
+            return null;
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
+                    + ": x3dhpq group decrypt failed: " + e.getMessage());
+            return null;
+        }
+        if (plaintext == null) {
+            // Deferred — announcement not yet received
+            return null;
+        }
+        return new Message(
+                conversation,
+                new String(plaintext, java.nio.charset.StandardCharsets.UTF_8),
+                Message.ENCRYPTION_X3DHPQ,
+                status);
+    }
+
+    /**
+     * Handle an inbound pairwise envelope whose {@code <payload>} has {@code type='sender-chain'}.
+     * Decrypts the transport key, then decrypts the payload, and hands the
+     * {@link im.conversations.x3dhpq.types.SenderChainAnnouncement} bytes to GroupCryptoService.
+     */
+    private void parseX3dhpqSenderChain(
+            final im.conversations.android.xmpp.model.x3dhpq.envelope.Envelope envelopeEl,
+            final Jid from,
+            final eu.siacs.conversations.entities.Account account) {
+        final X3dhpqService x3dhpqService = account.getX3dhpqService();
+        if (x3dhpqService == null) return;
+        final Integer myDeviceIdObj = x3dhpqService.getOwnDeviceIdOrNull();
+        if (myDeviceIdObj == null) return;
+        final int myDeviceId = myDeviceIdObj;
+
+        final XmppX3dhpqMessage incoming;
+        try {
+            incoming = XmppX3dhpqMessage.fromExtension(account, from, envelopeEl);
+        } catch (Exception e) {
+            Log.d(Config.LOGTAG, account.getJid().asBareJid()
+                    + ": invalid x3dhpq sender-chain envelope: " + e.getMessage());
+            return;
+        }
+
+        final XmppX3dhpqMessage.EncryptedKey k = incoming.findKeyForDevice(myDeviceId);
+        if (k == null) return;
+
+        final im.conversations.x3dhpq.protocol.Session session;
+        try {
+            if (k.prekey != null) {
+                final im.conversations.x3dhpq.protocol.PrekeyEnvelope env =
+                        new im.conversations.x3dhpq.protocol.PrekeyEnvelope(
+                                k.prekey.ephemeralPub, k.prekey.kemCiphertext,
+                                k.prekey.kemKeyId, k.prekey.opkId, k.prekey.dcMarshal,
+                                k.prekey.aikEd25519Pub, k.prekey.aikMldsaPub);
+                session = x3dhpqService.acceptInboundSessionAsSession(from, incoming.senderDeviceId, env);
+            } else {
+                session = x3dhpqService.loadSession(from, incoming.senderDeviceId);
+                if (session == null) return;
+            }
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG, account.getJid().asBareJid()
+                    + ": x3dhpq sender-chain session setup failed: " + e.getMessage());
+            return;
+        }
+
+        final byte[] annBytes;
+        try {
+            annBytes = incoming.decrypt(session, k);
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG, account.getJid().asBareJid()
+                    + ": x3dhpq sender-chain decrypt failed: " + e.getMessage());
+            return;
+        }
+
+        try {
+            x3dhpqService.persistSession(from, incoming.senderDeviceId, session);
+        } catch (Exception ignored) {}
+
+        // Forward to GroupCryptoService
+        final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
+                mXmppConnectionService.getGroupCryptoService(account);
+        if (gcs != null) {
+            gcs.onSenderChainAnnouncementReceived(from, incoming.senderDeviceId, annBytes);
+        }
     }
 
     private boolean handleErrorMessage(
@@ -397,6 +504,8 @@ public class MessageParser extends AbstractParser
         final var replacementId = replace == null ? null : replace.getId();
         final var axolotlEncrypted = packet.getOnlyExtension(Encrypted.class);
         final var x3dhpqEnvelope = packet.getOnlyExtension(Envelope.class);
+        final var x3dhpqGroupEnvelope = packet.getOnlyExtension(
+                im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup.class);
         // TODO this can probably be refactored to be final
         int status;
         final Jid counterpart;
@@ -472,6 +581,7 @@ public class MessageParser extends AbstractParser
                 || pgpEncrypted != null
                 || (axolotlEncrypted != null && axolotlEncrypted.hasExtension(Payload.class))
                 || x3dhpqEnvelope != null
+                || x3dhpqGroupEnvelope != null
                 || oobUrl != null) {
             final boolean conversationIsProbablyMuc =
                     isTypeGroupChat
@@ -611,13 +721,31 @@ public class MessageParser extends AbstractParser
                 if (conversationMultiMode) {
                     message.setTrueCounterpart(origin);
                 }
+            } else if (x3dhpqGroupEnvelope != null && isTypeGroupChat) {
+                // §13 group-encrypted message: decrypt via GroupCryptoService.
+                try {
+                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status);
+                } catch (final Throwable t) {
+                    Log.e(Config.LOGTAG, account.getJid().asBareJid()
+                            + ": x3dhpq group parser threw: " + t.getMessage(), t);
+                    return;
+                }
+                if (message == null) {
+                    return;
+                }
             } else if (x3dhpqEnvelope != null) {
                 // x3dhpq pairwise encrypted message (Wave D6). Wrap in a Throwable
                 // catch so any unforeseen runtime error inside the crypto stack
                 // (NPE on missing state, ML-DSA verification errors, malformed
                 // session blobs after schema bumps, etc.) cannot crash the whole
                 // process or the entire MessageParser pipeline.
+                // First check for sender-chain announcement payload.
                 try {
+                    final var payloadEl = x3dhpqEnvelope.getPayload();
+                    if (payloadEl != null && payloadEl.isSenderChain()) {
+                        parseX3dhpqSenderChain(x3dhpqEnvelope, from, account);
+                        return;
+                    }
                     message = parseX3dhpqChat(x3dhpqEnvelope, from, conversation, status);
                 } catch (final Throwable t) {
                     Log.e(Config.LOGTAG, account.getJid().asBareJid()

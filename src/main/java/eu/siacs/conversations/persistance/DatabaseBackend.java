@@ -3387,6 +3387,86 @@ public class DatabaseBackend extends SQLiteOpenHelper
         return result;
     }
 
+    /**
+     * Wipe every x3dhpq_session row for the given account. Used as a one-shot
+     * recovery mechanism when the on-disk session blob format is known to
+     * disagree with the on-wire ratchet expectations of remote peers (e.g.
+     * a session bootstrapped before the initiator/responder pre-ratchet fix
+     * lands). All paired peers will re-establish on the next outgoing send.
+     */
+    public int wipeAllX3dhpqSessions(String accountUuid) {
+        final SQLiteDatabase db = getWritableDatabase();
+        return db.delete("x3dhpq_session", "account_uuid=?", new String[] {accountUuid});
+    }
+
+    /**
+     * Drop every cached row for {@code (accountUuid, peerJid)} whose deviceId
+     * is NOT in {@code keepIds}. Called after a fresh devicelist arrives so
+     * stale device entries (from a peer that regenerated its keys) don't
+     * silently keep getting pairwise envelopes addressed to ghost devices.
+     * Also cascades into x3dhpq_remote_bundle and x3dhpq_session for the
+     * dropped device ids.
+     */
+    public void pruneX3dhpqRemoteDevicesNotIn(
+            String accountUuid, String peerJid, java.util.Collection<Integer> keepIds) {
+        final SQLiteDatabase db = getWritableDatabase();
+        // Build "id NOT IN (?, ?, ...)" — empty keepIds means "drop all rows
+        // for this peer".
+        if (keepIds == null || keepIds.isEmpty()) {
+            db.delete("x3dhpq_remote_device",
+                    "account_uuid=? AND peer_jid=?",
+                    new String[] {accountUuid, peerJid});
+            db.delete("x3dhpq_remote_bundle",
+                    "account_uuid=? AND peer_jid=?",
+                    new String[] {accountUuid, peerJid});
+            db.delete("x3dhpq_session",
+                    "account_uuid=? AND peer_jid=?",
+                    new String[] {accountUuid, peerJid});
+            return;
+        }
+        final StringBuilder placeholders = new StringBuilder();
+        final String[] args = new String[keepIds.size() + 2];
+        args[0] = accountUuid;
+        args[1] = peerJid;
+        int i = 2;
+        for (Integer id : keepIds) {
+            if (placeholders.length() > 0) placeholders.append(',');
+            placeholders.append('?');
+            args[i++] = Integer.toString(id);
+        }
+        final String where = "account_uuid=? AND peer_jid=? AND device_id NOT IN (" + placeholders + ")";
+        db.delete("x3dhpq_remote_device", where, args);
+        db.delete("x3dhpq_remote_bundle", where, args);
+        db.delete("x3dhpq_session", where, args);
+    }
+
+    /** List all remote device rows for an account (all peers). Used by GroupCryptoService for AIK fp → JID lookup. */
+    public List<X3dhpqRemoteDeviceRow> listAllX3dhpqRemoteDevices(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c = db.query(
+                "x3dhpq_remote_device",
+                null,
+                "account_uuid=?",
+                new String[]{accountUuid},
+                null, null, null);
+        final List<X3dhpqRemoteDeviceRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                final int lastSeenIdx = c.getColumnIndexOrThrow("last_seen");
+                final Long lastSeen = c.isNull(lastSeenIdx) ? null : c.getLong(lastSeenIdx);
+                result.add(new X3dhpqRemoteDeviceRow(
+                        c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                        c.getString(c.getColumnIndexOrThrow("peer_jid")),
+                        c.getInt(c.getColumnIndexOrThrow("device_id")),
+                        c.getBlob(c.getColumnIndexOrThrow("cert_marshal")),
+                        lastSeen));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
     // ---- x3dhpq DAO: remote_bundle ----
 
     public void putX3dhpqRemoteBundle(

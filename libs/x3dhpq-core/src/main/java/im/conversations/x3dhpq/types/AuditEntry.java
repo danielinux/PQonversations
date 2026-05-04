@@ -23,6 +23,39 @@ public final class AuditEntry {
     public static final int ACTION_REMOVE_DEVICE       = 2;
     public static final int ACTION_ROTATE_AIK          = 3;
     public static final int ACTION_RECOVER_FROM_BACKUP = 4;
+    // Group membership journal actions (§13.8).
+    public static final int ACTION_ADD_MEMBER          = 5;
+    public static final int ACTION_REMOVE_MEMBER       = 6;
+
+    /**
+     * Builds the payload for AddMember / RemoveMember journal entries.
+     * Wire: &lt;aik_fp 20 bytes&gt; | &lt;epoch_after uint32 BE&gt;.
+     */
+    public static byte[] buildMemberPayload(byte[] aikFp20, long epochAfter) {
+        if (aikFp20 == null || aikFp20.length != 20) {
+            throw new IllegalArgumentException("aikFp must be 20 bytes");
+        }
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(24)
+                .order(java.nio.ByteOrder.BIG_ENDIAN);
+        buf.put(aikFp20);
+        buf.putInt((int) (epochAfter & 0xFFFFFFFFL));
+        return buf.array();
+    }
+
+    /**
+     * Parses a member payload built by {@link #buildMemberPayload}.
+     * Returns [aikFp20 (20 bytes), epochAfter (4 bytes)].
+     */
+    public static byte[][] parseMemberPayload(byte[] payload) {
+        if (payload == null || payload.length < 24) {
+            throw new IllegalArgumentException("member payload must be 24 bytes");
+        }
+        byte[] fp = new byte[20];
+        System.arraycopy(payload, 0, fp, 0, 20);
+        byte[] epochBytes = new byte[4];
+        System.arraycopy(payload, 20, epochBytes, 0, 4);
+        return new byte[][] { fp, epochBytes };
+    }
 
     // Signing prefix, exactly 16 bytes: "X3DHPQ-Audit-v1\x00"
     static final byte[] AUDIT_PREFIX = {
