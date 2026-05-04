@@ -257,13 +257,13 @@ public class MultiUserChatManager extends AbstractManager {
 
         final var history = x.addExtension(new History());
 
-        if (mucOptions.mamSupport()) {
-            // Use MAM instead of the limited muc history to get history
-            history.setMaxStanzas(0);
-        } else {
-            // Fallback to muc history
-            history.setSince(conversation.getLastMessageTransmitted().getTimestamp());
-        }
+        // Keep requesting mediated MUC history even when MAM is advertised.
+        // For x3dhpq rooms, startup ordering means group capability is often
+        // still unknown at join time, so gating this on isCapableForGroup()
+        // suppresses the only recovery path before the journal/bootstrap has
+        // finished. Duplicate suppression in the message layer handles overlap
+        // with any later MAM results.
+        history.setSince(conversation.getLastMessageTransmitted().getTimestamp());
         available(joinJid, mucOptions.nonanonymous(), x);
         if (!joinJid.equals(conversation.getAddress())) {
             conversation.setContactJid(joinJid);

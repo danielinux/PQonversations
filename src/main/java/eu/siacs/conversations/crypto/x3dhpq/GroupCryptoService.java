@@ -6,6 +6,7 @@ import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.persistance.DatabaseBackend;
 import eu.siacs.conversations.services.XmppConnectionService;
+import eu.siacs.conversations.xmpp.manager.MessageArchiveManager;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import im.conversations.android.xmpp.model.pubsub.Items;
@@ -66,6 +67,10 @@ public class GroupCryptoService {
     private static final class RoomState {
         final MembershipJournal journal = new MembershipJournal();
         GroupSession session;
+        // Membership item ids we've already applied to this in-memory room
+        // state. Catch-up fetches may run multiple times for the same room;
+        // journal append is sequential and not idempotent on duplicate seqs.
+        final java.util.Set<String> appliedMembershipItemIds = new java.util.HashSet<>();
         // Queued announcements waiting for journal to be populated.
         final List<QueuedAnnouncement> announcementQueue = new ArrayList<>();
         // Track which (memberAikFp, deviceId) tuples we've already announced
@@ -140,10 +145,17 @@ public class GroupCryptoService {
         final String roomStr = roomJidBare.toString();
         final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
         synchronized (state) {
+            if (itemId != null && state.appliedMembershipItemIds.contains(itemId)) {
+                return;
+            }
             try {
-                // For TOFU / AIK lookup, we pass null — journal handles it
-                // once the owner AIK is known or bootstrapped.
+                // For TOFU / AIK lookup, we pass the best AIK map we can build
+                // from persisted account + bundle state so restart recovery can
+                // bootstrap from seq=0 without relying on prior RAM state.
                 state.journal.append(entryBytes, buildAikLookupMap(state));
+                if (itemId != null) {
+                    state.appliedMembershipItemIds.add(itemId);
+                }
                 rebuildGroupSession(roomStr, state);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, TAG + ": failed to append journal entry "
@@ -157,18 +169,39 @@ public class GroupCryptoService {
      */
     private Map<String, AccountIdentityPub> buildAikLookupMap(RoomState state) {
         Map<String, AccountIdentityPub> map = new HashMap<>();
-        // Add AIKs we already know from the existing session
+        // Add AIKs we already know from the existing session.
         if (state.session != null) {
             for (GroupMember m : state.session.members) {
                 String fp = m.aik.fingerprint(X3dhpqCrypto.BLAKE2B_160);
                 map.put(MembershipJournal.fingerprintHex(hexToBytes(fp.replace(" ", ""))), m.aik);
             }
         }
-        // Also add from journal's existing knownAikPubs
+        // Also add from journal's existing known members.
         for (Map.Entry<String, AccountIdentityPub> e : state.journal.getMembers().entrySet()) {
             if (e.getValue() != null) {
                 map.put(e.getKey(), e.getValue());
             }
+        }
+        // Seed TOFU/bootstrap from the local AIK plus every cached remote bundle.
+        final DatabaseBackend.X3dhpqAccountIdentityRow ownAikRow =
+                db.loadX3dhpqAccountIdentity(account.getUuid());
+        if (ownAikRow != null && ownAikRow.aikPub() != null) {
+            try {
+                final AccountIdentityPub ownAik = AccountIdentityPub.unmarshal(ownAikRow.aikPub());
+                map.put(MembershipJournal.fingerprintHex(blakeFpBytes(ownAik)), ownAik);
+            } catch (Exception ignored) {}
+        }
+        for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd :
+                db.listAllX3dhpqRemoteDevices(account.getUuid())) {
+            try {
+                final DatabaseBackend.X3dhpqRemoteBundleRow bundle =
+                        db.loadX3dhpqRemoteBundle(account.getUuid(), rd.peerJid(), rd.deviceId());
+                if (bundle == null || bundle.aikPubMarshal() == null) {
+                    continue;
+                }
+                final AccountIdentityPub aik = AccountIdentityPub.unmarshal(bundle.aikPubMarshal());
+                map.put(MembershipJournal.fingerprintHex(blakeFpBytes(aik)), aik);
+            } catch (Exception ignored) {}
         }
         return map;
     }
@@ -327,15 +360,18 @@ public class GroupCryptoService {
      */
     public byte[] decryptGroupMessage(final Jid roomJid, final EnvelopeGroup envelope)
             throws GroupNotEnabledException, Exception {
-        final String roomStr = roomJid.asBareJid().toString();
-        final RoomState state = rooms.get(roomStr);
-        if (state == null || state.session == null) {
-            throw new GroupNotEnabledException("Room " + roomStr + " is not yet x3dhpq-enabled");
-        }
+        final Jid roomBare = roomJid.asBareJid();
+        final String roomStr = roomBare.toString();
+        final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
 
         synchronized (state) {
             if (state.session == null) {
-                throw new GroupNotEnabledException("Room " + roomStr + " is not yet x3dhpq-enabled");
+                // After app restart, pairwise sender-chain announcements or MAM
+                // catch-up may race the room journal bootstrap. Trigger a fresh
+                // journal catch-up instead of treating the room as permanently
+                // disabled and dropping the message on the floor.
+                subscribeAndCatchUp(roomBare);
+                return null;
             }
 
             final byte[] hdrBytes = envelope.getHdrBytes();
@@ -489,20 +525,21 @@ public class GroupCryptoService {
             return;
         }
 
-        final String roomStr = ann.roomJID;
-        final RoomState state = rooms.get(roomStr);
-        if (state == null) {
-            Log.d(Config.LOGTAG, TAG + ": received announcement for unknown room " + roomStr);
-            return;
-        }
+        final Jid roomBare = Jid.of(ann.roomJID).asBareJid();
+        final String roomStr = roomBare.toString();
+        final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
 
         synchronized (state) {
             if (state.session == null) {
-                // Journal not yet ready; queue for later
+                // After restart the room state may not exist yet even though a
+                // peer is already re-announcing its sender chain. Queue the
+                // announcement and immediately refresh the room journal so the
+                // queued chain can be accepted once membership is rebuilt.
                 if (state.announcementQueue.size() < MAX_QUEUE) {
                     state.announcementQueue.add(
                             new RoomState.QueuedAnnouncement(senderJid, senderDeviceId, ann));
                 }
+                subscribeAndCatchUp(roomBare);
                 return;
             }
 
@@ -520,7 +557,7 @@ public class GroupCryptoService {
 
             try {
                 state.session.acceptSenderChain(ann);
-
+                triggerMamCatchupAfterChain(roomBare, state);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, TAG + ": acceptSenderChain failed: " + e.getMessage());
             }
@@ -778,14 +815,33 @@ public class GroupCryptoService {
             final List<RoomState.QueuedAnnouncement> queue =
                     new ArrayList<>(state.announcementQueue);
             state.announcementQueue.clear();
+            boolean acceptedAny = false;
             for (RoomState.QueuedAnnouncement qa : queue) {
                 try {
                     state.session.acceptSenderChain(qa.ann);
+                    acceptedAny = true;
                 } catch (Exception e) {
                     Log.w(Config.LOGTAG, TAG + ": deferred acceptSenderChain failed: " + e.getMessage());
                 }
             }
+            if (acceptedAny) {
+                triggerMamCatchupAfterChain(Jid.of(roomStr), state);
+            }
         }
+    }
+
+    private void triggerMamCatchupAfterChain(final Jid roomBare, final RoomState state) {
+        if (account == null || account.getXmppConnection() == null) {
+            return;
+        }
+        final Conversation conversation =
+                mXmppConnectionService.findOrCreateConversation(account, roomBare, true, false);
+        final MessageArchiveManager mam =
+                account.getXmppConnection().getManager(MessageArchiveManager.class);
+        if (mam.queryInProgress(conversation)) {
+            return;
+        }
+        mam.catchupMUC(conversation);
     }
 
     private Iq buildFetchAllItemsIq(Jid to, String node) {
