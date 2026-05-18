@@ -379,6 +379,15 @@
             android:name="com.canhub.cropper.CropImageActivity"
             android:theme="@style/Base.Theme.AppCompat" />
         <activity android:name=".ui.MemorizingActivity" />
+        <activity
+            android:name=".ui.X3dhpqSelfDevicesActivity"
+            android:label="@string/x3dhpq_self_devices_title" />
+        <activity
+            android:name=".ui.PairNewDeviceActivity"
+            android:label="@string/x3dhpq_pair_new_device_title" />
+        <activity
+            android:name=".ui.PairToExistingActivity"
+            android:label="@string/x3dhpq_pair_to_existing_title" />
 
         <activity
             android:name=".ui.MediaBrowserActivity"

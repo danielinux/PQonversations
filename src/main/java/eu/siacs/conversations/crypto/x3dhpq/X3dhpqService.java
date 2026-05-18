@@ -87,6 +87,9 @@ public class X3dhpqService {
     private MembershipListener membershipListener;
     private RecoveryListener recoveryListener;
 
+    /** Lazy singleton; null when running in a test-only context (account == null). */
+    private PairingSessionService pairingSessionService;
+
     public X3dhpqService(final Account account, final XmppConnectionService svc) {
         if (account == null || svc == null) {
             throw new IllegalArgumentException("account and service cannot be null");
@@ -133,6 +136,21 @@ public class X3dhpqService {
 
     public void setRecoveryListener(final RecoveryListener l) {
         this.recoveryListener = l;
+    }
+
+    /**
+     * Returns the lazily-created {@link PairingSessionService} for this account.
+     * Returns {@code null} when {@code account} or {@code db} is not available
+     * (test-only construction paths).
+     */
+    public synchronized PairingSessionService getPairingSessionService() {
+        if (account == null || mXmppConnectionService == null || db == null) {
+            return null;
+        }
+        if (pairingSessionService == null) {
+            pairingSessionService = new PairingSessionService(account, mXmppConnectionService, db);
+        }
+        return pairingSessionService;
     }
 
     /**

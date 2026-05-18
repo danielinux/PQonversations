@@ -262,6 +262,36 @@ public class LocalKeyBootstrapTest {
         }
 
         @Override
+        public byte[] getAuditTailHash(long accountId) { return null; }
+
+        @Override
+        public void setAuditTailHash(long accountId, byte[] tailHash) {}
+
+        @Override
+        public void putX3dhpqPairingSession(
+                String accountUuid,
+                byte[] sid,
+                int role,
+                String peerJid,
+                String code,
+                byte[] stateBlob,
+                long expiresAt) {}
+
+        @Override
+        public DatabaseBackend.X3dhpqPairingSessionRow loadX3dhpqPairingSession(byte[] sid) {
+            return null;
+        }
+
+        @Override
+        public void updateX3dhpqPairingState(byte[] sid, byte[] stateBlob) {}
+
+        @Override
+        public void deleteX3dhpqPairingSession(byte[] sid) {}
+
+        @Override
+        public int sweepExpiredX3dhpqPairingSessions(long nowUnixSeconds) { return 0; }
+
+        @Override
         public void beginTransaction() {}
 
         @Override

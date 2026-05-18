@@ -74,7 +74,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 56;
+    private static final int DATABASE_VERSION = 57;
 
     private static boolean requiresMessageIndexRebuild = false;
     private static DatabaseBackend instance = null;
@@ -389,6 +389,20 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     + " ON DELETE CASCADE"
                     + ")";
 
+    private static final String CREATE_X3DHPQ_PAIRING_SESSION =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_pairing_session ("
+                    + "sid BLOB PRIMARY KEY NOT NULL,"
+                    + "account_uuid TEXT NOT NULL,"
+                    + "role INTEGER NOT NULL,"            // 0=existing/initiator, 1=new/responder
+                    + "peer_jid TEXT NOT NULL,"
+                    + "code TEXT NOT NULL,"               // 10-digit pairing code (with Luhn check)
+                    + "state_blob BLOB,"                  // opaque CPace transcript + advancing state
+                    + "expires_at INTEGER NOT NULL,"      // unix seconds; rows past this are sweepable
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + ")";
+    private static final String CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX =
+            "CREATE INDEX x3dhpq_pairing_session_expiry ON x3dhpq_pairing_session(expires_at)";
+
     private static final String RESOLVER_RESULTS_TABLENAME = "resolver_results";
 
     private static final String CREATE_RESOLVER_RESULTS_TABLE =
@@ -665,6 +679,8 @@ public class DatabaseBackend extends SQLiteOpenHelper
         db.execSQL(CREATE_X3DHPQ_AUDIT_OWNER_SEQ_INDEX);
         db.execSQL(CREATE_X3DHPQ_GROUP_SESSION);
         db.execSQL(CREATE_X3DHPQ_GROUP_MEMBERSHIP);
+        db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION);
+        db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
     }
 
     @Override
@@ -1266,6 +1282,11 @@ public class DatabaseBackend extends SQLiteOpenHelper
             db.execSQL(CREATE_X3DHPQ_AUDIT_OWNER_SEQ_INDEX);
             db.execSQL(CREATE_X3DHPQ_GROUP_SESSION);
             db.execSQL(CREATE_X3DHPQ_GROUP_MEMBERSHIP);
+        }
+        // x3dhpq_pairing_session table (added in DATABASE_VERSION = 57).
+        if (oldVersion < 57 && newVersion >= 57) {
+            db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION);
+            db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
         }
     }
 
@@ -3003,6 +3024,15 @@ public class DatabaseBackend extends SQLiteOpenHelper
             String itemId,
             long fetchedAt) {}
 
+    public record X3dhpqPairingSessionRow(
+            byte[] sid,
+            String accountUuid,
+            int role,
+            String peerJid,
+            String code,
+            byte[] stateBlob,
+            long expiresAt) {}
+
     // ---- x3dhpq transaction helpers ----
 
     // Begins a write transaction; pair with setTransactionSuccessful()/endTransaction().
@@ -3730,5 +3760,104 @@ public class DatabaseBackend extends SQLiteOpenHelper
         } finally {
             c.close();
         }
+    }
+
+    // ---- x3dhpq DAO: pairing_session ----
+
+    @Override
+    public void putX3dhpqPairingSession(
+            String accountUuid,
+            byte[] sid,
+            int role,
+            String peerJid,
+            String code,
+            byte[] stateBlob,
+            long expiresAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("sid", sid);
+        v.put("account_uuid", accountUuid);
+        v.put("role", role);
+        v.put("peer_jid", peerJid);
+        v.put("code", code);
+        v.put("state_blob", stateBlob);
+        v.put("expires_at", expiresAt);
+        db.insertWithOnConflict(
+                "x3dhpq_pairing_session", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    @Override
+    public X3dhpqPairingSessionRow loadX3dhpqPairingSession(byte[] sid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_pairing_session",
+                        null,
+                        "hex(sid)=?",
+                        new String[] {CryptoHelper.bytesToHex(sid).toUpperCase()},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return x3dhpqPairingSessionFromCursor(c);
+        } finally {
+            c.close();
+        }
+    }
+
+    @Override
+    public void updateX3dhpqPairingState(byte[] sid, byte[] stateBlob) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("state_blob", stateBlob);
+        db.update(
+                "x3dhpq_pairing_session",
+                v,
+                "hex(sid)=?",
+                new String[] {CryptoHelper.bytesToHex(sid).toUpperCase()});
+    }
+
+    @Override
+    public void deleteX3dhpqPairingSession(byte[] sid) {
+        final SQLiteDatabase db = getWritableDatabase();
+        db.delete(
+                "x3dhpq_pairing_session",
+                "hex(sid)=?",
+                new String[] {CryptoHelper.bytesToHex(sid).toUpperCase()});
+    }
+
+    @Override
+    public int sweepExpiredX3dhpqPairingSessions(long nowUnixSeconds) {
+        final SQLiteDatabase db = getWritableDatabase();
+        return db.delete(
+                "x3dhpq_pairing_session",
+                "expires_at < ?",
+                new String[] {Long.toString(nowUnixSeconds)});
+    }
+
+    private X3dhpqPairingSessionRow x3dhpqPairingSessionFromCursor(Cursor c) {
+        return new X3dhpqPairingSessionRow(
+                c.getBlob(c.getColumnIndexOrThrow("sid")),
+                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                c.getInt(c.getColumnIndexOrThrow("role")),
+                c.getString(c.getColumnIndexOrThrow("peer_jid")),
+                c.getString(c.getColumnIndexOrThrow("code")),
+                c.getBlob(c.getColumnIndexOrThrow("state_blob")),
+                c.getLong(c.getColumnIndexOrThrow("expires_at")));
+    }
+
+    // ---- x3dhpq DAO: audit chain tail hash ----
+    // TODO: implement backing table in a separate migration task.
+
+    @Override
+    public byte[] getAuditTailHash(final long accountId) {
+        // Stub — full implementation (separate task) will query x3dhpq_audit_tail table.
+        return null;
+    }
+
+    @Override
+    public void setAuditTailHash(final long accountId, final byte[] tailHash) {
+        // Stub — full implementation (separate task) will upsert x3dhpq_audit_tail table.
     }
 }

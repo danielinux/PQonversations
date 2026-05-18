@@ -1195,4 +1195,25 @@
     <string name="filter_media">Filter media</string>
     <string name="apply_filter">Apply</string>
     <string name="select_all">Select all</string>
+    <string name="x3dhpq_self_devices_title">x3dhpq devices</string>
+    <string name="x3dhpq_add_device">Add device</string>
+    <string name="x3dhpq_aik_fp_label">AIK fingerprint</string>
+    <string name="x3dhpq_remove_device">Remove</string>
+    <string name="x3dhpq_pair_new_device_title">Pair new device</string>
+    <string name="x3dhpq_pair_show_code_help">Show this code on the new device</string>
+    <string name="x3dhpq_pair_status_waiting">Waiting for new device…</string>
+    <string name="x3dhpq_pair_status_verifying">Verifying…</string>
+    <string name="x3dhpq_pair_status_done">Pairing complete</string>
+    <string name="x3dhpq_pair_status_failed">Pairing failed: %1$s</string>
+    <string name="x3dhpq_pair_to_existing_title">Pair this device</string>
+    <string name="x3dhpq_pair_to_existing_help">Either scan the QR shown on the existing device, or type the 10-digit code below.</string>
+    <string name="x3dhpq_scan_qr_button">Scan QR</string>
+    <string name="x3dhpq_pairing_code_hint">Pairing code</string>
+    <string name="x3dhpq_pair_button">Pair</string>
+    <string name="x3dhpq_pair_status_wrong_account">QR code belongs to a different account</string>
+    <string name="x3dhpq_pair_status_invalid_uri">Invalid pairing QR code</string>
+    <string name="x3dhpq_pair_request_title">New device wants to pair</string>
+    <string name="x3dhpq_pair_request_text">%1$d existing device(s) detected. Tap to start pairing.</string>
+    <string name="x3dhpq_secondary_device_detected_title">Sync with existing device</string>
+    <string name="x3dhpq_secondary_device_detected_text">This account already has %1$d device(s). Enter the pairing code shown on your existing device to sync.</string>
 </resources>

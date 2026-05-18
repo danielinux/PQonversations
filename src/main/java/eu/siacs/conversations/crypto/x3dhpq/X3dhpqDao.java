@@ -55,6 +55,20 @@ public interface X3dhpqDao {
     // --- all remote devices (for AIK fp → JID lookup) ---
     List<DatabaseBackend.X3dhpqRemoteDeviceRow> listAllX3dhpqRemoteDevices(String accountUuid);
 
+    // --- audit chain tail hash ---
+    /** Returns the persisted SHA-256 tail hash for the account's audit chain, or null if none. */
+    byte[] getAuditTailHash(long accountId);
+    /** Persists the SHA-256 tail hash for the account's audit chain. */
+    void setAuditTailHash(long accountId, byte[] tailHash);
+
+    // --- pairing session ---
+    void putX3dhpqPairingSession(String accountUuid, byte[] sid, int role, String peerJid,
+                                 String code, byte[] stateBlob, long expiresAt);
+    DatabaseBackend.X3dhpqPairingSessionRow loadX3dhpqPairingSession(byte[] sid);
+    void updateX3dhpqPairingState(byte[] sid, byte[] stateBlob);
+    void deleteX3dhpqPairingSession(byte[] sid);
+    int sweepExpiredX3dhpqPairingSessions(long nowUnixSeconds);
+
     // --- transactions ---
     void beginTransaction();
     void setTransactionSuccessful();

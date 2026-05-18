@@ -540,6 +540,11 @@ public class Account extends AbstractEntity implements AvatarService.Avatar {
         return this.xmppConnection.getX3dhpqService();
     }
 
+    public eu.siacs.conversations.crypto.x3dhpq.PairingSessionService getPairingSessionService() {
+        final X3dhpqService x3dhpq = getX3dhpqService();
+        return x3dhpq == null ? null : x3dhpq.getPairingSessionService();
+    }
+
     public PgpDecryptionService getPgpDecryptionService() {
         return this.xmppConnection.getPgpDecryptionService();
     }

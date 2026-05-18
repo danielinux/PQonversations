@@ -39,7 +39,9 @@ import eu.siacs.conversations.xmpp.manager.PubSubManager;
 import eu.siacs.conversations.xmpp.manager.ReactionManager;
 import eu.siacs.conversations.xmpp.manager.RosterManager;
 import eu.siacs.conversations.xmpp.manager.StanzaIdManager;
+import eu.siacs.conversations.xmpp.manager.VerifyDeviceManager;
 import im.conversations.android.xmpp.model.Extension;
+import im.conversations.android.xmpp.model.x3dhpq.pair.VerifyDevice;
 import im.conversations.android.xmpp.model.axolotl.Encrypted;
 import im.conversations.android.xmpp.model.axolotl.Payload;
 import im.conversations.android.xmpp.model.x3dhpq.envelope.Envelope;
@@ -546,6 +548,28 @@ public class MessageParser extends AbstractParser
             status = Message.STATUS_RECEIVED;
             counterpart = from;
             selfAddressed = false;
+        }
+
+        // XEP §15.8: headline messages carrying <verify-device> are consumed here and
+        // must not fall through to body/pubsub handlers.
+        if (packet.getType() == im.conversations.android.xmpp.model.stanza.Message.Type.HEADLINE
+                && packet.hasExtension(VerifyDevice.class)) {
+            getManager(VerifyDeviceManager.class).handleHeadlineMessage(packet);
+            return;
+        }
+
+        // x3dhpq pairing stanzas (chat-type <message> carrying <pair>): dispatch to FSM and
+        // consume — do not fall through to body/message-archive handlers.
+        if (packet.hasExtension(im.conversations.android.xmpp.model.x3dhpq.pair.Pair.class)) {
+            final var pairing = account.getPairingSessionService();
+            if (pairing != null) {
+                try {
+                    pairing.onIncoming(packet);
+                } catch (final Exception e) {
+                    Log.w(Config.LOGTAG, "x3dhpq pairing dispatch failed", e);
+                }
+            }
+            return;
         }
 
         if (packet.hasExtension(MucUser.class)
