@@ -47,6 +47,10 @@ public final class X3dhpqStanzaBuilder {
         for (final DatabaseBackend.X3dhpqLocalDeviceRow row : localDevices) {
             final Device device = new Device();
             device.setDeviceId(row.deviceId());
+            // added-at is the device's stable first-seen time (its DC creation
+            // time); it is part of the signed input (§8.3) so it MUST be on the
+            // wire (§8.4) and MUST NOT drift between republishes of the same list.
+            device.setAddedAt(row.createdAt());
             // flags=1 means x3dhpq-capable per protocol spec
             device.setFlags(Integer.toString(row.flags()));
 

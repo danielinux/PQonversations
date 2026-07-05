@@ -21,6 +21,25 @@ public class Device extends Extension {
         this.setAttribute("id", deviceId);
     }
 
+    // added-at: unix seconds the device id was first added to the account.
+    // Part of the signed devicelist input (§8.3); MUST be carried on the wire
+    // (§8.4) so a receiver can reconstruct the identical SignedPart.
+    public Long getAddedAt() {
+        final String v = this.getAttribute("added-at");
+        if (Strings.isNullOrEmpty(v)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(v.trim());
+        } catch (final NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public void setAddedAt(final long addedAt) {
+        this.setAttribute("added-at", Long.toString(addedAt));
+    }
+
     // flags bitmask; 1 = capable of x3dhpq per protocol spec.
     public String getFlags() {
         return this.getAttribute("flags");

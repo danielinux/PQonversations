@@ -392,8 +392,10 @@ public class X3dhpqService {
             final Integer id = device.getDeviceId();
             final Cert certEl = device.getCert();
             final byte[] dcBytes = certEl != null ? certEl.asBytes() : null;
+            final Long addedAt = device.getAddedAt(); // §8.4 — needed to rebuild the SignedPart
             Log.d(Config.LOGTAG,
                     "x3dhpq: device entry id=" + id
+                            + " addedAt=" + addedAt
                             + " hasCert=" + (certEl != null)
                             + " dcLen=" + (dcBytes == null ? -1 : dcBytes.length));
             if (id == null) {
