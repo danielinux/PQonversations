@@ -47,6 +47,9 @@ public class VerifyDeviceManager extends AbstractManager {
     /** Intent extra: the uint32 device-id the new resource intends to claim (int). */
     public static final String EXTRA_DEVICE_ID = "device_id";
 
+    /** Intent extra: the CPace session id carried by {@code <pair-hello>} (base64url, no padding). */
+    public static final String EXTRA_SID = "sid";
+
     public VerifyDeviceManager(final Context context, final XmppConnection connection) {
         super(context, connection);
     }
@@ -167,6 +170,56 @@ public class VerifyDeviceManager extends AbstractManager {
         intent.putExtra(EXTRA_ACCOUNT_JID, getAccount().getJid().asBareJid().toString());
         intent.putExtra(EXTRA_NEW_RESOURCE, newResource);
         intent.putExtra(EXTRA_DEVICE_ID, deviceId.intValue());
+
+        context.sendBroadcast(intent);
+    }
+
+    /**
+     * Handles an inbound serverless rendezvous {@code <pair-hello>} (XEP §10.1a), arriving either
+     * via self-PEP {@code +notify} (method B) or as a directed {@code <message>} (method A). Reads
+     * the new device's {@code full-jid} and {@code sid} and broadcasts
+     * {@link #ACTION_X3DHPQ_PAIR_NEW_DEVICE} so the existing-device pairing UI initiates the FSM
+     * (i.e. sends {@code PairingMsgPAKE1} toward that full JID) — exactly what the removed
+     * server {@code <verify-device>} headline used to trigger.
+     *
+     * <p>Ignores our own {@code pair-hello} (the publisher receives its own self-PEP notification):
+     * only a resource whose full JID differs from ours acts as the existing primary.
+     *
+     * @param hello the parsed {@code <pair-hello>} element
+     */
+    public void handlePairHello(
+            final im.conversations.android.xmpp.model.x3dhpq.pair.PairHello hello) {
+        if (hello == null) {
+            Log.w(Config.LOGTAG, getAccount().getJid().asBareJid()
+                    + ": handlePairHello called without <pair-hello> element");
+            return;
+        }
+        final String fullJid = hello.getFullJid();
+        final String sid = hello.getSid();
+        final Long deviceId = hello.getDeviceId();
+
+        if (fullJid == null || fullJid.isEmpty() || sid == null || sid.isEmpty()) {
+            Log.w(Config.LOGTAG, getAccount().getJid().asBareJid()
+                    + ": <pair-hello> missing full-jid or sid — dropping");
+            return;
+        }
+
+        // Never act on our own pair-hello echoed back to us via self-PEP.
+        if (fullJid.equals(getAccount().getJid().toString())) {
+            Log.d(Config.LOGTAG, getAccount().getJid().asBareJid()
+                    + ": ignoring our own pair-hello (full-jid=" + fullJid + ")");
+            return;
+        }
+
+        Log.d(Config.LOGTAG, getAccount().getJid().asBareJid()
+                + ": received pair-hello from full-jid=" + fullJid
+                + " device-id=" + deviceId);
+
+        final Intent intent = new Intent(ACTION_X3DHPQ_PAIR_NEW_DEVICE);
+        intent.putExtra(EXTRA_ACCOUNT_JID, getAccount().getJid().asBareJid().toString());
+        intent.putExtra(EXTRA_NEW_RESOURCE, fullJid);
+        intent.putExtra(EXTRA_DEVICE_ID, deviceId != null ? deviceId.intValue() : 0);
+        intent.putExtra(EXTRA_SID, sid);
 
         context.sendBroadcast(intent);
     }

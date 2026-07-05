@@ -558,6 +558,16 @@ public class MessageParser extends AbstractParser
             return;
         }
 
+        // x3dhpq serverless rendezvous (§10.1a, method A): a directed <message> carrying
+        // <pair-hello> triggers the existing device to initiate pairing. Consume it here.
+        if (packet.hasExtension(im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class)) {
+            final var hello =
+                    packet.getExtension(
+                            im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class);
+            getManager(VerifyDeviceManager.class).handlePairHello(hello);
+            return;
+        }
+
         // x3dhpq pairing stanzas (chat-type <message> carrying <pair>): dispatch to FSM and
         // consume — do not fall through to body/message-archive handlers.
         if (packet.hasExtension(im.conversations.android.xmpp.model.x3dhpq.pair.Pair.class)) {

@@ -199,11 +199,13 @@ public class PubSubManager extends AbstractManager {
         if (isFromBare && Namespace.AXOLOTL_DEVICE_LIST.equals(node)) {
             getManager(AxolotlManager.class).handleItems(from, items);
         }
-        // Route x3dhpq PEP nodes (caps-based: devicelist, bundle, audit, recovery; explicit: group)
+        // Route x3dhpq PEP nodes (caps-based: devicelist, bundle, audit, recovery, pair;
+        // explicit: group). The pair node carries serverless rendezvous <pair-hello> (§10.1a).
         if (Namespace.X3DHPQ_DEVICELIST.equals(node)
                 || Namespace.X3DHPQ_BUNDLE.equals(node)
                 || Namespace.X3DHPQ_AUDIT.equals(node)
                 || Namespace.X3DHPQ_RECOVERY.equals(node)
+                || Namespace.X3DHPQ_PAIR.equals(node)
                 || Namespace.X3DHPQ_GROUP.equals(node)) {
             getManager(X3dhpqManager.class).handleItems(from, items);
         }

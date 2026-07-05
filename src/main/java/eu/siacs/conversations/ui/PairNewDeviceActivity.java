@@ -228,9 +228,27 @@ public class PairNewDeviceActivity extends XmppActivity {
                             return;
                         }
 
+                        // Use the sid carried in the <pair-hello> (§10.1a): for method A it equals
+                        // the sid we put in the QR; for method B it is the new device's own sid.
+                        // Both sides must agree on the same sid for CPace. Fall back to mSid.
+                        byte[] sessionId = mSid;
+                        final String sidB64Url =
+                                intent.getStringExtra(VerifyDeviceManager.EXTRA_SID);
+                        if (sidB64Url != null && !sidB64Url.isEmpty()) {
+                            try {
+                                sessionId =
+                                        Base64.getUrlDecoder().decode(sidB64Url);
+                            } catch (final IllegalArgumentException e) {
+                                Log.w(
+                                        Config.LOGTAG,
+                                        LOGTAG + ": invalid base64url sid in pair-hello broadcast;"
+                                                + " falling back to local sid");
+                            }
+                        }
+
                         Log.d(
                                 Config.LOGTAG,
-                                LOGTAG + ": received verify-device broadcast, new_resource="
+                                LOGTAG + ": received pair-hello broadcast, new_resource="
                                         + newResource);
 
                         mHandler.post(() -> mStatusView.setText(
@@ -246,7 +264,7 @@ public class PairNewDeviceActivity extends XmppActivity {
                         }
 
                         try {
-                            mPairingService.startAsExisting(mSid, mRawCode, peerJid, mOpts);
+                            mPairingService.startAsExisting(sessionId, mRawCode, peerJid, mOpts);
                         } catch (final Exception e) {
                             Log.e(Config.LOGTAG, LOGTAG + ": startAsExisting failed", e);
                             final String reason = e.getMessage();

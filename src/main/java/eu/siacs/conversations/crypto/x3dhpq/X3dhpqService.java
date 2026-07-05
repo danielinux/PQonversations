@@ -195,6 +195,20 @@ public class X3dhpqService {
                 recoveryListener.onRecoveryReceived(from, (Recovery) payload);
             }
             return true;
+        } else if (Namespace.X3DHPQ_PAIR.equals(node)) {
+            // Serverless rendezvous (§10.1a, method B): a <pair-hello> published to our own PEP
+            // node reaches this (existing) resource via self-PEP +notify. Hand it to the pairing
+            // trigger — the same code path a directed pair-hello message uses.
+            if (payload instanceof im.conversations.android.xmpp.model.x3dhpq.pair.PairHello
+                    && account != null
+                    && account.getXmppConnection() != null) {
+                account.getXmppConnection()
+                        .getManager(
+                                eu.siacs.conversations.xmpp.manager.VerifyDeviceManager.class)
+                        .handlePairHello(
+                                (im.conversations.android.xmpp.model.x3dhpq.pair.PairHello) payload);
+            }
+            return true;
         }
         return false;
     }
@@ -226,6 +240,13 @@ public class X3dhpqService {
             }
         } else if (Namespace.X3DHPQ_RECOVERY.equals(node)) {
             final var entry = items.getFirstItemWithId(Recovery.class);
+            if (entry != null) {
+                handleEvent(from, node, entry.getKey(), entry.getValue());
+            }
+        } else if (Namespace.X3DHPQ_PAIR.equals(node)) {
+            final var entry =
+                    items.getFirstItemWithId(
+                            im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class);
             if (entry != null) {
                 handleEvent(from, node, entry.getKey(), entry.getValue());
             }
