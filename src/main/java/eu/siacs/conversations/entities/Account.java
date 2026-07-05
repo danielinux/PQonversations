@@ -11,7 +11,6 @@ import de.gultsch.common.MiniUri;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.crypto.PgpDecryptionService;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
 import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
 import eu.siacs.conversations.crypto.sasl.ChannelBinding;
 import eu.siacs.conversations.crypto.sasl.ChannelBindingMechanism;
@@ -521,11 +520,6 @@ public class Account extends AbstractEntity implements AvatarService.Avatar {
         return values;
     }
 
-    public AxolotlService getAxolotlService() {
-        return this.xmppConnection.getAxolotlService();
-    }
-
-    // Parallel to getAxolotlService(); delegates to XmppConnection for lifecycle parity.
     public X3dhpqService getX3dhpqService() {
         return this.xmppConnection.getX3dhpqService();
     }

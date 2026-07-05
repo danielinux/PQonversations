@@ -84,7 +84,6 @@ import eu.siacs.conversations.utils.AccountUtils;
 import eu.siacs.conversations.utils.Compatibility;
 import eu.siacs.conversations.utils.SignupUtils;
 import eu.siacs.conversations.xmpp.Jid;
-import eu.siacs.conversations.xmpp.OnKeyStatusUpdated;
 import eu.siacs.conversations.xmpp.OnUpdateBlocklist;
 import eu.siacs.conversations.xmpp.manager.PresenceManager;
 import eu.siacs.conversations.xmpp.manager.ReactionManager;
@@ -509,9 +508,6 @@ public abstract class XmppActivity extends ActionBarActivity {
             this.xmppConnectionService.setOnShowErrorToastListener(
                     (XmppConnectionService.OnShowErrorToast) this);
         }
-        if (this instanceof OnKeyStatusUpdated) {
-            this.xmppConnectionService.setOnKeyStatusUpdatedListener((OnKeyStatusUpdated) this);
-        }
         if (this instanceof XmppConnectionService.OnJingleRtpConnectionUpdate) {
             this.xmppConnectionService.setOnRtpConnectionUpdateListener(
                     (XmppConnectionService.OnJingleRtpConnectionUpdate) this);
@@ -545,9 +541,6 @@ public abstract class XmppActivity extends ActionBarActivity {
         if (this instanceof XmppConnectionService.OnShowErrorToast) {
             this.xmppConnectionService.removeOnShowErrorToastListener(
                     (XmppConnectionService.OnShowErrorToast) this);
-        }
-        if (this instanceof OnKeyStatusUpdated) {
-            this.xmppConnectionService.removeOnNewKeysAvailableListener((OnKeyStatusUpdated) this);
         }
         if (this instanceof XmppConnectionService.OnJingleRtpConnectionUpdate) {
             this.xmppConnectionService.removeRtpConnectionUpdateListener(

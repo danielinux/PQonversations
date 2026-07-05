@@ -62,9 +62,6 @@ import eu.siacs.conversations.android.JabberIdContact;
 import eu.siacs.conversations.crypto.OmemoSetting;
 import eu.siacs.conversations.crypto.PgpDecryptionService;
 import eu.siacs.conversations.crypto.PgpEngine;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
-import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
-import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
 import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Blockable;
@@ -108,7 +105,6 @@ import eu.siacs.conversations.xml.LocalizedContent;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.OnContactStatusChanged;
-import eu.siacs.conversations.xmpp.OnKeyStatusUpdated;
 import eu.siacs.conversations.xmpp.OnUpdateBlocklist;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import eu.siacs.conversations.xmpp.forms.Data;
@@ -275,8 +271,6 @@ public class XmppConnectionService extends Service {
             Collections.newSetFromMap(new WeakHashMap<OnUpdateBlocklist, Boolean>());
     private final Set<OnMucRosterUpdate> mOnMucRosterUpdate =
             Collections.newSetFromMap(new WeakHashMap<OnMucRosterUpdate, Boolean>());
-    private final Set<OnKeyStatusUpdated> mOnKeyStatusUpdated =
-            Collections.newSetFromMap(new WeakHashMap<OnKeyStatusUpdated, Boolean>());
     private final Set<OnJingleRtpConnectionUpdate> onJingleRtpConnectionUpdate =
             Collections.newSetFromMap(new WeakHashMap<OnJingleRtpConnectionUpdate, Boolean>());
 
@@ -2737,32 +2731,6 @@ public class XmppConnectionService extends Service {
         }
     }
 
-    public void setOnKeyStatusUpdatedListener(final OnKeyStatusUpdated listener) {
-        final boolean remainingListeners;
-        synchronized (LISTENER_LOCK) {
-            remainingListeners = checkListeners();
-            if (!this.mOnKeyStatusUpdated.add(listener)) {
-                Log.w(
-                        Config.LOGTAG,
-                        listener.getClass().getName()
-                                + " is already registered as OnKeyStatusUpdateListener");
-            }
-        }
-        if (remainingListeners) {
-            switchToForeground();
-        }
-    }
-
-    public void removeOnNewKeysAvailableListener(final OnKeyStatusUpdated listener) {
-        final boolean remainingListeners;
-        synchronized (LISTENER_LOCK) {
-            this.mOnKeyStatusUpdated.remove(listener);
-            remainingListeners = checkListeners();
-        }
-        if (remainingListeners) {
-            switchToBackground();
-        }
-    }
 
     public void setOnRtpConnectionUpdateListener(final OnJingleRtpConnectionUpdate listener) {
         final boolean remainingListeners;
@@ -2826,8 +2794,7 @@ public class XmppConnectionService extends Service {
                 && this.mOnMucRosterUpdate.isEmpty()
                 && this.mOnUpdateBlocklist.isEmpty()
                 && this.mOnShowErrorToasts.isEmpty()
-                && this.onJingleRtpConnectionUpdate.isEmpty()
-                && this.mOnKeyStatusUpdated.isEmpty());
+                && this.onJingleRtpConnectionUpdate.isEmpty());
     }
 
     private void switchToForeground() {
@@ -3540,12 +3507,6 @@ public class XmppConnectionService extends Service {
     public void updateMucRosterUi() {
         for (OnMucRosterUpdate listener : threadSafeList(this.mOnMucRosterUpdate)) {
             listener.onMucRosterUpdate();
-        }
-    }
-
-    public void keyStatusUpdated(AxolotlService.FetchStatus report) {
-        for (OnKeyStatusUpdated listener : threadSafeList(this.mOnKeyStatusUpdated)) {
-            listener.onKeyStatusUpdated(report);
         }
     }
 

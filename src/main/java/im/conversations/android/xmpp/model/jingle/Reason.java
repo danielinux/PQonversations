@@ -1,7 +1,6 @@
 package im.conversations.android.xmpp.model.jingle;
 
 import com.google.common.base.Throwables;
-import eu.siacs.conversations.crypto.axolotl.CryptoFailedException;
 import eu.siacs.conversations.xmpp.jingle.RtpContentMap;
 import im.conversations.android.annotation.XmlElement;
 import im.conversations.android.xmpp.model.Extension;
@@ -145,9 +144,6 @@ public abstract class Reason extends Extension {
         final Throwable root = Throwables.getRootCause(throwable);
         if (root instanceof RuntimeException e) {
             return of(e);
-        }
-        if (root instanceof CryptoFailedException) {
-            return new SecurityError();
         }
         return new FailedApplication();
     }

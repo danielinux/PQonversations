@@ -1,7 +1,5 @@
 package eu.siacs.conversations.generator;
 
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
-import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
 import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Conversation;
@@ -9,17 +7,12 @@ import eu.siacs.conversations.entities.Conversational;
 import eu.siacs.conversations.entities.Message;
 import eu.siacs.conversations.services.XmppConnectionService;
 import eu.siacs.conversations.xml.Namespace;
-import eu.siacs.conversations.xmpp.Jid;
 import im.conversations.android.xmpp.model.correction.Replace;
-import im.conversations.android.xmpp.model.hints.Store;
 import im.conversations.android.xmpp.model.markers.Markable;
 import im.conversations.android.xmpp.model.unique.OriginId;
 import im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup;
 
 public class MessageGenerator extends AbstractGenerator {
-    private static final String OMEMO_FALLBACK_MESSAGE =
-            "I sent you an OMEMO encrypted message but your client doesn’t seem to support that."
-                    + " Find more information on https://conversations.im/omemo";
     private static final String PGP_FALLBACK_MESSAGE =
             "I sent you a PGP encrypted message but your client doesn’t seem to support that.";
 
@@ -62,21 +55,6 @@ public class MessageGenerator extends AbstractGenerator {
         if (message.edited()) {
             packet.addExtension(new Replace(message.getEditedIdWireFormat()));
         }
-        return packet;
-    }
-
-    public im.conversations.android.xmpp.model.stanza.Message generateAxolotlChat(
-            Message message, XmppAxolotlMessage axolotlMessage) {
-        im.conversations.android.xmpp.model.stanza.Message packet = preparePacket(message);
-        if (axolotlMessage == null) {
-            return null;
-        }
-        packet.setAxolotlMessage(axolotlMessage.toElement());
-        packet.setBody(OMEMO_FALLBACK_MESSAGE);
-        packet.addExtension(new Store());
-        packet.addChild("encryption", "urn:xmpp:eme:0")
-                .setAttribute("name", "OMEMO")
-                .setAttribute("namespace", AxolotlService.PEP_PREFIX);
         return packet;
     }
 
@@ -134,17 +112,6 @@ public class MessageGenerator extends AbstractGenerator {
         packet.setTo(to);
         packet.addExtension(envelope.toExtension());
         packet.addChild("store", "urn:xmpp:hints");
-        return packet;
-    }
-
-    public im.conversations.android.xmpp.model.stanza.Message generateKeyTransportMessage(
-            Jid to, XmppAxolotlMessage axolotlMessage) {
-        im.conversations.android.xmpp.model.stanza.Message packet =
-                new im.conversations.android.xmpp.model.stanza.Message();
-        packet.setType(im.conversations.android.xmpp.model.stanza.Message.Type.CHAT);
-        packet.setTo(to);
-        packet.setAxolotlMessage(axolotlMessage.toElement());
-        packet.addChild(new Store());
         return packet;
     }
 

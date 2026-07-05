@@ -35,7 +35,6 @@ import eu.siacs.conversations.R;
 import eu.siacs.conversations.android.Device;
 import eu.siacs.conversations.crypto.PgpDecryptionService;
 import eu.siacs.conversations.crypto.XmppDomainVerifier;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
 import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
 import eu.siacs.conversations.crypto.sasl.ChannelBinding;
 import eu.siacs.conversations.crypto.sasl.ChannelBindingMechanism;
@@ -212,8 +211,7 @@ public class XmppConnection implements Runnable {
     private final Consumer<im.conversations.android.xmpp.model.stanza.Message> messageListener;
     private final Consumer<Account.State> accountStateProcessor;
     private final BiFunction<Jid, String, Boolean> messageAcknowledgedProcessor;
-    private AxolotlService axolotlService;
-    // x3dhpq service instance, created alongside axolotlService at construction time
+    // x3dhpq service instance, created at construction time
     private X3dhpqService x3dhpqService;
     // Group crypto service for §13 sender-chain MUC encryption
     private eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService groupCryptoService;
@@ -241,7 +239,6 @@ public class XmppConnection implements Runnable {
         this.accountStateProcessor = new AccountStateProcessor(service, this);
         this.messageAcknowledgedProcessor = new MessageAcknowledgedProcessor(service, this);
         this.managers = Managers.get(service, this);
-        this.setAxolotlService(new AxolotlService(account, service));
         this.x3dhpqService = new X3dhpqService(account, service);
         this.groupCryptoService = new eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService(account, service);
         this.pgpDecryptionService = new PgpDecryptionService(service);
@@ -2909,10 +2906,6 @@ public class XmppConnection implements Runnable {
         return from == null || from.asBareJid().equals(account.asBareJid());
     }
 
-    public AxolotlService getAxolotlService() {
-        return this.axolotlService;
-    }
-
     public X3dhpqService getX3dhpqService() {
         return this.x3dhpqService;
     }
@@ -2923,15 +2916,6 @@ public class XmppConnection implements Runnable {
 
     public PgpDecryptionService getPgpDecryptionService() {
         return this.pgpDecryptionService;
-    }
-
-    public void setAxolotlService(AxolotlService axolotlService) {
-        final var current = this.axolotlService;
-        if (current != null) {
-            this.advancedStreamFeaturesLoadedListeners.remove(current);
-        }
-        this.axolotlService = axolotlService;
-        this.addOnAdvancedStreamFeaturesAvailableListener(axolotlService);
     }
 
     public void setStatusAndTriggerProcessor(final Account.State state) {

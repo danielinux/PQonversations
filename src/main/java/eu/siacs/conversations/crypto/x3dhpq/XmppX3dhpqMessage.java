@@ -28,7 +28,6 @@ import java.util.Map;
 
 /**
  * Builder and parser for x3dhpq-encrypted message envelopes.
- * Mirrors XmppAxolotlMessage for the x3dhpq protocol path.
  */
 public class XmppX3dhpqMessage {
 

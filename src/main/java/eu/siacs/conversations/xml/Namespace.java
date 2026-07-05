@@ -2,12 +2,9 @@ package eu.siacs.conversations.xml;
 
 public final class Namespace {
     public static final String ADDRESSING = "http://jabber.org/protocol/address";
-    public static final String AXOLOTL = "eu.siacs.conversations.axolotl";
     public static final String BOB = "urn:xmpp:bob";
     public static final String PGP_SIGNED = "jabber:x:signed";
     public static final String PGP_ENCRYPTED = "jabber:x:encrypted";
-    public static final String AXOLOTL_BUNDLES = AXOLOTL + ".bundles";
-    public static final String AXOLOTL_DEVICE_LIST = AXOLOTL + ".devicelist";
     public static final String HINTS = "urn:xmpp:hints";
     public static final String MESSAGE_ARCHIVE_MANAGEMENT = "urn:xmpp:mam:2";
     public static final String VERSION = "jabber:iq:version";
@@ -81,7 +78,6 @@ public final class Namespace {
     public static final String JINGLE_ERRORS = "urn:xmpp:jingle:errors:1";
     public static final String JINGLE_MESSAGE = "urn:xmpp:jingle-message:0";
     public static final String JINGLE_ENCRYPTED_TRANSPORT = "urn:xmpp:jingle:jet:0";
-    public static final String JINGLE_ENCRYPTED_TRANSPORT_OMEMO = "urn:xmpp:jingle:jet-omemo:0";
     public static final String JINGLE_TRANSPORTS_S5B = "urn:xmpp:jingle:transports:s5b:1";
     public static final String JINGLE_TRANSPORTS_IBB = "urn:xmpp:jingle:transports:ibb:1";
     public static final String JINGLE_TRANSPORT_ICE_UDP = "urn:xmpp:jingle:transports:ice-udp:1";

@@ -84,11 +84,6 @@ public class Message extends Stanza {
         this.addExtension(new Body(text));
     }
 
-    public void setAxolotlMessage(Element axolotlMessage) {
-        this.children.remove(findChild("body"));
-        this.children.add(0, axolotlMessage);
-    }
-
     public enum Type {
         ERROR,
         NORMAL,
