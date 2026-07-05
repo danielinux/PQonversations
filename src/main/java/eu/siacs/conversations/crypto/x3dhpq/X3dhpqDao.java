@@ -22,6 +22,7 @@ public interface X3dhpqDao {
     // --- local device ---
     void putX3dhpqLocalDevice(String accountUuid, int deviceId, byte[] dikPriv, byte[] dc, long createdAt, int flags);
     List<DatabaseBackend.X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid);
+    void deleteX3dhpqLocalDevice(String accountUuid, int deviceId);
 
     // --- signed pre-key ---
     void putX3dhpqSignedPreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX, byte[] sigEd, byte[] sigMldsa, long createdAt);

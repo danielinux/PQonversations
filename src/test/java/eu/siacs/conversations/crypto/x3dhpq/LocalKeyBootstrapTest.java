@@ -104,6 +104,14 @@ public class LocalKeyBootstrapTest {
         }
 
         @Override
+        public void deleteX3dhpqLocalDevice(String accountUuid, int deviceId) {
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows = deviceRows.get(accountUuid);
+            if (rows != null) {
+                rows.removeIf(r -> r.deviceId() == deviceId);
+            }
+        }
+
+        @Override
         public void putX3dhpqSignedPreKey(
                 String accountUuid,
                 int keyId,

@@ -3185,6 +3185,15 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 "x3dhpq_local_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    /** Deletes the local device key material for a single device (§8.6 revocation). */
+    public void deleteX3dhpqLocalDevice(String accountUuid, int deviceId) {
+        final SQLiteDatabase db = getWritableDatabase();
+        db.delete(
+                "x3dhpq_local_device",
+                "account_uuid=? AND device_id=?",
+                new String[] {accountUuid, Integer.toString(deviceId)});
+    }
+
     public List<X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid) {
         final SQLiteDatabase db = getReadableDatabase();
         final Cursor c =

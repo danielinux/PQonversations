@@ -194,14 +194,19 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     }
 
     private void removeDevice(final DatabaseBackend.X3dhpqLocalDeviceRow device) {
-        // TODO: deleteX3dhpqLocalDevice is not yet defined in X3dhpqDao / DatabaseBackend.
-        // When it is added, call:
-        //   xmppConnectionService.databaseBackend.deleteX3dhpqLocalDevice(mAccountUuid, device.deviceId());
-        // and then re-publish the devicelist without this device's DC.
+        if (mAccount == null || !xmppConnectionServiceBound) {
+            Toast.makeText(this, "Not connected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Revokes the device (§8.6): deletes its local key material, republishes
+        // the signed devicelist with a bumped version omitting it, and appends a
+        // RemoveDevice audit entry.
+        mAccount.getX3dhpqService().revokeOwnDevice(device.deviceId());
         Toast.makeText(
                         this,
-                        "Remove-device not yet implemented (DAO method missing)",
+                        "Removed device " + Integer.toUnsignedString(device.deviceId()),
                         Toast.LENGTH_LONG)
                 .show();
+        refresh();
     }
 }

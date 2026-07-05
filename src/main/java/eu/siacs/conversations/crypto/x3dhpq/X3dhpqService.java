@@ -1099,6 +1099,116 @@ public class X3dhpqService {
                 });
     }
 
+    /**
+     * Revokes one of the account's own devices (§8.6). Deletes its local key
+     * material, republishes the signed devicelist with the device omitted and the
+     * version bumped (the authoritative removal — item ③ machinery), and appends a
+     * {@code RemoveDevice} audit entry (§11.4 layout D) to the audit node as
+     * corroborating, tamper-evident evidence. Peers and co-account devices tear
+     * down state for the vanished device on observing the version-advanced list
+     * (handled inbound by {@link #handleInboundDeviceList} + the remote-device prune).
+     */
+    public void revokeOwnDevice(final int deviceId) {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": revokeOwnDevice ignored — no db/account/service");
+            return;
+        }
+        final String accountUuid = account.getUuid();
+        final String ownerJid = account.getJid().asBareJid().toString();
+
+        // 1. Drop the local device so it is omitted from the republished list.
+        db.deleteX3dhpqLocalDevice(accountUuid, deviceId);
+
+        // 2. Republish the signed devicelist. Because the content changed, the
+        //    monotonic version strictly increases, making the removal authoritative
+        //    for contacts and co-account devices (§8.6 step 1).
+        publishDeviceList();
+
+        // 3. Append + publish the RemoveDevice audit entry (§8.6 step 2). Best-effort:
+        //    the removal is already authoritative via the signed list above.
+        try {
+            publishRemoveDeviceAuditEntry(accountUuid, ownerJid, deviceId);
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": RemoveDevice audit entry publish failed for "
+                    + deviceId + " (removal still authoritative via signed devicelist): "
+                    + e.getMessage());
+        }
+    }
+
+    /** Builds, persists and publishes a hybrid-signed RemoveDevice audit entry (layout D). */
+    private void publishRemoveDeviceAuditEntry(
+            final String accountUuid, final String ownerJid, final int deviceId) {
+        final DatabaseBackend backend = mXmppConnectionService.databaseBackend;
+
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": no AIK — cannot sign RemoveDevice audit entry");
+            return;
+        }
+        final AccountIdentityKey aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
+
+        // Chain onto our own audit head: seq = last+1, prevHash = SHA-256(last.marshal()).
+        final List<DatabaseBackend.X3dhpqAuditEntryRow> chain =
+                backend.loadX3dhpqAuditChain(accountUuid, ownerJid);
+        final long seq;
+        final byte[] prevHash;
+        if (chain.isEmpty()) {
+            seq = 0L;
+            prevHash = new byte[32];
+        } else {
+            final DatabaseBackend.X3dhpqAuditEntryRow last = chain.get(chain.size() - 1);
+            final im.conversations.x3dhpq.types.AuditEntry lastEntry =
+                    new im.conversations.x3dhpq.types.AuditEntry(
+                            last.seq(), last.prevHash(), last.action(), last.payload(),
+                            last.timestamp(), last.sigEd25519(), last.sigMldsa());
+            prevHash = X3dhpqCrypto.SHA256.hash(lastEntry.marshal());
+            seq = last.seq() + 1L;
+        }
+
+        // payload = uint32_BE(device_id) (§11.4 layout D)
+        final byte[] payload =
+                ByteBuffer.allocate(4).order(java.nio.ByteOrder.BIG_ENDIAN).putInt(deviceId).array();
+        final long ts = System.currentTimeMillis() / 1000L;
+
+        final im.conversations.x3dhpq.types.AuditEntry unsigned =
+                new im.conversations.x3dhpq.types.AuditEntry(
+                        seq, prevHash, im.conversations.x3dhpq.types.AuditEntry.ACTION_REMOVE_DEVICE,
+                        payload, ts, new byte[0], new byte[0]);
+        final byte[] sp = unsigned.signedPart();
+        final byte[] sigEd = X3dhpqCrypto.ed25519Sign(aik.getPrivEd25519(), sp);
+        final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(aik.getPrivMLDSA(), sp);
+        final im.conversations.x3dhpq.types.AuditEntry signed =
+                new im.conversations.x3dhpq.types.AuditEntry(
+                        seq, prevHash, im.conversations.x3dhpq.types.AuditEntry.ACTION_REMOVE_DEVICE,
+                        payload, ts, sigEd, sigMl);
+
+        backend.putX3dhpqAuditEntry(accountUuid, ownerJid, seq, prevHash,
+                im.conversations.x3dhpq.types.AuditEntry.ACTION_REMOVE_DEVICE, payload, ts, sigEd, sigMl);
+
+        final im.conversations.android.xmpp.model.stanza.Iq iq =
+                new im.conversations.android.xmpp.model.stanza.Iq(
+                        im.conversations.android.xmpp.model.stanza.Iq.Type.SET);
+        final PubSub ps = iq.addExtension(new PubSub());
+        final im.conversations.android.xmpp.model.pubsub.Publish pub =
+                ps.addExtension(new im.conversations.android.xmpp.model.pubsub.Publish());
+        pub.setNode(Namespace.X3DHPQ_AUDIT);
+        final PubSub.Item item = pub.addExtension(new PubSub.Item());
+        item.setId(Long.toString(seq));
+        final AuditEntry auditEl = item.addExtension(new AuditEntry());
+        auditEl.setContent(signed.marshal());
+
+        Log.d(Config.LOGTAG, LOGPREFIX + ": publishing RemoveDevice audit entry seq=" + seq
+                + " for device " + deviceId);
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            if (response.getType() == im.conversations.android.xmpp.model.stanza.Iq.Type.ERROR) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": RemoveDevice audit publish failed: " + response);
+            } else {
+                Log.d(Config.LOGTAG, LOGPREFIX + ": RemoveDevice audit entry published (seq=" + seq + ")");
+            }
+        });
+    }
+
     private void publishOwnBundle() {
         // load the (single) local device row to obtain the active deviceId
         final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
