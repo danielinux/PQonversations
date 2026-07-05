@@ -1013,54 +1013,26 @@ public class X3dhpqService {
         final XmppX3dhpqMessage xmsg = XmppX3dhpqMessage.createOutbound(
                 account, account.getJid(), ownDeviceId, plaintextBytes);
 
-        boolean bundleMissing = false;
-        for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd : remoteDevices) {
-            final int devId = rd.deviceId();
-            final DatabaseBackend.X3dhpqSessionRow sessionRow =
-                    db.loadX3dhpqSession(accountUuid, peer, devId);
+        // Encrypt a per-device <key rid=..> block for every peer device.
+        boolean bundleMissing = addRecipientDevices(xmsg, accountUuid, peerJid, remoteDevices, -1);
 
-            final Session session;
-            XmppX3dhpqMessage.PrekeyMetadata prekeyMeta = null;
-            boolean isFirst = false;
-
-            if (sessionRow == null || sessionRow.stateBlob() == null) {
-                // no session yet: run initiator PQXDH
-                Log.d(Config.LOGTAG,
-                        "x3dhpq: no session for " + peer + "/" + devId
-                                + ", attempting PQXDH initiation");
-                final Optional<PqxdhResult> resultOpt = establishOutboundSession(peerJid, devId);
-                if (!resultOpt.isPresent()) {
-                    Log.w(Config.LOGTAG,
-                            "x3dhpq: bundle missing for " + peer + "/" + devId
-                                    + "; fetch was kicked off, message will retry on arrival");
-                    bundleMissing = true;
-                    continue;
-                }
-                Log.d(Config.LOGTAG,
-                        "x3dhpq: PQXDH session established with " + peer + "/" + devId);
-                final PqxdhResult result = resultOpt.get();
-                final PrekeyEnvelope env = result.getEnvelope();
-                if (env != null) {
-                    prekeyMeta = new XmppX3dhpqMessage.PrekeyMetadata(
-                            env.ephemeralPub, env.opkId, env.kemKeyId,
-                            env.kemCiphertext, env.dcMarshal,
-                            env.aikEd25519Pub, env.aikMldsaPub);
-                }
-                // load the freshly persisted session blob
-                final DatabaseBackend.X3dhpqSessionRow newRow =
-                        db.loadX3dhpqSession(accountUuid, peer, devId);
-                if (newRow == null) return null;
-                session = Session.unmarshal(newRow.stateBlob());
-                isFirst = true;
-            } else {
-                session = Session.unmarshal(sessionRow.stateBlob());
-            }
-
-            xmsg.addRecipient(peerJid, devId, session, isFirst, prekeyMeta);
-
-            // persist updated session state after encrypt
-            db.putX3dhpqSession(accountUuid, peer, devId,
-                    session.marshal(), System.currentTimeMillis() / 1000L);
+        // Multi-device self-copy: also encrypt to our OWN other devices so the
+        // carbon/MAM copy they receive is decryptable. Mirrors the Dino fork's
+        // get_recipients, which adds the account's own bare JID to the recipient
+        // set. We skip our own current device id (we don't message ourselves).
+        final Jid ownBareJid = account.getJid().asBareJid();
+        final List<DatabaseBackend.X3dhpqRemoteDeviceRow> ownDevices =
+                db.listX3dhpqRemoteDevices(accountUuid, ownBareJid.toString());
+        if (ownDevices.isEmpty()) {
+            // We don't yet know our own other devices; request our own
+            // devicelist so future sends can fan out to them. Not fatal — the
+            // message still goes to the peer without a self copy this round.
+            Log.d(Config.LOGTAG,
+                    "x3dhpq: own devicelist not cached yet; requesting it for self-copy");
+            requestPeerDeviceList(ownBareJid);
+        } else {
+            bundleMissing |= addRecipientDevices(
+                    xmsg, accountUuid, ownBareJid, ownDevices, ownDeviceId);
         }
 
         if (bundleMissing) {
@@ -1075,6 +1047,81 @@ public class X3dhpqService {
                 "x3dhpq: envelope ready for " + peer + " ("
                         + remoteDevices.size() + " recipient device(s))");
         return xmsg;
+    }
+
+    /**
+     * Adds an encrypted {@code <key rid=..>} block to {@code xmsg} for every device
+     * of {@code targetBareJid}, establishing a pairwise session where none exists yet.
+     * Devices whose id equals {@code skipDeviceId} are skipped (used to avoid
+     * encrypting to our own current device when fanning out the self copy).
+     *
+     * @return true if at least one required bundle was missing (a fetch was kicked
+     *         off; the caller should defer and retry when the bundle arrives).
+     */
+    private boolean addRecipientDevices(
+            final XmppX3dhpqMessage xmsg,
+            final String accountUuid,
+            final Jid targetBareJid,
+            final List<DatabaseBackend.X3dhpqRemoteDeviceRow> devices,
+            final int skipDeviceId) {
+        final String target = targetBareJid.asBareJid().toString();
+        boolean bundleMissing = false;
+        for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd : devices) {
+            final int devId = rd.deviceId();
+            if (devId == skipDeviceId) {
+                continue;
+            }
+            final DatabaseBackend.X3dhpqSessionRow sessionRow =
+                    db.loadX3dhpqSession(accountUuid, target, devId);
+
+            final Session session;
+            XmppX3dhpqMessage.PrekeyMetadata prekeyMeta = null;
+            boolean isFirst = false;
+
+            if (sessionRow == null || sessionRow.stateBlob() == null) {
+                // no session yet: run initiator PQXDH
+                Log.d(Config.LOGTAG,
+                        "x3dhpq: no session for " + target + "/" + devId
+                                + ", attempting PQXDH initiation");
+                final Optional<PqxdhResult> resultOpt =
+                        establishOutboundSession(targetBareJid, devId);
+                if (!resultOpt.isPresent()) {
+                    Log.w(Config.LOGTAG,
+                            "x3dhpq: bundle missing for " + target + "/" + devId
+                                    + "; fetch was kicked off, message will retry on arrival");
+                    bundleMissing = true;
+                    continue;
+                }
+                Log.d(Config.LOGTAG,
+                        "x3dhpq: PQXDH session established with " + target + "/" + devId);
+                final PqxdhResult result = resultOpt.get();
+                final PrekeyEnvelope env = result.getEnvelope();
+                if (env != null) {
+                    prekeyMeta = new XmppX3dhpqMessage.PrekeyMetadata(
+                            env.ephemeralPub, env.opkId, env.kemKeyId,
+                            env.kemCiphertext, env.dcMarshal,
+                            env.aikEd25519Pub, env.aikMldsaPub);
+                }
+                // load the freshly persisted session blob
+                final DatabaseBackend.X3dhpqSessionRow newRow =
+                        db.loadX3dhpqSession(accountUuid, target, devId);
+                if (newRow == null) {
+                    bundleMissing = true;
+                    continue;
+                }
+                session = Session.unmarshal(newRow.stateBlob());
+                isFirst = true;
+            } else {
+                session = Session.unmarshal(sessionRow.stateBlob());
+            }
+
+            xmsg.addRecipient(targetBareJid, devId, session, isFirst, prekeyMeta);
+
+            // persist updated session state after encrypt
+            db.putX3dhpqSession(accountUuid, target, devId,
+                    session.marshal(), System.currentTimeMillis() / 1000L);
+        }
+        return bundleMissing;
     }
 
     /**
