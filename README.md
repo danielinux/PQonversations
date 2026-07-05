@@ -30,7 +30,7 @@ Why x3dhpq is more secure than OMEMO:
 x3dhpq and OMEMO are **not** interoperable: PQonversations users talk to other x3dhpq clients (e.g. the [Dino](https://dino.im) fork with x3dhpq support). The protocol is specified in the accompanying `x3dhpq` draft. PQonversations is licensed under GPLv3, inherited from Conversations, and gratefully builds on the upstream project's work.
 
 ## Features
-* Post-quantum end-to-end encryption with **x3dhpq** (hybrid X25519 + ML-KEM-768 key agreement, Ed25519 + ML-DSA-65 identities), replacing OMEMO — or [OpenPGP](http://openpgp.org/about/)
+* Post-quantum end-to-end encryption with **x3dhpq** (hybrid X25519 + ML-KEM-768 key agreement, Ed25519 + ML-DSA-65 identities) — or [OpenPGP](http://openpgp.org/about/)
 * Send and receive images and other kinds of files
 * Encrypted audio and video calls ([DTLS-SRTP](https://help.conversations.im))
 * Advanced machine-in-the-middle detection via channel binding (requires opt-in)
@@ -266,8 +266,8 @@ will it accelerate the development.
 
 ### Why are there two end-to-end encryption methods and which one should I choose?
 
-* OMEMO works even when a contact is offline, and works with multiple devices. It also allows asynchronous file-transfer when the server has [HTTP File Upload](http://xmpp.org/extensions/xep-0363.html). However, OMEMO not widely support and is currently implemented only [by a handful of clients](https://omemo.top).
-* OpenPGP (XEP-0027) is a very old encryption method that has some advantages over OMEMO but should only be used by people who know what they are doing.
+* **x3dhpq** is PQonversations' default and recommended method. It provides post-quantum end-to-end encryption, works even when a contact is offline, works across multiple devices, and — after you verify a contact once — automatically trusts all of their devices. It also allows asynchronous file-transfer when the server has [HTTP File Upload](http://xmpp.org/extensions/xep-0363.html). Use it whenever the other party also runs an x3dhpq-capable client.
+* OpenPGP (XEP-0027) is a very old encryption method that has some advantages over x3dhpq for niche workflows but should only be used by people who know what they are doing.
 
 ### How do I use OpenPGP
 
