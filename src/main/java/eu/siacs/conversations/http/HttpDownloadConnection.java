@@ -102,10 +102,6 @@ public class HttpDownloadConnection implements Transferable {
                             : String.format("%s.%s", message.getUuid(), ext);
             mXmppConnectionService.getFileBackend().setupRelativeFilePath(message, filename);
             setupFile();
-            if (this.message.getEncryption() == Message.ENCRYPTION_AXOLOTL
-                    && this.transportSecurity == null) {
-                this.message.setEncryption(Message.ENCRYPTION_NONE);
-            }
             final Long knownFileSize;
             if (message.getEncryption() == Message.ENCRYPTION_PGP
                     || message.getEncryption() == Message.ENCRYPTION_DECRYPTED) {
@@ -114,8 +110,7 @@ public class HttpDownloadConnection implements Transferable {
                 knownFileSize = message.getFileParams().size;
             }
             if (knownFileSize != null && interactive) {
-                if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL
-                        && this.transportSecurity != null) {
+                if (this.transportSecurity != null) {
                     this.expectedSize = knownFileSize + GCM_AUTHENTICATION_TAG_LENGTH;
                 } else {
                     this.expectedSize = knownFileSize;
@@ -393,7 +388,7 @@ public class HttpDownloadConnection implements Transferable {
 
     private void persistFileSize(final long size) {
         final Message.FileParams fileParams = message.getFileParams();
-        if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL && transportSecurity != null) {
+        if (transportSecurity != null) {
             // store the file size of the clear text file. If we resume the download we will add the
             // auth tag size again
             // this is equivalent to use updating file params *after* download (which would take the

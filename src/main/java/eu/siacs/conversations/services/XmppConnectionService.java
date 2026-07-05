@@ -1657,27 +1657,6 @@ public class XmppConnectionService extends Service {
                         packet = mMessageGenerator.generatePgpChat(message);
                     }
                     break;
-                case Message.ENCRYPTION_AXOLOTL:
-                    message.setFingerprint(account.getAxolotlService().getOwnFingerprint());
-                    if (message.needsUploading()) {
-                        if (account.httpUploadAvailable(
-                                        fileBackend.getFile(message, false).length())
-                                || conversation.getMode() == Conversation.MODE_MULTI
-                                || message.fixCounterpart()) {
-                            this.sendFileMessage(message, delay, forceP2P);
-                        } else {
-                            break;
-                        }
-                    } else {
-                        XmppAxolotlMessage axolotlMessage =
-                                account.getAxolotlService().fetchAxolotlMessageFromCache(message);
-                        if (axolotlMessage == null) {
-                            account.getAxolotlService().preparePayloadMessage(message, delay);
-                        } else {
-                            packet = mMessageGenerator.generateAxolotlChat(message, axolotlMessage);
-                        }
-                    }
-                    break;
                 case Message.ENCRYPTION_X3DHPQ:
                     // x3dhpq hybrid post-quantum encryption path (mirrors OMEMO branch above)
                     Log.d(Config.LOGTAG,
@@ -1773,9 +1752,6 @@ public class XmppConnectionService extends Service {
                             message.setEncryption(Message.ENCRYPTION_DECRYPTED);
                         }
                     }
-                    break;
-                case Message.ENCRYPTION_AXOLOTL:
-                    message.setFingerprint(account.getAxolotlService().getOwnFingerprint());
                     break;
             }
         }
@@ -2520,7 +2496,6 @@ public class XmppConnectionService extends Service {
                     } catch (CertificateException e) {
                         showErrorToastInUi(R.string.certificate_chain_is_not_trusted);
                     }
-                    account.getAxolotlService().regenerateKeys(true);
                 }
             } else {
                 showErrorToastInUi(R.string.jid_does_not_match_certificate);
@@ -2560,9 +2535,6 @@ public class XmppConnectionService extends Service {
     public void deleteAccount(final Account account) {
         final boolean connected = account.getStatus() == Account.State.ONLINE;
         synchronized (this.conversations) {
-            if (connected) {
-                account.getAxolotlService().deleteOmemoIdentity();
-            }
             for (final Conversation conversation : conversations) {
                 if (conversation.getAccount() == account) {
                     if (conversation.getMode() == Conversation.MODE_MULTI) {
@@ -3314,10 +3286,6 @@ public class XmppConnectionService extends Service {
                     connection.resetEverything();
                 } else {
                     logout(account);
-                }
-                final AxolotlService axolotlService = account.getAxolotlService();
-                if (axolotlService != null) {
-                    axolotlService.resetBrokenness();
                 }
             }
         }

@@ -16,7 +16,6 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
-import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.entities.Message;
 import eu.siacs.conversations.entities.Transferable;
@@ -55,8 +54,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
@@ -134,35 +131,6 @@ public class JingleFileTransferConnection extends AbstractJingleConnection
     }
 
     public void sendSessionInitialize() {
-        final ListenableFuture<Optional<XmppAxolotlMessage>> keyTransportMessage;
-        if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL) {
-            keyTransportMessage =
-                    Futures.transform(
-                            id.account
-                                    .getAxolotlService()
-                                    .prepareKeyTransportMessage(requireConversation()),
-                            Optional::of,
-                            MoreExecutors.directExecutor());
-        } else {
-            keyTransportMessage = Futures.immediateFuture(Optional.empty());
-        }
-        Futures.addCallback(
-                keyTransportMessage,
-                new FutureCallback<>() {
-                    @Override
-                    public void onSuccess(final Optional<XmppAxolotlMessage> xmppAxolotlMessage) {
-                        sendSessionInitialize(xmppAxolotlMessage.orElse(null));
-                    }
-
-                    @Override
-                    public void onFailure(@NonNull Throwable throwable) {
-                        Log.d(Config.LOGTAG, "can not send message");
-                    }
-                },
-                MoreExecutors.directExecutor());
-    }
-
-    private void sendSessionInitialize(final XmppAxolotlMessage xmppAxolotlMessage) {
         this.transport = setupTransport();
         this.transport.setTransportCallback(this);
         final File file = xmppConnectionService.getFileBackend().getFile(message);
@@ -196,7 +164,7 @@ public class JingleFileTransferConnection extends AbstractJingleConnection
                             final Transport.InitialTransportInfo initialTransportInfo) {
                         final FileTransferContentMap contentMap =
                                 FileTransferContentMap.of(fileDescription, initialTransportInfo);
-                        sendSessionInitialize(xmppAxolotlMessage, contentMap);
+                        sendSessionInitialize(contentMap);
                     }
 
                     @Override
@@ -207,33 +175,11 @@ public class JingleFileTransferConnection extends AbstractJingleConnection
                 MoreExecutors.directExecutor());
     }
 
-    private Conversation requireConversation() {
-        final var conversational = message.getConversation();
-        if (conversational instanceof Conversation c) {
-            return c;
-        } else {
-            throw new IllegalStateException("Message had no proper conversation attached");
-        }
-    }
-
-    private void sendSessionInitialize(
-            final XmppAxolotlMessage xmppAxolotlMessage, final FileTransferContentMap contentMap) {
+    private void sendSessionInitialize(final FileTransferContentMap contentMap) {
         if (transition(
                 State.SESSION_INITIALIZED,
                 () -> this.initiatorFileTransferContentMap = contentMap)) {
             final var iq = contentMap.toJinglePacket(Jingle.Action.SESSION_INITIATE, id.sessionId);
-            final var jingle = iq.getExtension(Jingle.class);
-            if (xmppAxolotlMessage != null) {
-                this.transportSecurity =
-                        new TransportSecurity(
-                                xmppAxolotlMessage.getInnerKey(), xmppAxolotlMessage.getIV());
-                final var contents = jingle.getJingleContents();
-                final var rawContent =
-                        contents.get(Iterables.getOnlyElement(contentMap.contents.keySet()));
-                if (rawContent != null) {
-                    rawContent.setSecurity(xmppAxolotlMessage);
-                }
-            }
             iq.setTo(id.with);
             final var future = id.account.getXmppConnection().sendIqPacket(iq);
             Futures.addCallback(
@@ -352,46 +298,21 @@ public class JingleFileTransferConnection extends AbstractJingleConnection
             sendSessionTerminate(Reason.of(e), e.getMessage());
             return;
         }
-        final XmppAxolotlMessage.XmppAxolotlKeyTransportMessage keyTransportMessage;
-        final var contents = jingle.getJingleContents();
-        final var rawContent = contents.get(Iterables.getOnlyElement(contentMap.contents.keySet()));
-        final var security =
-                rawContent == null ? null : rawContent.getSecurity(jinglePacket.getFrom());
-        if (security != null) {
-            Log.d(Config.LOGTAG, "found security element!");
-            keyTransportMessage =
-                    id.account
-                            .getAxolotlService()
-                            .processReceivingKeyTransportMessage(security, false);
-        } else {
-            keyTransportMessage = null;
-        }
-        receiveSessionInitiate(jinglePacket, contentMap, file, keyTransportMessage);
+        receiveSessionInitiate(jinglePacket, contentMap, file);
     }
 
     private void receiveSessionInitiate(
             final Iq jinglePacket,
             final FileTransferContentMap contentMap,
-            final FileTransferDescription.File file,
-            final XmppAxolotlMessage.XmppAxolotlKeyTransportMessage keyTransportMessage) {
+            final FileTransferDescription.File file) {
 
         if (transition(State.SESSION_INITIALIZED, () -> setRemoteContentMap(contentMap))) {
             respondOk(jinglePacket);
-            Log.d(
-                    Config.LOGTAG,
-                    "got file offer " + file + " jet=" + Objects.nonNull(keyTransportMessage));
+            Log.d(Config.LOGTAG, "got file offer " + file);
             // TODO store hashes if there are any
             setFileOffer(file);
-            if (keyTransportMessage != null) {
-                this.transportSecurity =
-                        new TransportSecurity(
-                                keyTransportMessage.getKey(), keyTransportMessage.getIv());
-                this.message.setFingerprint(keyTransportMessage.getFingerprint());
-                this.message.setEncryption(Message.ENCRYPTION_AXOLOTL);
-            } else {
-                this.transportSecurity = null;
-                this.message.setFingerprint(null);
-            }
+            this.transportSecurity = null;
+            this.message.setFingerprint(null);
             final var conversation = (Conversation) message.getConversation();
             conversation.add(message);
 

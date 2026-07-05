@@ -129,8 +129,7 @@ public class HttpUploadConnection
         final long originalFileSize = file.length();
         final TransportSecurity transportSecurity;
         this.delayed = delay;
-        if (Config.ENCRYPT_ON_HTTP_UPLOADED
-                || message.getEncryption() == Message.ENCRYPTION_AXOLOTL) {
+        if (Config.ENCRYPT_ON_HTTP_UPLOADED) {
             final var keyIv = new byte[44];
             SECURE_RANDOM.nextBytes(keyIv);
             transportSecurity = TransportSecurity.ofKeyAndIv(keyIv);
