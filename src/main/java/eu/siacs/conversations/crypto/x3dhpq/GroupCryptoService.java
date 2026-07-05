@@ -255,11 +255,24 @@ public class GroupCryptoService {
                     state.session.addMember(new GroupMember(e.getValue(), new ArrayList<>()));
                 }
             }
-            // Remove members that are no longer in the journal
+            // Remove members that are no longer in the journal. The journal
+            // keys removals by the full 40-char uppercase hex of the raw
+            // BLAKE2b-160 digest of the AIK, but GroupSession keys its member
+            // and removedAiks maps by the spaced display fingerprint
+            // (aik.fingerprint()). Comparing the two forms directly never
+            // matches, so we resolve the session member by the hex form and
+            // then remove it using the session's own fingerprint form — this
+            // is what actually drops the member and rotates the epoch. Once
+            // removed the member is gone from session.members, so subsequent
+            // rebuilds find nothing to remove and do not re-rotate.
             for (Map.Entry<String, Long> e : state.journal.getRemovedAiks().entrySet()) {
-                final String fp = e.getKey();
-                if (!state.session.removedAiks.containsKey(fp)) {
-                    state.session.removeMember(fp);
+                final String removedHex = e.getKey();
+                for (GroupMember m : new ArrayList<>(state.session.members)) {
+                    final byte[] mFpRaw = X3dhpqCrypto.BLAKE2B_160.hash(m.aik.marshal());
+                    if (removedHex.equalsIgnoreCase(MembershipJournal.fingerprintHex(mFpRaw))) {
+                        state.session.removeMember(m.aik.fingerprint(X3dhpqCrypto.BLAKE2B_160));
+                        break;
+                    }
                 }
             }
         }
@@ -656,6 +669,95 @@ public class GroupCryptoService {
         }
     }
 
+    /**
+     * Owner-side hook: publish a RemoveMember entry to the room's group:0
+     * journal, then locally drop the member and rotate the group epoch so the
+     * removed device can no longer read new traffic. Symmetric to
+     * {@link #publishAddMember}.
+     *
+     * <p>No-op if the room is not yet x3dhpq-enabled, if we hold no local AIK,
+     * if the member's AIK cannot be resolved from a cached bundle, or if the
+     * member is not currently in the journal.
+     *
+     * @param roomJid   bare JID of the room
+     * @param memberJid bare JID of the member to remove; their AIK pub must be
+     *                  cached in {@code x3dhpq_remote_bundle} (it was fetched
+     *                  when they were added)
+     */
+    public void publishRemoveMember(final Jid roomJid, final Jid memberJid) {
+        Log.d(Config.LOGTAG, TAG + ": publishRemoveMember(room=" + roomJid
+                + ", member=" + memberJid + ")");
+        if (account == null || mXmppConnectionService == null || db == null) {
+            Log.w(Config.LOGTAG, TAG + ": publishRemoveMember aborted — null account/service/db");
+            return;
+        }
+        final Jid roomBare = roomJid.asBareJid();
+        final String roomStr = roomBare.toString();
+        final RoomState state = rooms.get(roomStr);
+        if (state == null || state.session == null) {
+            Log.d(Config.LOGTAG, TAG + ": publishRemoveMember skipped — room " + roomStr
+                    + " is not x3dhpq-enabled");
+            return;
+        }
+
+        // Resolve our own AIK (priv + pub) for signing.
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(account.getUuid());
+        if (aikRow == null) {
+            Log.w(Config.LOGTAG, TAG + ": publishRemoveMember skipped — no local AIK");
+            return;
+        }
+        final im.conversations.x3dhpq.types.AccountIdentityKey ownerKey;
+        try {
+            ownerKey = im.conversations.x3dhpq.types.AccountIdentityKey.unmarshal(aikRow.aikPriv());
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG, TAG + ": publishRemoveMember failed to load owner AIK: "
+                    + e.getMessage());
+            return;
+        }
+
+        // Resolve the member's AIK from any of their cached bundles.
+        final List<DatabaseBackend.X3dhpqRemoteDeviceRow> peerDevices =
+                db.listX3dhpqRemoteDevices(account.getUuid(), memberJid.asBareJid().toString());
+        AccountIdentityPub memberAik = null;
+        for (DatabaseBackend.X3dhpqRemoteDeviceRow rd : peerDevices) {
+            final DatabaseBackend.X3dhpqRemoteBundleRow b =
+                    db.loadX3dhpqRemoteBundle(account.getUuid(), rd.peerJid(), rd.deviceId());
+            if (b != null && b.aikPubMarshal() != null) {
+                try {
+                    memberAik = AccountIdentityPub.unmarshal(b.aikPubMarshal());
+                    break;
+                } catch (Exception ignored) {}
+            }
+        }
+        if (memberAik == null) {
+            Log.w(Config.LOGTAG, TAG + ": publishRemoveMember skipped — no cached AIK for "
+                    + memberJid + "; cannot identify member to remove");
+            return;
+        }
+        final byte[] memberFpRaw = blakeFpBytes(memberAik);
+        final String memberFpKey = MembershipJournal.fingerprintHex(memberFpRaw);
+
+        synchronized (state) {
+            if (!state.journal.isMember(memberFpKey)) {
+                Log.d(Config.LOGTAG, TAG + ": publishRemoveMember skipped — " + memberJid
+                        + " is not a current journal member of " + roomStr);
+                return;
+            }
+            final long seq = state.journal.getLastSeq() + 1;
+            final byte[] prevHash = previousHashOrZero(state);
+            // epoch_after: the epoch that the removal-triggered rotation lands on.
+            final long epochAfter = (state.session.epoch & 0xFFFFFFFFL) + 1;
+            publishOneRemoveMember(
+                    roomBare, ownerKey, seq, prevHash, memberFpRaw, memberAik, epochAfter);
+        }
+
+        // Re-announce our (post-rotation) sender chain to the REMAINING members
+        // so they install the fresh recv chain for the new epoch. The removed
+        // member is no longer in session.members and receives nothing.
+        announceSenderChain(roomBare);
+    }
+
     private static byte[] blakeFpBytes(final AccountIdentityPub aik) {
         // AccountIdentityPub#fingerprint returns a *truncated* 15-byte hex
         // display form; the journal entry payload needs the raw 20-byte
@@ -733,6 +835,89 @@ public class GroupCryptoService {
         } catch (Exception e) {
             Log.w(Config.LOGTAG, TAG + ": local append after publish failed (will rely on +notify): "
                     + e.getMessage());
+        }
+
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            if (response.getType() == Iq.Type.ERROR) {
+                Log.w(Config.LOGTAG, TAG + ": membership entry seq=" + seq
+                        + " publish failed: " + response);
+            } else {
+                Log.d(Config.LOGTAG, TAG + ": membership entry seq=" + seq + " published");
+            }
+        });
+    }
+
+    /**
+     * Publishes a single RemoveMember journal entry and optimistically applies
+     * it locally (drop member + rotate epoch). Symmetric to
+     * {@link #publishOneAddMember}.
+     */
+    private void publishOneRemoveMember(
+            final Jid roomBare,
+            final im.conversations.x3dhpq.types.AccountIdentityKey ownerKey,
+            final long seq,
+            final byte[] prevHash,
+            final byte[] memberFpRaw,
+            final AccountIdentityPub memberAik,
+            final long epochAfter) {
+
+        // payload = aik_fp(20) || epoch_after(uint32 BE) — the same 24-byte
+        // shape the journal parser expects for AddMember and RemoveMember.
+        final byte[] payload =
+                im.conversations.x3dhpq.types.AuditEntry.buildMemberPayload(memberFpRaw, epochAfter);
+        final long ts = System.currentTimeMillis() / 1000L;
+
+        final im.conversations.x3dhpq.types.AuditEntry unsigned =
+                new im.conversations.x3dhpq.types.AuditEntry(
+                        seq, prevHash,
+                        im.conversations.x3dhpq.types.AuditEntry.ACTION_REMOVE_MEMBER,
+                        payload, ts, new byte[0], new byte[0]);
+        final byte[] signedPart = unsigned.signedPart();
+        final byte[] sigEd = X3dhpqCrypto.ed25519Sign(ownerKey.getPrivEd25519(), signedPart);
+        final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(ownerKey.getPrivMLDSA(), signedPart);
+
+        final im.conversations.x3dhpq.types.AuditEntry signed =
+                new im.conversations.x3dhpq.types.AuditEntry(
+                        seq, prevHash,
+                        im.conversations.x3dhpq.types.AuditEntry.ACTION_REMOVE_MEMBER,
+                        payload, ts, sigEd, sigMl);
+        final byte[] entryBytes = signed.marshal();
+
+        // Build publish IQ targeted at the room JID.
+        final Iq iq = new Iq(Iq.Type.SET);
+        iq.setTo(roomBare);
+        final im.conversations.android.xmpp.model.pubsub.PubSub ps =
+                iq.addExtension(new im.conversations.android.xmpp.model.pubsub.PubSub());
+        final im.conversations.android.xmpp.model.pubsub.Publish pub =
+                ps.addExtension(new im.conversations.android.xmpp.model.pubsub.Publish());
+        pub.setNode(Namespace.X3DHPQ_GROUP);
+        final im.conversations.android.xmpp.model.pubsub.PubSub.Item item =
+                pub.addExtension(new im.conversations.android.xmpp.model.pubsub.PubSub.Item());
+        item.setId(Long.toString(seq));
+        final MembershipEntry me = item.addExtension(new MembershipEntry());
+        me.setContent(entryBytes);
+
+        Log.d(Config.LOGTAG, TAG + ": publishing membership entry seq=" + seq
+                + " action=RemoveMember to " + roomBare);
+
+        // Optimistically apply to the local journal + session so the removal and
+        // epoch rotation take effect immediately; the +notify echo is later
+        // ignored as a seq gap. The AIK map teaches the journal this member's
+        // pub key (also used for signature bootstrap on the owner's own device).
+        final Map<String, AccountIdentityPub> aikLookup = new HashMap<>();
+        aikLookup.put(MembershipJournal.fingerprintHex(memberFpRaw), memberAik);
+        final RoomState st = rooms.get(roomBare.toString());
+        if (st != null && st.journal.getOwnerAik() == null) {
+            st.journal.setOwnerAik(ownerKey.getPublic());
+        }
+        try {
+            if (st != null) {
+                st.journal.append(entryBytes, aikLookup);
+                rebuildGroupSession(roomBare.toString(), st);
+            }
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG, TAG + ": local append after remove publish failed"
+                    + " (will rely on +notify): " + e.getMessage());
         }
 
         mXmppConnectionService.sendIqPacket(account, iq, response -> {

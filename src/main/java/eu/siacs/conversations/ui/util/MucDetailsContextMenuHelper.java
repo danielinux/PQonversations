@@ -173,7 +173,12 @@ public final class MucDetailsContextMenuHelper {
                 changeAffiliationInConference(activity, conversation, jid, Affiliation.OWNER);
                 return true;
             case R.id.remove_membership:
-                changeAffiliationInConference(activity, conversation, jid, Affiliation.NONE);
+                changeAffiliationInConference(
+                        activity,
+                        conversation,
+                        jid,
+                        Affiliation.NONE,
+                        () -> publishGroupMemberRemoval(activity, conversation, jid));
                 return true;
             case R.id.remove_from_room:
                 removeFromRoom(user, activity);
@@ -206,6 +211,15 @@ public final class MucDetailsContextMenuHelper {
             final Conversation conversation,
             final Jid user,
             final Affiliation affiliation) {
+        changeAffiliationInConference(activity, conversation, user, affiliation, null);
+    }
+
+    private static void changeAffiliationInConference(
+            final XmppActivity activity,
+            final Conversation conversation,
+            final Jid user,
+            final Affiliation affiliation,
+            final Runnable onSuccess) {
         final var account = conversation.getAccount();
         final var future =
                 account.getXmppConnection()
@@ -217,6 +231,9 @@ public final class MucDetailsContextMenuHelper {
                     @Override
                     public void onSuccess(Void result) {
                         activity.refreshUi();
+                        if (onSuccess != null) {
+                            onSuccess.run();
+                        }
                     }
 
                     @Override
@@ -230,6 +247,30 @@ public final class MucDetailsContextMenuHelper {
                     }
                 },
                 ContextCompat.getMainExecutor(activity));
+    }
+
+    /**
+     * After a member's affiliation has been revoked, publish a RemoveMember
+     * entry to the room's x3dhpq membership journal and rotate the group epoch.
+     * A no-op for rooms that are not x3dhpq-enabled (handled inside the service).
+     */
+    private static void publishGroupMemberRemoval(
+            final XmppActivity activity, final Conversation conversation, final Jid member) {
+        if (activity == null || activity.xmppConnectionService == null || member == null) {
+            return;
+        }
+        final Account account = conversation.getAccount();
+        final var groupCryptoService =
+                activity.xmppConnectionService.getGroupCryptoService(account);
+        if (groupCryptoService == null) {
+            return;
+        }
+        try {
+            groupCryptoService.publishRemoveMember(
+                    conversation.getAddress().asBareJid(), member.asBareJid());
+        } catch (final Exception e) {
+            Log.d(Config.LOGTAG, "x3dhpq: failed to publish group member removal", e);
+        }
     }
 
     private static void removeFromRoom(final User user, final XmppActivity activity) {
