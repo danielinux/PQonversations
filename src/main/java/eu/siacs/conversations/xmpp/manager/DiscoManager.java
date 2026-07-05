@@ -20,7 +20,6 @@ import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.BuildConfig;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.XmppConnection;
@@ -57,8 +56,6 @@ public class DiscoManager extends AbstractManager {
                     Namespace.JINGLE_APPS_FILE_TRANSFER,
                     Namespace.JINGLE_TRANSPORTS_S5B,
                     Namespace.JINGLE_TRANSPORTS_IBB,
-                    Namespace.JINGLE_ENCRYPTED_TRANSPORT,
-                    Namespace.JINGLE_ENCRYPTED_TRANSPORT_OMEMO,
                     Namespace.MUC,
                     Namespace.DIRECT_MUC_INVITATIONS,
                     Namespace.OOB,
@@ -345,7 +342,6 @@ public class DiscoManager extends AbstractManager {
         if (appSettings.isAllowMessageCorrection()) {
             features.addAll(MESSAGE_CORRECTION_FEATURES);
         }
-        features.add(AxolotlService.PEP_DEVICE_LIST_NOTIFY);
         // x3dhpq caps-based PEP subscriptions (XEP §8, §9, §11, §12)
         features.add(notify(Namespace.X3DHPQ_DEVICELIST));
         features.add(notify(Namespace.X3DHPQ_BUNDLE));
