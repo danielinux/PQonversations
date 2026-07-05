@@ -785,8 +785,12 @@ public class GroupCryptoService {
             final AccountIdentityPub memberAik) {
 
         // payload = aik_fp(20) || epoch_after(uint32 BE)
-        // For an MVP single-epoch room we always use epoch_after=1 (current).
-        final byte[] payload = im.conversations.x3dhpq.types.AuditEntry.buildMemberPayload(memberFpRaw, 1);
+        // epoch_after is the DERIVED post-application epoch (§13.1a/§13.5): the
+        // genesis AddMember (seq=0) does NOT rotate and carries epoch_after=0;
+        // every subsequent entry rotates once, so for this strictly linear,
+        // single-writer journal epoch_after == seq. MUST NOT be hardcoded.
+        final byte[] payload =
+                im.conversations.x3dhpq.types.AuditEntry.buildMemberPayload(memberFpRaw, seq);
         final long ts = System.currentTimeMillis() / 1000L;
 
         // Build unsigned AuditEntry to obtain signedPart() bytes.

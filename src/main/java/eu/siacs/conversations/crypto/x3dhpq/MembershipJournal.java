@@ -51,6 +51,11 @@ public final class MembershipJournal {
     // Highest seq processed.
     private long lastSeq = -1;
 
+    // Epoch derived authoritatively from journal replay (§13.1a/§13.5): the
+    // genesis entry establishes epoch 0 (no rotation); every subsequent entry
+    // rotates exactly once. -1 before the first entry.
+    private long derivedEpoch = -1;
+
     // Owner AIK (set on first entry for TOFU, or pre-set by caller).
     private AccountIdentityPub ownerAik;
 
@@ -151,6 +156,19 @@ public final class MembershipJournal {
         byte[] aikFp20 = memberPayload[0];
         long epochAfter = ByteBuffer.wrap(memberPayload[1]).order(ByteOrder.BIG_ENDIAN).getInt() & 0xFFFFFFFFL;
         String fpHex = fingerprintHex(aikFp20);
+
+        // SHOULD-level cross-check (§13.1a): derive the epoch authoritatively
+        // from replay (genesis => 0, every later entry => previous + 1) and
+        // compare it to the writer-supplied epoch_after. A mismatch signals a
+        // non-conforming writer or a forked journal; warn but do NOT reject, so
+        // interop stays robust against clients that once hardcoded the value.
+        final long derivedEpochForThis = (expectedSeq == 0) ? 0 : (derivedEpoch + 1);
+        if (epochAfter != derivedEpochForThis) {
+            Log.w(Config.LOGTAG, TAG + ": epoch_after mismatch at seq=" + entry.getSeq()
+                    + " — writer wrote " + epochAfter + " but replay derives "
+                    + derivedEpochForThis + " (accepting; see §13.1a)");
+        }
+        derivedEpoch = derivedEpochForThis;
 
         if (memberAiks != null && memberAiks.containsKey(fpHex)) {
             knownAikPubs.put(fpHex, memberAiks.get(fpHex));
