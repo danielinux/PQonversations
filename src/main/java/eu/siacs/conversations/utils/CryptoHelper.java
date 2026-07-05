@@ -256,10 +256,6 @@ public final class CryptoHelper {
     public static @StringRes int encryptionTypeToText(final int encryption) {
         return switch (encryption) {
             case Message.ENCRYPTION_OTR -> R.string.encryption_choice_otr;
-            case Message.ENCRYPTION_AXOLOTL,
-                    Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE,
-                    Message.ENCRYPTION_AXOLOTL_FAILED ->
-                    R.string.encryption_choice_omemo;
             case Message.ENCRYPTION_PGP,
                     Message.ENCRYPTION_DECRYPTED,
                     Message.ENCRYPTION_DECRYPTION_FAILED ->

@@ -419,7 +419,6 @@ public class MessageArchiveManager extends AbstractManager {
 
     private void processPostponed(final Query query) {
         final var account = getAccount();
-        account.getAxolotlService().processPostponed();
         query.pendingReceiptRequests.removeAll(query.receiptRequests);
         Log.d(
                 Config.LOGTAG,

@@ -827,19 +827,7 @@ public class MultiUserChatManager extends AbstractManager {
 
     private void fetchDeviceIdsIfNeeded(
             final Collection<Jid> previousMembers, final MucOptions.User user) {
-        final var real = user.getRealJid();
-        if (real == null) {
-            return;
-        }
-        final var contact = user.getContact();
-        final var mucOptions = user.getMucOptions();
-        final var axolotlService = connection.getAxolotlService();
-        if (!previousMembers.contains(real)
-                && mucOptions.isPrivateAndNonAnonymous()
-                && (contact == null || !contact.mutualPresenceSubscription())
-                && axolotlService.hasEmptyDeviceList(real)) {
-            axolotlService.fetchDeviceIds(real);
-        }
+        // OMEMO removed: no per-member device-id prefetch is required.
     }
 
     public ListenableFuture<Void> fetchDiscoInfo(final Conversation conversation) {

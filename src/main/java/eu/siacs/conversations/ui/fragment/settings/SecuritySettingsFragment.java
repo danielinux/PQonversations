@@ -167,8 +167,6 @@ public class SecuritySettingsFragment extends XmppPreferenceFragment {
                 case "always" -> context.getString(R.string.pref_omemo_setting_summary_always);
                 case "default_off" ->
                         context.getString(R.string.pref_omemo_setting_summary_default_off);
-                case "axolotl" ->
-                        context.getString(R.string.pref_omemo_setting_summary_axolotl);
                 default -> context.getString(R.string.pref_omemo_setting_summary_default_on);
             };
         }

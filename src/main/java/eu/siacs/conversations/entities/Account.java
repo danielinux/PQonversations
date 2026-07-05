@@ -269,16 +269,6 @@ public class Account extends AbstractEntity implements AvatarService.Avatar {
     public boolean setJid(final Jid next) {
         final Jid previousFull = this.jid;
         final Jid prev = this.jid != null ? this.jid.asBareJid() : null;
-        final boolean changed = prev == null || (next != null && !prev.equals(next.asBareJid()));
-        if (changed) {
-            final AxolotlService oldAxolotlService = xmppConnection.getAxolotlService();
-            // TODO check that changing JID and recreating the AxolotlService still works
-            if (oldAxolotlService != null) {
-                oldAxolotlService.destroy();
-                this.jid = next;
-                xmppConnection.setAxolotlService(oldAxolotlService.makeNew());
-            }
-        }
         this.jid = next;
         return next != null && !next.equals(previousFull);
     }
@@ -648,19 +638,8 @@ public class Account extends AbstractEntity implements AvatarService.Avatar {
     }
 
     public ImmutableMap<String, Collection<String>> getFingerprints() {
-        final ImmutableMultimap.Builder<String, String> builder = new ImmutableMultimap.Builder<>();
-        final var axolotlService = getAxolotlService();
-        builder.put(
-                String.format("omemo-sid-%d", axolotlService.getOwnDeviceId()),
-                axolotlService.getOwnFingerprint().substring(2));
-        for (final var session : axolotlService.findOwnSessions()) {
-            if (session.getTrust().isVerified() && session.getTrust().isActive()) {
-                builder.put(
-                        String.format("omemo-sid-%d", session.getRemoteAddress().getDeviceId()),
-                        session.getFingerprint().substring(2));
-            }
-        }
-        return builder.build().asMap();
+        // OMEMO removed: no OMEMO fingerprints are advertised in shareable URIs.
+        return ImmutableMap.of();
     }
 
     public boolean isOnlineAndConnected() {

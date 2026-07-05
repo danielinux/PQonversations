@@ -187,10 +187,6 @@ public class RosterManager extends AbstractManager implements Roster {
                     account.getJid().asBareJid()
                             + ": gained mutual presence subscription with "
                             + contact.getAddress());
-            final var axolotlService = account.getAxolotlService();
-            if (axolotlService != null) {
-                axolotlService.clearErrorsInFetchStatusMap(contact.getAddress());
-            }
         }
         service.getAvatarService().clear(contact);
     }

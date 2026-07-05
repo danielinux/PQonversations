@@ -788,7 +788,7 @@ public class Conversation extends AbstractEntity
     public int getNextEncryption() {
         if (OmemoSetting.isAlways()) {
             return suitableForOmemoByDefault(this)
-                    ? Message.ENCRYPTION_AXOLOTL
+                    ? Message.ENCRYPTION_X3DHPQ
                     : Message.ENCRYPTION_NONE;
         }
         final int defaultEncryption;

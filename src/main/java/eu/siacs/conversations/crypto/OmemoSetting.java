@@ -64,11 +64,6 @@ public class OmemoSetting {
                 always = false;
                 encryption = Message.ENCRYPTION_NONE;
                 break;
-            case "axolotl":
-                // legacy fallback for installs that explicitly want OMEMO
-                always = false;
-                encryption = Message.ENCRYPTION_AXOLOTL;
-                break;
             default:
                 always = false;
                 encryption = Message.ENCRYPTION_X3DHPQ;

@@ -13,7 +13,6 @@ import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import eu.siacs.conversations.R;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.entities.Conversational;
@@ -223,10 +222,6 @@ public class UIHelper {
             return new Pair<>(context.getString(R.string.pgp_message), true);
         } else if (message.getEncryption() == Message.ENCRYPTION_DECRYPTION_FAILED) {
             return new Pair<>(context.getString(R.string.decryption_failed), true);
-        } else if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE) {
-            return new Pair<>(context.getString(R.string.not_encrypted_for_this_device), true);
-        } else if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL_FAILED) {
-            return new Pair<>(context.getString(R.string.omemo_decryption_failed), true);
         } else if (message.isFileOrImage()) {
             return new Pair<>(getFileDescriptionString(context, message), true);
         } else if (message.getType() == Message.TYPE_RTP_SESSION) {
@@ -505,14 +500,6 @@ public class UIHelper {
     public static String getMessageHint(final Context context, final Conversation conversation) {
         return switch (conversation.getNextEncryption()) {
             case Message.ENCRYPTION_NONE -> context.getString(R.string.send_unencrypted_message);
-            case Message.ENCRYPTION_AXOLOTL -> {
-                final AxolotlService axolotlService = conversation.getAccount().getAxolotlService();
-                if (axolotlService != null && axolotlService.trustedSessionVerified(conversation)) {
-                    yield context.getString(R.string.send_omemo_x509_message);
-                } else {
-                    yield context.getString(R.string.send_encrypted_message);
-                }
-            }
             default -> context.getString(R.string.send_encrypted_message);
         };
     }
