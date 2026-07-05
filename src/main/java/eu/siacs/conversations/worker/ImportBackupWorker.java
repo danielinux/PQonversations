@@ -29,7 +29,6 @@ import com.google.gson.stream.JsonToken;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.Conversations;
 import eu.siacs.conversations.R;
-import eu.siacs.conversations.crypto.axolotl.SQLiteAxolotlStore;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.entities.Message;
@@ -73,17 +72,9 @@ public class ImportBackupWorker extends Worker {
     private static final String DATA_KEY_URI = "uri";
     private static final String DATA_KEY_INCLUDE_OMEMO = "omemo";
 
-    private static final Collection<String> OMEMO_TABLE_LIST =
-            Arrays.asList(
-                    SQLiteAxolotlStore.PREKEY_TABLENAME,
-                    SQLiteAxolotlStore.SIGNED_PREKEY_TABLENAME,
-                    SQLiteAxolotlStore.SESSION_TABLENAME,
-                    SQLiteAxolotlStore.IDENTITIES_TABLENAME);
-
     private static final List<String> TABLE_ALLOW_LIST =
             new ImmutableList.Builder<String>()
                     .add(Account.TABLENAME, Conversation.TABLENAME, Message.TABLENAME)
-                    .addAll(OMEMO_TABLE_LIST)
                     .build();
 
     private static final Pattern COLUMN_PATTERN = Pattern.compile("^[a-zA-Z_]+$");
@@ -288,32 +279,10 @@ public class ImportBackupWorker extends Worker {
             } else {
                 throw new IOException("jid or password in table did not match backup");
             }
-            final var keys = Account.parseKeys(contentValues.getAsString(Account.KEYS));
-            final var deviceId = keys.optString(SQLiteAxolotlStore.JSONKEY_REGISTRATION_ID);
-            final var importReadyKeys = new JSONObject();
-            if (!Strings.isNullOrEmpty(deviceId) && this.includeOmemo) {
-                try {
-                    importReadyKeys.put(SQLiteAxolotlStore.JSONKEY_REGISTRATION_ID, deviceId);
-                } catch (final JSONException e) {
-                    Log.e(Config.LOGTAG, "error writing omemo registration id", e);
-                }
-            }
-            contentValues.put(Account.KEYS, importReadyKeys.toString());
+            // OMEMO removed: do not restore any OMEMO key material into the account keys.
+            contentValues.put(Account.KEYS, new JSONObject().toString());
         }
-        if (this.includeOmemo) {
-            db.insert(table, null, contentValues);
-        } else {
-            if (OMEMO_TABLE_LIST.contains(table)) {
-                if (SQLiteAxolotlStore.IDENTITIES_TABLENAME.equals(table)
-                        && contentValues.getAsInteger(SQLiteAxolotlStore.OWN) == 0) {
-                    db.insert(table, null, contentValues);
-                } else {
-                    Log.d(Config.LOGTAG, "skipping over omemo key material in table " + table);
-                }
-            } else {
-                db.insert(table, null, contentValues);
-            }
-        }
+        db.insert(table, null, contentValues);
     }
 
     private void stopBackgroundService() {

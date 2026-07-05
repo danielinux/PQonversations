@@ -26,7 +26,6 @@ import com.google.gson.stream.JsonWriter;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
-import eu.siacs.conversations.crypto.axolotl.SQLiteAxolotlStore;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.entities.Message;
@@ -275,15 +274,6 @@ public class ExportBackupWorker extends Worker {
         accountExport(db, uuid, jsonWriter);
         simpleExport(db, Conversation.TABLENAME, Conversation.ACCOUNT, uuid, jsonWriter);
         messageExport(db, uuid, location, jsonWriter, progress);
-        for (final String table :
-                Arrays.asList(
-                        SQLiteAxolotlStore.PREKEY_TABLENAME,
-                        SQLiteAxolotlStore.SIGNED_PREKEY_TABLENAME,
-                        SQLiteAxolotlStore.SESSION_TABLENAME,
-                        SQLiteAxolotlStore.IDENTITIES_TABLENAME)) {
-            throwIfWorkStopped(location);
-            simpleExport(db, table, SQLiteAxolotlStore.ACCOUNT, uuid, jsonWriter);
-        }
         jsonWriter.endArray();
         jsonWriter.flush();
         jsonWriter.close();
