@@ -82,8 +82,6 @@ import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.crypto.PgpEngine;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
-import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
 import eu.siacs.conversations.databinding.DialogModerationBinding;
 import eu.siacs.conversations.databinding.FragmentConversationBinding;
 import eu.siacs.conversations.entities.Account;
@@ -660,7 +658,6 @@ public class ConversationFragment extends XmppFragment
                         return false;
                     }
                     switch (menuItem.getItemId()) {
-                        case R.id.encryption_choice_axolotl:
                         case R.id.encryption_choice_x3dhpq:
                         case R.id.encryption_choice_pgp:
                         case R.id.encryption_choice_none:
@@ -1015,45 +1012,8 @@ public class ConversationFragment extends XmppFragment
     }
 
     private boolean trustKeysIfNeeded(final Conversation conversation, final int requestCode) {
-        return conversation.getNextEncryption() == Message.ENCRYPTION_AXOLOTL
-                && trustKeysIfNeeded(requestCode);
-    }
-
-    protected boolean trustKeysIfNeeded(final int requestCode) {
-        final var axolotlService = conversation.getAccount().getAxolotlService();
-        final var targets = axolotlService.getCryptoTargets(conversation);
-        boolean hasUnaccepted = !conversation.getAcceptedCryptoTargets().containsAll(targets);
-        // TODO basically all of those are hitting the database. This should be async
-        boolean hasUndecidedOwn =
-                !axolotlService
-                        .getKeysWithTrust(FingerprintStatus.createActiveUndecided())
-                        .isEmpty();
-        boolean hasUndecidedContacts =
-                !axolotlService
-                        .getKeysWithTrust(FingerprintStatus.createActiveUndecided(), targets)
-                        .isEmpty();
-        boolean hasPendingKeys = !axolotlService.findDevicesWithoutSession(conversation).isEmpty();
-        boolean hasNoTrustedKeys = axolotlService.anyTargetHasNoTrustedKeys(targets);
-        boolean downloadInProgress = axolotlService.hasPendingKeyFetches(targets);
-        if (hasUndecidedOwn
-                || hasUndecidedContacts
-                || hasPendingKeys
-                || hasNoTrustedKeys
-                || hasUnaccepted
-                || downloadInProgress) {
-            axolotlService.createSessionsIfNeeded(conversation);
-            final Intent intent = new Intent(requireActivity(), TrustKeysActivity.class);
-            intent.putExtra(
-                    "contacts",
-                    Collections2.transform(targets, Jid::toString).toArray(new String[0]));
-            intent.putExtra(
-                    EXTRA_ACCOUNT, conversation.getAccount().getJid().asBareJid().toString());
-            intent.putExtra("conversation", conversation.getUuid());
-            startActivityForResult(intent, requestCode);
-            return true;
-        } else {
-            return false;
-        }
+        // OMEMO removed: x3dhpq manages its own key trust, no interactive trust step here.
+        return false;
     }
 
     public void updateChatMsgHint() {
@@ -1347,11 +1307,6 @@ public class ConversationFragment extends XmppFragment
         final Message m = this.selectedMessage;
         final Transferable t = m.getTransferable();
         if (m.getType() != Message.TYPE_STATUS && m.getType() != Message.TYPE_RTP_SESSION) {
-
-            if (m.getEncryption() == Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE
-                    || m.getEncryption() == Message.ENCRYPTION_AXOLOTL_FAILED) {
-                return;
-            }
 
             if (m.getStatus() == Message.STATUS_RECEIVED
                     && t != null
@@ -1824,15 +1779,6 @@ public class ConversationFragment extends XmppFragment
                     requireXmppActivity().showInstallPgpDialog();
                     updated = false;
                 }
-                break;
-            case R.id.encryption_choice_axolotl:
-                Log.d(
-                        Config.LOGTAG,
-                        AxolotlService.getLogprefix(conversation.getAccount())
-                                + "Enabled axolotl for Contact "
-                                + conversation.getContact().getAddress());
-                updated = conversation.setNextEncryption(Message.ENCRYPTION_AXOLOTL);
-                item.setChecked(true);
                 break;
             case R.id.encryption_choice_x3dhpq:
                 Log.d(

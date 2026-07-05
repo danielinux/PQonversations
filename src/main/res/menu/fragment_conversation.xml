@@ -36,9 +36,6 @@
                     android:id="@+id/encryption_choice_none"
                     android:title="@string/encryption_choice_unencrypted" />
                 <item
-                    android:id="@+id/encryption_choice_axolotl"
-                    android:title="@string/encryption_choice_omemo" />
-                <item
                     android:id="@+id/encryption_choice_x3dhpq"
                     android:title="@string/encryption_choice_x3dhpq" />
                 <item

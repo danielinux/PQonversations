@@ -51,7 +51,6 @@ import de.gultsch.common.Linkify;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
-import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
 import eu.siacs.conversations.databinding.ItemMessageDateBubbleBinding;
 import eu.siacs.conversations.databinding.ItemMessageEndBinding;
 import eu.siacs.conversations.databinding.ItemMessageRtpSessionBinding;
@@ -255,16 +254,6 @@ public class MessageAdapter extends ArrayAdapter<Message> {
             viewHolder.indicatorSecurity().setVisibility(View.GONE);
         } else {
             boolean verified = false;
-            if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL) {
-                final FingerprintStatus fingerprintStatus =
-                        message.getConversation()
-                                .getAccount()
-                                .getAxolotlService()
-                                .getFingerprintTrust(message.getFingerprint());
-                if (fingerprintStatus != null && fingerprintStatus.isVerified()) {
-                    verified = true;
-                }
-            }
             if (verified) {
                 viewHolder.indicatorSecurity().setImageResource(R.drawable.ic_verified_user_24dp);
             } else {
@@ -840,9 +829,7 @@ public class MessageAdapter extends ArrayAdapter<Message> {
             final int position,
             final Message message,
             final BubbleMessageItemViewHolder viewHolder) {
-        final boolean omemoEncryption = message.getEncryption() == Message.ENCRYPTION_AXOLOTL;
-        final boolean isInValidSession =
-                message.isValidInSession() && (!omemoEncryption || message.isTrusted());
+        final boolean isInValidSession = message.isValidInSession();
         final Conversational conversation = message.getConversation();
         final Account account = conversation.getAccount();
 
@@ -971,14 +958,6 @@ public class MessageAdapter extends ArrayAdapter<Message> {
         } else if (message.getEncryption() == Message.ENCRYPTION_DECRYPTION_FAILED) {
             displayInfoMessage(
                     viewHolder, activity.getString(R.string.decryption_failed), bubbleColor);
-        } else if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE) {
-            displayInfoMessage(
-                    viewHolder,
-                    activity.getString(R.string.not_encrypted_for_this_device),
-                    bubbleColor);
-        } else if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL_FAILED) {
-            displayInfoMessage(
-                    viewHolder, activity.getString(R.string.omemo_decryption_failed), bubbleColor);
         } else {
             if (message.isGeoUri()) {
                 displayLocationMessage(viewHolder, message, bubbleColor);
@@ -1018,13 +997,9 @@ public class MessageAdapter extends ArrayAdapter<Message> {
                 startViewHolder.encryption().setVisibility(View.GONE);
             } else {
                 startViewHolder.encryption().setVisibility(View.VISIBLE);
-                if (omemoEncryption && !message.isTrusted()) {
-                    startViewHolder.encryption().setText(R.string.not_trusted);
-                } else {
-                    startViewHolder
-                            .encryption()
-                            .setText(CryptoHelper.encryptionTypeToText(message.getEncryption()));
-                }
+                startViewHolder
+                        .encryption()
+                        .setText(CryptoHelper.encryptionTypeToText(message.getEncryption()));
             }
             final boolean remaining = Restrictions.reactionsPerUserRemaining(message);
             if (remaining) {
@@ -1316,10 +1291,6 @@ public class MessageAdapter extends ArrayAdapter<Message> {
 
     private static int homogenizedEncryption(final int encryption) {
         return switch (encryption) {
-            case Message.ENCRYPTION_AXOLOTL,
-                    Message.ENCRYPTION_AXOLOTL_FAILED,
-                    Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE ->
-                    Message.ENCRYPTION_AXOLOTL;
             case Message.ENCRYPTION_PGP,
                     Message.ENCRYPTION_DECRYPTED,
                     Message.ENCRYPTION_DECRYPTION_FAILED ->
