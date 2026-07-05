@@ -74,7 +74,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 57;
+    private static final int DATABASE_VERSION = 58;
 
     private static boolean requiresMessageIndexRebuild = false;
     private static DatabaseBackend instance = null;
@@ -389,6 +389,26 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     + " ON DELETE CASCADE"
                     + ")";
 
+    // Per-account devicelist version + last-seen content state (§8.2, §8.5).
+    // owner_jid is the account whose devicelist this row tracks: our own bare
+    // JID for the publish-side monotonic counter, or a peer bare JID for the
+    // receive-side rollback/fork/transitional gate. content_hash is SHA-256 of
+    // the sorted device records (id|added_at|flags|cert) — the stable content
+    // that excludes version and issued_at. accepted_signed flips to 1 once a
+    // valid signed list has been accepted for the owner (downgrade lock, §8.5).
+    private static final String CREATE_X3DHPQ_DEVICELIST_STATE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_devicelist_state ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "owner_jid TEXT NOT NULL,"
+                    + "version INTEGER NOT NULL,"
+                    + "content_hash BLOB NOT NULL,"     // SHA-256 of sorted device records
+                    + "accepted_signed INTEGER NOT NULL DEFAULT 0,"
+                    + "updated_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, owner_jid),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+
     private static final String CREATE_X3DHPQ_PAIRING_SESSION =
             "CREATE TABLE IF NOT EXISTS x3dhpq_pairing_session ("
                     + "sid BLOB PRIMARY KEY NOT NULL,"
@@ -679,6 +699,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         db.execSQL(CREATE_X3DHPQ_AUDIT_OWNER_SEQ_INDEX);
         db.execSQL(CREATE_X3DHPQ_GROUP_SESSION);
         db.execSQL(CREATE_X3DHPQ_GROUP_MEMBERSHIP);
+        db.execSQL(CREATE_X3DHPQ_DEVICELIST_STATE);
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION);
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
     }
@@ -1287,6 +1308,10 @@ public class DatabaseBackend extends SQLiteOpenHelper
         if (oldVersion < 57 && newVersion >= 57) {
             db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION);
             db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
+        }
+        // x3dhpq_devicelist_state table (added in DATABASE_VERSION = 58).
+        if (oldVersion < 58 && newVersion >= 58) {
+            db.execSQL(CREATE_X3DHPQ_DEVICELIST_STATE);
         }
     }
 
@@ -2950,6 +2975,13 @@ public class DatabaseBackend extends SQLiteOpenHelper
     public record X3dhpqAccountIdentityRow(
             String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint) {}
 
+    public record X3dhpqDeviceListStateRow(
+            String accountUuid,
+            String ownerJid,
+            long version,
+            byte[] contentHash,
+            boolean acceptedSigned) {}
+
     public record X3dhpqLocalDeviceRow(
             String accountUuid,
             int deviceId,
@@ -3082,6 +3114,51 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     c.getBlob(c.getColumnIndexOrThrow("aik_priv_marshal")),
                     c.getBlob(c.getColumnIndexOrThrow("aik_pub_marshal")),
                     c.getString(c.getColumnIndexOrThrow("fingerprint")));
+        } finally {
+            c.close();
+        }
+    }
+
+    // ---- x3dhpq DAO: devicelist_state (§8.2, §8.5) ----
+
+    public void putX3dhpqDeviceListState(
+            String accountUuid,
+            String ownerJid,
+            long version,
+            byte[] contentHash,
+            boolean acceptedSigned,
+            long updatedAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("owner_jid", ownerJid);
+        v.put("version", version);
+        v.put("content_hash", contentHash != null ? contentHash : new byte[0]);
+        v.put("accepted_signed", acceptedSigned ? 1 : 0);
+        v.put("updated_at", updatedAt);
+        db.insertWithOnConflict(
+                "x3dhpq_devicelist_state", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqDeviceListStateRow loadX3dhpqDeviceListState(String accountUuid, String ownerJid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_devicelist_state",
+                        null,
+                        "account_uuid=? AND owner_jid=?",
+                        new String[] {accountUuid, ownerJid},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqDeviceListStateRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getString(c.getColumnIndexOrThrow("owner_jid")),
+                    c.getLong(c.getColumnIndexOrThrow("version")),
+                    c.getBlob(c.getColumnIndexOrThrow("content_hash")),
+                    c.getInt(c.getColumnIndexOrThrow("accepted_signed")) != 0);
         } finally {
             c.close();
         }

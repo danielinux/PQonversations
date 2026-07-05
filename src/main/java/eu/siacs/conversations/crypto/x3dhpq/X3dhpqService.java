@@ -24,6 +24,8 @@ import im.conversations.android.xmpp.model.x3dhpq.bundle.Dc;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.Cert;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.Device;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
+import im.conversations.android.xmpp.model.x3dhpq.devicelist.MldsaSig;
+import im.conversations.android.xmpp.model.x3dhpq.devicelist.Sig;
 import im.conversations.android.xmpp.model.x3dhpq.group.MembershipEntry;
 import im.conversations.android.xmpp.model.x3dhpq.recovery.Recovery;
 import im.conversations.x3dhpq.crypto.X3dhpqCrypto;
@@ -33,6 +35,7 @@ import im.conversations.x3dhpq.protocol.PqxdhResponder;
 import im.conversations.x3dhpq.protocol.PqxdhResult;
 import im.conversations.x3dhpq.protocol.PrekeyEnvelope;
 import im.conversations.x3dhpq.protocol.Session;
+import im.conversations.x3dhpq.types.AccountIdentityKey;
 import im.conversations.x3dhpq.types.AccountIdentityPub;
 import im.conversations.x3dhpq.types.DeviceCertificate;
 import im.conversations.x3dhpq.types.DeviceIdentityKey;
@@ -203,9 +206,23 @@ public class X3dhpqService {
     public void handleItems(final Jid from, final Items items) {
         final String node = items.getNode();
         if (Namespace.X3DHPQ_DEVICELIST.equals(node)) {
-            final var entry = items.getFirstItemWithId(DeviceList.class);
-            if (entry != null) {
-                handleEvent(from, node, entry.getKey(), entry.getValue());
+            // The <sig>/<mldsa-sig> live as siblings of <devicelist> inside the
+            // item (§8.4), so route via the raw Item to carry them through.
+            for (final var item : items.getItems()) {
+                final DeviceList list = item.getExtension(DeviceList.class);
+                if (list == null) {
+                    continue;
+                }
+                final Sig sig = item.getExtension(Sig.class);
+                final MldsaSig mldsaSig = item.getExtension(MldsaSig.class);
+                handleInboundDeviceList(
+                        from, list,
+                        sig != null ? sig.asBytes() : null,
+                        mldsaSig != null ? mldsaSig.asBytes() : null);
+                if (deviceListListener != null) {
+                    deviceListListener.onDeviceListReceived(from, list);
+                }
+                break; // only the 'current' item is relevant
             }
         } else if (Namespace.X3DHPQ_BUNDLE.equals(node)) {
             final var entry = items.getFirstItemWithId(Bundle.class);
@@ -330,14 +347,14 @@ public class X3dhpqService {
                                 "x3dhpq: devicelist fetch returned non-RESULT for " + peerBareJid);
                         return;
                     }
-                    final Extension payload = extractPubsubPayload(response, DeviceList.class);
-                    if (payload == null) {
+                    final DeviceListItem dli = extractDeviceListItem(response);
+                    if (dli == null) {
                         Log.w(Config.LOGTAG,
                                 "x3dhpq: devicelist fetch RESULT carried no DeviceList payload"
                                         + " for " + peerBareJid + "; iq body=" + response);
                         return;
                     }
-                    handleInboundDeviceList(peerBareJid, (DeviceList) payload);
+                    handleInboundDeviceList(peerBareJid, dli.list, dli.edSig, dli.mlSig);
                 });
     }
 
@@ -375,12 +392,33 @@ public class X3dhpqService {
                 });
     }
 
-    /** Handles an inbound devicelist: persists remote_device rows and schedules missing bundle fetches. */
+    /** Legacy/test entry point: inbound devicelist without carried signatures. */
     void handleInboundDeviceList(final Jid peerBareJid, final DeviceList list) {
+        handleInboundDeviceList(peerBareJid, list, null, null);
+    }
+
+    /**
+     * Handles an inbound devicelist: enforces the hybrid-signature + monotonic
+     * version gate (§8.2/§8.5), then persists remote_device rows and schedules
+     * missing bundle fetches. {@code edSig}/{@code mldsaSig} are the {@code <sig>}
+     * / {@code <mldsa-sig>} siblings of the devicelist in the PEP item; null for
+     * a legacy unsigned list.
+     */
+    void handleInboundDeviceList(
+            final Jid peerBareJid, final DeviceList list,
+            final byte[] edSig, final byte[] mldsaSig) {
         if (db == null) return;
         final String accountUuid = account != null ? account.getUuid() : "test";
         final String peer = peerBareJid.asBareJid().toString();
         final long now = System.currentTimeMillis() / 1000L;
+
+        // §8.2/§8.5 gate: reject rollback/fork/downgrade/bad-signature lists
+        // before trusting any of their contents.
+        if (!deviceListGate(accountUuid, peer, list, edSig, mldsaSig, now)) {
+            Log.w(Config.LOGTAG,
+                    "x3dhpq: REJECTED inbound devicelist from " + peer + " (see gate log)");
+            return;
+        }
 
         final Collection<Device> devices = list.getDevices();
         Log.d(Config.LOGTAG,
@@ -434,6 +472,193 @@ public class X3dhpqService {
         // pairwise envelopes (e.g. SenderChainAnnouncements) to ghost
         // device ids that the peer regenerated and abandoned.
         db.pruneX3dhpqRemoteDevicesNotIn(accountUuid, peer, liveIds);
+    }
+
+    /**
+     * The signature + monotonic-version gate for an inbound devicelist (§8.2/§8.5).
+     *
+     * <p>Returns {@code true} when the list may be processed (accepted, or a signed
+     * list whose signature check is DEFERRED because the peer AIK is not yet known),
+     * {@code false} when it MUST be rejected (rollback, fork, bad signature, or an
+     * unsigned/legacy list after a signed one was already accepted — downgrade lock).
+     */
+    private boolean deviceListGate(
+            final String accountUuid, final String peer, final DeviceList list,
+            final byte[] edSig, final byte[] mldsaSig, final long now) {
+        final boolean hasSig =
+                edSig != null && edSig.length > 0 && mldsaSig != null && mldsaSig.length > 0;
+
+        final long issuedAt = parseLongOr(list.getIssuedAt(), 0L);
+        // Clock-skew guard (§8.5): reject lists issued too far in the future.
+        if (issuedAt > now + 300L) {
+            Log.w(Config.LOGTAG, "x3dhpq: devicelist from " + peer
+                    + " issued_at " + issuedAt + " > now+300s; rejecting");
+            return false;
+        }
+
+        final DatabaseBackend.X3dhpqDeviceListStateRow state =
+                db.loadX3dhpqDeviceListState(accountUuid, peer);
+        final boolean everAcceptedSigned = state != null && state.acceptedSigned();
+
+        if (!hasSig) {
+            // Transitional rule (§8.5): accept an unsigned list ONLY if we have
+            // never accepted a signed one for this account; otherwise a malicious
+            // server could strip signatures to force a downgrade.
+            if (everAcceptedSigned) {
+                Log.w(Config.LOGTAG, "x3dhpq: unsigned devicelist from " + peer
+                        + " rejected — a signed list was already accepted (downgrade lock)");
+                return false;
+            }
+            Log.d(Config.LOGTAG, "x3dhpq: accepting unsigned (transitional) devicelist from " + peer);
+            return true;
+        }
+
+        // Signed list. We need the peer AIK to verify.
+        final AccountIdentityPub peerAik = resolvePinnedPeerAik(accountUuid, peer);
+        if (peerAik == null) {
+            // First-contact caveat: bundle (hence AIK) not fetched yet. Defer the
+            // gate — process the list so bundle fetches are scheduled; a later
+            // republish will be verified once the AIK is known.
+            Log.d(Config.LOGTAG, "x3dhpq: deferring devicelist signature gate for " + peer
+                    + " — peer AIK not yet known");
+            return true;
+        }
+
+        final long version = parseUnsignedLongOr(list.getVersion(), -1L);
+        if (version < 0) {
+            Log.w(Config.LOGTAG, "x3dhpq: signed devicelist from " + peer
+                    + " has no/invalid version; rejecting");
+            return false;
+        }
+
+        // Reconstruct the §8.3 SignedPart from the wire (sorted by device_id asc)
+        // and verify BOTH AIK signatures + every embedded DC.
+        final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries =
+                coreEntriesFromWire(list);
+        if (entries == null) {
+            Log.w(Config.LOGTAG, "x3dhpq: signed devicelist from " + peer
+                    + " has a malformed device/cert; cannot verify, rejecting");
+            return false;
+        }
+        for (final im.conversations.x3dhpq.types.DeviceList.DeviceListEntry e : entries) {
+            final byte[] dcSigned = e.getCert().signedPart();
+            final boolean dcEd = X3dhpqCrypto.ed25519Verify(
+                    peerAik.getPubEd25519(), dcSigned, e.getCert().getSigEd25519());
+            final boolean dcMl = X3dhpqCrypto.mldsa65Verify(
+                    peerAik.getPubMLDSA(), dcSigned, e.getCert().getSigMLDSA());
+            if (!dcEd || !dcMl) {
+                Log.w(Config.LOGTAG, "x3dhpq: devicelist from " + peer
+                        + " embeds a DC not signed by the peer AIK; rejecting");
+                return false;
+            }
+        }
+
+        final byte[] signedPart =
+                new im.conversations.x3dhpq.types.DeviceList(
+                                version, issuedAt, entries, new byte[0], new byte[0])
+                        .signedPart();
+        final boolean edOk = X3dhpqCrypto.ed25519Verify(peerAik.getPubEd25519(), signedPart, edSig);
+        final boolean mlOk = X3dhpqCrypto.mldsa65Verify(peerAik.getPubMLDSA(), signedPart, mldsaSig);
+        if (!edOk || !mlOk) {
+            Log.w(Config.LOGTAG, "x3dhpq: devicelist AIK signature FAILED for " + peer
+                    + " (ed=" + edOk + " mldsa=" + mlOk + "); rejecting");
+            return false;
+        }
+
+        // Version rule (§8.5): reject rollback and same-version forks; an identical
+        // republish at the same version is an idempotent no-op.
+        final long lastSeenVersion = state != null ? state.version() : -1L;
+        final byte[] contentHash = deviceListContentHash(entries);
+        if (version < lastSeenVersion) {
+            Log.w(Config.LOGTAG, "x3dhpq: devicelist rollback from " + peer
+                    + " (version " + version + " < last-seen " + lastSeenVersion + "); rejecting");
+            return false;
+        }
+        if (version == lastSeenVersion
+                && state != null
+                && !Arrays.equals(state.contentHash(), contentHash)) {
+            Log.w(Config.LOGTAG, "x3dhpq: devicelist fork from " + peer
+                    + " (same version " + version + ", different content); rejecting");
+            return false;
+        }
+
+        db.putX3dhpqDeviceListState(accountUuid, peer, version, contentHash, true, now);
+        Log.d(Config.LOGTAG, "x3dhpq: accepted signed devicelist from " + peer
+                + " version=" + version);
+        return true;
+    }
+
+    /**
+     * Builds sorted (device_id ascending, unsigned) core entries from an inbound
+     * XML devicelist for SignedPart reconstruction; returns null if any device is
+     * missing its id/added-at/cert or the cert is unparseable.
+     */
+    private static List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> coreEntriesFromWire(
+            final DeviceList list) {
+        final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries =
+                new ArrayList<>();
+        for (final Device device : list.getDevices()) {
+            final Integer id = device.getDeviceId();
+            final Long addedAt = device.getAddedAt();
+            final Cert certEl = device.getCert();
+            final byte[] dcBytes = certEl != null ? certEl.asBytes() : null;
+            if (id == null || addedAt == null || dcBytes == null || dcBytes.length == 0) {
+                return null;
+            }
+            final byte flags;
+            try {
+                flags = (byte) Integer.parseInt(
+                        com.google.common.base.Strings.nullToEmpty(device.getFlags()).trim());
+            } catch (final NumberFormatException e) {
+                return null;
+            }
+            final DeviceCertificate cert;
+            try {
+                cert = DeviceCertificate.unmarshal(dcBytes);
+            } catch (final Exception e) {
+                return null;
+            }
+            entries.add(new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
+                    id & 0xffffffffL, addedAt, flags, cert));
+        }
+        entries.sort(java.util.Comparator.comparingLong(
+                im.conversations.x3dhpq.types.DeviceList.DeviceListEntry::getDeviceId));
+        return entries;
+    }
+
+    /** Resolves the pinned (TOFU) peer AIK from any cached bundle, or null if none. */
+    private AccountIdentityPub resolvePinnedPeerAik(final String accountUuid, final String peer) {
+        for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd :
+                db.listX3dhpqRemoteDevices(accountUuid, peer)) {
+            final DatabaseBackend.X3dhpqRemoteBundleRow b =
+                    db.loadX3dhpqRemoteBundle(accountUuid, peer, rd.deviceId());
+            if (b != null && b.aikPubMarshal() != null) {
+                try {
+                    return AccountIdentityPub.unmarshal(b.aikPubMarshal());
+                } catch (final Exception ignored) {
+                    // try the next cached bundle
+                }
+            }
+        }
+        return null;
+    }
+
+    private static long parseLongOr(final String s, final long dflt) {
+        if (s == null) return dflt;
+        try {
+            return Long.parseLong(s.trim());
+        } catch (final NumberFormatException e) {
+            return dflt;
+        }
+    }
+
+    private static long parseUnsignedLongOr(final String s, final long dflt) {
+        if (s == null) return dflt;
+        try {
+            return Long.parseUnsignedLong(s.trim());
+        } catch (final NumberFormatException e) {
+            return dflt;
+        }
     }
 
     /** Handles an inbound bundle: verifies DC signatures, pins AIK (TOFU), and persists. */
@@ -748,6 +973,41 @@ public class X3dhpqService {
         }
     }
 
+    /** A devicelist plus its {@code <sig>}/{@code <mldsa-sig>} siblings from one item. */
+    private static final class DeviceListItem {
+        final DeviceList list;
+        final byte[] edSig;
+        final byte[] mlSig;
+
+        DeviceListItem(final DeviceList list, final byte[] edSig, final byte[] mlSig) {
+            this.list = list;
+            this.edSig = edSig;
+            this.mlSig = mlSig;
+        }
+    }
+
+    // Navigate iq → pubsub → items → the item holding a <devicelist>, returning it
+    // together with its <sig>/<mldsa-sig> siblings (§8.4). Null on any miss.
+    private static DeviceListItem extractDeviceListItem(final Iq iq) {
+        final PubSub pubsub = iq.getExtension(PubSub.class);
+        if (pubsub == null) return null;
+        final im.conversations.android.xmpp.model.pubsub.Items items = pubsub.getItems();
+        if (items == null) return null;
+        for (final var item : items.getItems()) {
+            final DeviceList list = item.getExtension(DeviceList.class);
+            if (list == null) {
+                continue;
+            }
+            final Sig sig = item.getExtension(Sig.class);
+            final MldsaSig mldsaSig = item.getExtension(MldsaSig.class);
+            return new DeviceListItem(
+                    list,
+                    sig != null ? sig.asBytes() : null,
+                    mldsaSig != null ? mldsaSig.asBytes() : null);
+        }
+        return null;
+    }
+
     // Navigate iq → pubsub → items → item(0) → child of type clazz; returns null on any miss.
     private static <T extends Extension> T extractPubsubPayload(final Iq iq, final Class<T> clazz) {
         final PubSub pubsub = iq.getExtension(PubSub.class);
@@ -757,13 +1017,95 @@ public class X3dhpqService {
         return items.getFirstItem(clazz);
     }
 
+    // SignedPart header preceding the per-device records: prefix(21) + version(8)
+    // + issued_at(8) + num_devices(2). Stripping it yields the version/issued_at-
+    // independent "content" whose hash decides when the monotonic version bumps.
+    private static final int DEVICELIST_SIGNED_PART_HEADER_LEN = 21 + 8 + 8 + 2;
+
+    /** Hash of the device-records portion of the SignedPart (excludes version + issued_at). */
+    private static byte[] deviceListContentHash(
+            final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries) {
+        final byte[] sp =
+                new im.conversations.x3dhpq.types.DeviceList(
+                                0L, 0L, entries, new byte[0], new byte[0])
+                        .signedPart();
+        final byte[] records =
+                Arrays.copyOfRange(sp, DEVICELIST_SIGNED_PART_HEADER_LEN, sp.length);
+        return X3dhpqCrypto.SHA256.hash(records);
+    }
+
     private void publishDeviceList() {
+        final String accountUuid = account.getUuid();
+        final String ownerJid = account.getJid().asBareJid().toString();
+
+        // Build the canonical core entries from local rows, sorted by device_id
+        // ascending (unsigned) — the §8.3 signed-input order.
+        final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
+                new ArrayList<>(db.listX3dhpqLocalDevices(accountUuid));
+        rows.sort(java.util.Comparator.comparingLong(r -> r.deviceId() & 0xffffffffL));
+        final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries =
+                new ArrayList<>();
+        for (final DatabaseBackend.X3dhpqLocalDeviceRow row : rows) {
+            final DeviceCertificate cert;
+            try {
+                cert = DeviceCertificate.unmarshal(row.dc());
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": skipping local device " + row.deviceId()
+                        + " with unparseable DC: " + e.getMessage());
+                continue;
+            }
+            entries.add(new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
+                    row.deviceId() & 0xffffffffL, row.createdAt(), (byte) row.flags(), cert));
+        }
+
+        // Decide the monotonic version (§8.2): first publish => 1; content change
+        // => previous + 1; unchanged republish => reuse. Never hardcoded.
+        final byte[] contentHash = deviceListContentHash(entries);
+        final DatabaseBackend.X3dhpqDeviceListStateRow state =
+                db.loadX3dhpqDeviceListState(accountUuid, ownerJid);
+        final long version;
+        if (state == null) {
+            version = 1L;
+        } else if (!Arrays.equals(state.contentHash(), contentHash)) {
+            version = state.version() + 1L;
+        } else {
+            version = state.version();
+        }
+
+        final long issuedAt = System.currentTimeMillis() / 1000L;
+
+        // Hybrid-sign the SignedPart over the account's own AIK (§8.2/§7.7).
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": cannot sign devicelist — no AIK row");
+            return;
+        }
+        final AccountIdentityKey aik;
+        try {
+            aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": cannot load AIK priv to sign devicelist: "
+                    + e.getMessage());
+            return;
+        }
+        final byte[] signedPart =
+                new im.conversations.x3dhpq.types.DeviceList(
+                                version, issuedAt, entries, new byte[0], new byte[0])
+                        .signedPart();
+        final byte[] sigEd = X3dhpqCrypto.ed25519Sign(aik.getPrivEd25519(), signedPart);
+        final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(aik.getPrivMLDSA(), signedPart);
+
+        // Persist our own monotonic state (we always publish signed).
+        db.putX3dhpqDeviceListState(accountUuid, ownerJid, version, contentHash, true,
+                System.currentTimeMillis() / 1000L);
+
         final DeviceList list =
-                X3dhpqStanzaBuilder.buildDeviceList(db, account.getUuid());
+                X3dhpqStanzaBuilder.buildDeviceList(db, accountUuid, version, issuedAt);
         final im.conversations.android.xmpp.model.stanza.Iq iq =
                 mXmppConnectionService
                         .getIqGenerator()
-                        .generateX3dhpqPublishDeviceList(list, "current");
+                        .generateX3dhpqPublishDeviceList(list, "current", sigEd, sigMl);
         mXmppConnectionService.sendIqPacket(
                 account,
                 iq,

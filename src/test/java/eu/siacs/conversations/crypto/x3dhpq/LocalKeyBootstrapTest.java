@@ -58,6 +58,30 @@ public class LocalKeyBootstrapTest {
             return identityRows.get(accountUuid);
         }
 
+        // key: accountUuid + ":" + ownerJid
+        final Map<String, DatabaseBackend.X3dhpqDeviceListStateRow> deviceListStateRows =
+                new HashMap<>();
+
+        @Override
+        public void putX3dhpqDeviceListState(
+                String accountUuid,
+                String ownerJid,
+                long version,
+                byte[] contentHash,
+                boolean acceptedSigned,
+                long updatedAt) {
+            deviceListStateRows.put(
+                    accountUuid + ":" + ownerJid,
+                    new DatabaseBackend.X3dhpqDeviceListStateRow(
+                            accountUuid, ownerJid, version, contentHash, acceptedSigned));
+        }
+
+        @Override
+        public DatabaseBackend.X3dhpqDeviceListStateRow loadX3dhpqDeviceListState(
+                String accountUuid, String ownerJid) {
+            return deviceListStateRows.get(accountUuid + ":" + ownerJid);
+        }
+
         @Override
         public void putX3dhpqLocalDevice(
                 String accountUuid,

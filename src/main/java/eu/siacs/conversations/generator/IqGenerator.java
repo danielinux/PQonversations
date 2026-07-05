@@ -13,6 +13,8 @@ import eu.siacs.conversations.xmpp.forms.Data;
 import eu.siacs.conversations.xmpp.pep.PublishOptions;
 import im.conversations.android.xmpp.model.stanza.Iq;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
+import im.conversations.android.xmpp.model.x3dhpq.devicelist.MldsaSig;
+import im.conversations.android.xmpp.model.x3dhpq.devicelist.Sig;
 import im.conversations.android.xmpp.model.x3dhpq.pair.VerifyDevice;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
@@ -200,9 +202,31 @@ public class IqGenerator extends AbstractGenerator {
      */
     public Iq generateX3dhpqPublishDeviceList(
             final DeviceList list, final String itemId) {
+        return generateX3dhpqPublishDeviceList(list, itemId, null, null);
+    }
+
+    /**
+     * Publishes the signed x3dhpq device list (§8.4). When {@code sigEd25519} and
+     * {@code sigMldsa} are non-null they are emitted as {@code <sig>} and
+     * {@code <mldsa-sig>} siblings of {@code <devicelist>} inside the item, per the
+     * §8.4 example. Passing null signatures publishes an unsigned (legacy) list.
+     */
+    public Iq generateX3dhpqPublishDeviceList(
+            final DeviceList list,
+            final String itemId,
+            final byte[] sigEd25519,
+            final byte[] sigMldsa) {
         final Element item = new Element("item");
         item.setAttribute("id", itemId);
         item.addChild(list); // DeviceList extends Element
+        if (sigEd25519 != null && sigMldsa != null) {
+            final Sig sig = new Sig();
+            sig.setContent(sigEd25519);
+            item.addChild(sig);
+            final MldsaSig mldsaSig = new MldsaSig();
+            mldsaSig.setContent(sigMldsa);
+            item.addChild(mldsaSig);
+        }
         final Bundle options = PublishOptions.openAccess();
         options.putString("pubsub#persist_items", "true");
         options.putString("pubsub#max_items", "1");

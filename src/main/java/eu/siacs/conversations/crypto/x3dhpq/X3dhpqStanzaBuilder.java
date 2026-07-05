@@ -21,6 +21,8 @@ import im.conversations.android.xmpp.model.x3dhpq.devicelist.Device;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
 import im.conversations.x3dhpq.types.AccountIdentityPub;
 import im.conversations.x3dhpq.types.DeviceIdentityKey;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -37,13 +39,33 @@ public final class X3dhpqStanzaBuilder {
      */
     public static DeviceList buildDeviceList(
             final X3dhpqDao dao, final String accountUuid) {
+        // Legacy/test convenience: version 1, current issued-at. The production
+        // publish path (X3dhpqService) computes the monotonic version (§8.2) and
+        // uses the explicit overload below.
+        return buildDeviceList(dao, accountUuid, 1L, System.currentTimeMillis() / 1000L);
+    }
+
+    /**
+     * Builds the DeviceList Extension for all local devices, with an explicit
+     * monotonic {@code version} and {@code issuedAt} (§8.2). Devices are emitted
+     * sorted by device_id ascending (unsigned) so the XML matches the canonical
+     * signed input order of §8.3.
+     */
+    public static DeviceList buildDeviceList(
+            final X3dhpqDao dao,
+            final String accountUuid,
+            final long version,
+            final long issuedAt) {
         final DeviceList deviceList = new DeviceList();
-        deviceList.setVersion("1");
-        // issued-at is Unix seconds as a string (mirrors dino fork lines 129-130)
-        deviceList.setIssuedAt(Long.toString(System.currentTimeMillis() / 1000L));
+        deviceList.setVersion(Long.toUnsignedString(version));
+        deviceList.setIssuedAt(Long.toString(issuedAt));
 
         final List<DatabaseBackend.X3dhpqLocalDeviceRow> localDevices =
-                dao.listX3dhpqLocalDevices(accountUuid);
+                new ArrayList<>(dao.listX3dhpqLocalDevices(accountUuid));
+        // Sort by device_id ascending (unsigned) — canonical order of §8.3.
+        localDevices.sort(
+                Comparator.comparingLong(r -> ((DatabaseBackend.X3dhpqLocalDeviceRow) r).deviceId()
+                        & 0xffffffffL));
         for (final DatabaseBackend.X3dhpqLocalDeviceRow row : localDevices) {
             final Device device = new Device();
             device.setDeviceId(row.deviceId());

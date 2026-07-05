@@ -14,6 +14,11 @@ public interface X3dhpqDao {
     void putX3dhpqAccountIdentity(String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint);
     DatabaseBackend.X3dhpqAccountIdentityRow loadX3dhpqAccountIdentity(String accountUuid);
 
+    // --- devicelist version + last-seen content state (§8.2, §8.5) ---
+    void putX3dhpqDeviceListState(String accountUuid, String ownerJid, long version,
+                                  byte[] contentHash, boolean acceptedSigned, long updatedAt);
+    DatabaseBackend.X3dhpqDeviceListStateRow loadX3dhpqDeviceListState(String accountUuid, String ownerJid);
+
     // --- local device ---
     void putX3dhpqLocalDevice(String accountUuid, int deviceId, byte[] dikPriv, byte[] dc, long createdAt, int flags);
     List<DatabaseBackend.X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid);
