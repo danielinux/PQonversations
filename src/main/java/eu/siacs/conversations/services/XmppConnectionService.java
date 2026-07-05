@@ -4001,46 +4001,6 @@ public class XmppConnectionService extends Service {
         return templates;
     }
 
-    public boolean verifyFingerprints(
-            final Contact contact, final Collection<String> fingerprints) {
-        final var performedVerification = new AtomicBoolean(false);
-        final AxolotlService axolotlService = contact.getAccount().getAxolotlService();
-        for (final var fp : fingerprints) {
-            final String fingerprint = "05" + fp.replaceAll("\\s", "");
-            FingerprintStatus fingerprintStatus = axolotlService.getFingerprintTrust(fingerprint);
-            if (fingerprintStatus != null) {
-                if (!fingerprintStatus.isVerified()) {
-                    performedVerification.set(true);
-                    axolotlService.setFingerprintTrust(fingerprint, fingerprintStatus.toVerified());
-                }
-            } else {
-                axolotlService.preVerifyFingerprint(contact, fingerprint);
-            }
-        }
-        return performedVerification.get();
-    }
-
-    public boolean verifyFingerprints(
-            final Account account, final Collection<String> fingerprints) {
-        final AxolotlService axolotlService = account.getAxolotlService();
-        final var verifiedSomething = new AtomicBoolean(false);
-        for (final var fp : fingerprints) {
-            final String fingerprint = "05" + fp.replaceAll("\\s", "");
-            Log.d(Config.LOGTAG, "trying to verify own fp=" + fingerprint);
-            FingerprintStatus fingerprintStatus = axolotlService.getFingerprintTrust(fingerprint);
-            if (fingerprintStatus != null) {
-                if (!fingerprintStatus.isVerified()) {
-                    axolotlService.setFingerprintTrust(fingerprint, fingerprintStatus.toVerified());
-                    verifiedSomething.set(true);
-                }
-            } else {
-                axolotlService.preVerifyFingerprint(account, fingerprint);
-                verifiedSomething.set(true);
-            }
-        }
-        return verifiedSomething.get();
-    }
-
     public ShortcutService getShortcutService() {
         return mShortcutService;
     }

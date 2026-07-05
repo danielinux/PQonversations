@@ -663,10 +663,6 @@ public class StartConversationActivity extends XmppActivity
                                         ? null
                                         : invite.uri.getParameter(MiniUri.Xmpp.PARAMETER_PRE_AUTH);
                         xmppConnectionService.createContact(contact, preAuth);
-                        if (invite != null && invite.uri.hasOmemoFingerprints()) {
-                            xmppConnectionService.verifyFingerprints(
-                                    contact, invite.uri.getOmemoFingerprints());
-                        }
                         switchToConversationDoNotAppend(
                                 contact, invite == null ? null : invite.uri.getBody());
                         return true;
@@ -1089,13 +1085,6 @@ public class StartConversationActivity extends XmppActivity
             if (!invite.scanned() && invite.uri.hasOmemoFingerprints()) {
                 displayVerificationWarningDialog(contact, invite);
             } else {
-                if (invite.uri.hasOmemoFingerprints()) {
-                    if (xmppConnectionService.verifyFingerprints(
-                            contact, invite.uri.getOmemoFingerprints())) {
-                        Toast.makeText(this, R.string.verified_fingerprints, Toast.LENGTH_SHORT)
-                                .show();
-                    }
-                }
                 if (invite.account != null) {
                     xmppConnectionService.getShortcutService().report(contact);
                 }
@@ -1131,10 +1120,6 @@ public class StartConversationActivity extends XmppActivity
         builder.setPositiveButton(
                 R.string.confirm,
                 (dialog, which) -> {
-                    if (isTrustedSource.isChecked() && invite.uri.hasOmemoFingerprints()) {
-                        xmppConnectionService.verifyFingerprints(
-                                contact, invite.uri.getOmemoFingerprints());
-                    }
                     switchToConversationDoNotAppend(contact, invite.uri.getBody());
                 });
         builder.setNegativeButton(

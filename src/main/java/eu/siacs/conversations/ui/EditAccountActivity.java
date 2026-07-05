@@ -24,11 +24,9 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.widget.CheckBox;
 import android.widget.CompoundButton.OnCheckedChangeListener;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
@@ -52,9 +50,6 @@ import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.crypto.PgpEngine;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
-import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
-import eu.siacs.conversations.crypto.axolotl.XmppAxolotlSession;
 import eu.siacs.conversations.databinding.ActivityEditAccountBinding;
 import eu.siacs.conversations.databinding.DialogPresenceBinding;
 import eu.siacs.conversations.entities.Account;
@@ -73,13 +68,11 @@ import eu.siacs.conversations.ui.util.MenuDoubleTabUtil;
 import eu.siacs.conversations.ui.util.PendingItem;
 import eu.siacs.conversations.ui.util.SoftKeyboardUtils;
 import eu.siacs.conversations.utils.Compatibility;
-import eu.siacs.conversations.utils.CryptoHelper;
 import eu.siacs.conversations.utils.Resolver;
 import eu.siacs.conversations.utils.SignupUtils;
 import eu.siacs.conversations.utils.TorServiceUtils;
 import eu.siacs.conversations.utils.UIHelper;
 import eu.siacs.conversations.xmpp.Jid;
-import eu.siacs.conversations.xmpp.OnKeyStatusUpdated;
 import eu.siacs.conversations.xmpp.OnUpdateBlocklist;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import eu.siacs.conversations.xmpp.XmppConnection.Features;
@@ -99,7 +92,6 @@ import im.conversations.android.xmpp.model.mam.Preferences;
 import im.conversations.android.xmpp.model.stanza.Presence;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import okhttp3.HttpUrl;
 import org.openintents.openpgp.util.OpenPgpUtils;
@@ -107,7 +99,6 @@ import org.openintents.openpgp.util.OpenPgpUtils;
 public class EditAccountActivity extends OmemoActivity
         implements OnAccountUpdate,
                 OnUpdateBlocklist,
-                OnKeyStatusUpdated,
                 OnCaptchaRequested,
                 KeyChainAliasCallback,
                 XmppConnectionService.OnShowErrorToast {
@@ -165,7 +156,6 @@ public class EditAccountActivity extends OmemoActivity
     private Toast mFetchingMamPrefsToast;
     private String mSavedInstanceAccount;
     private boolean mSavedInstanceInit = false;
-    private MiniUri.Xmpp pendingUri = null;
     private boolean mUseTor;
     private ActivityEditAccountBinding binding;
     private final OnClickListener mSaveButtonClickListener =
@@ -591,21 +581,7 @@ public class EditAccountActivity extends OmemoActivity
 
     @Override
     protected void processFingerprintVerification(final MiniUri.Xmpp uri) {
-        processFingerprintVerification(uri, true);
-    }
-
-    protected void processFingerprintVerification(
-            final MiniUri.Xmpp uri, boolean showWarningToast) {
-        if (mAccount != null
-                && mAccount.getJid().asBareJid().equals(uri.asJid())
-                && uri.hasOmemoFingerprints()) {
-            if (xmppConnectionService.verifyFingerprints(mAccount, uri.getOmemoFingerprints())) {
-                Toast.makeText(this, R.string.verified_fingerprints, Toast.LENGTH_SHORT).show();
-                updateAccountInformation(false);
-            }
-        } else if (showWarningToast) {
-            Toast.makeText(this, R.string.invalid_barcode, Toast.LENGTH_SHORT).show();
-        }
+        Toast.makeText(this, R.string.invalid_barcode, Toast.LENGTH_SHORT).show();
     }
 
     private void updatePortLayout() {
@@ -742,7 +718,6 @@ public class EditAccountActivity extends OmemoActivity
         this.binding.avater.setOnClickListener(this.mAvatarClickListener);
         this.binding.hostname.addTextChangedListener(mTextWatcher);
         this.binding.hostname.setOnFocusChangeListener(mEditTextFocusListener);
-        this.binding.clearDevices.setOnClickListener(v -> showWipePepDialog());
         this.binding.port.setText(String.valueOf(Resolver.XMPP_PORT_STARTTLS));
         this.binding.port.addTextChangedListener(mTextWatcher);
         this.binding.saveButton.setOnClickListener(this.mSaveButtonClickListener);
@@ -843,21 +818,6 @@ public class EditAccountActivity extends OmemoActivity
             } catch (final IllegalArgumentException | NullPointerException ignored) {
                 this.jidToEdit = null;
             }
-            final var miniUri = MiniUri.getOrNull(intent.getData());
-            final boolean scanned = intent.getBooleanExtra("scanned", false);
-            if (jidToEdit != null
-                    && miniUri instanceof MiniUri.Xmpp xmppUri
-                    && xmppUri.hasOmemoFingerprints()) {
-                if (scanned) {
-                    if (xmppConnectionServiceBound) {
-                        processFingerprintVerification(xmppUri, false);
-                    } else {
-                        this.pendingUri = xmppUri;
-                    }
-                } else {
-                    displayVerificationWarningDialog(xmppUri);
-                }
-            }
             boolean init = intent.getBooleanExtra("init", false);
             boolean openedFromNotification =
                     intent.getBooleanExtra(EXTRA_OPENED_FROM_NOTIFICATION, false);
@@ -905,41 +865,9 @@ public class EditAccountActivity extends OmemoActivity
         }
     }
 
-    private void displayVerificationWarningDialog(final MiniUri.Xmpp xmppUri) {
-        final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
-        builder.setTitle(R.string.verify_omemo_keys);
-        View view = getLayoutInflater().inflate(R.layout.dialog_verify_fingerprints, null);
-        final CheckBox isTrustedSource = view.findViewById(R.id.trusted_source);
-        TextView warning = view.findViewById(R.id.warning);
-        warning.setText(R.string.verifying_omemo_keys_trusted_source_account);
-        builder.setView(view);
-        builder.setPositiveButton(
-                R.string.continue_btn,
-                (dialog, which) -> {
-                    if (isTrustedSource.isChecked()) {
-                        processFingerprintVerification(xmppUri, false);
-                    } else {
-                        finish();
-                    }
-                });
-        builder.setNegativeButton(R.string.cancel, (dialog, which) -> finish());
-        final var dialog = builder.create();
-        dialog.setCanceledOnTouchOutside(false);
-        dialog.setOnCancelListener(d -> finish());
-        dialog.show();
-    }
-
     @Override
     public void onNewIntent(@NonNull final Intent intent) {
         super.onNewIntent(intent);
-        final var miniUri = MiniUri.getOrNull(intent.getData());
-        if (miniUri instanceof MiniUri.Xmpp xmpp) {
-            if (xmppConnectionServiceBound) {
-                processFingerprintVerification(xmpp, false);
-            } else {
-                this.pendingUri = xmpp;
-            }
-        }
     }
 
     @Override
@@ -975,7 +903,7 @@ public class EditAccountActivity extends OmemoActivity
                     mAccount.isOptionSet(Account.OPTION_MAGIC_CREATE)
                             && mAccount.isOptionSet(Account.OPTION_REGISTER);
             if (mPendingFingerprintVerificationUri != null) {
-                processFingerprintVerification(mPendingFingerprintVerificationUri, false);
+                processFingerprintVerification(mPendingFingerprintVerificationUri);
                 mPendingFingerprintVerificationUri = null;
             }
             updateAccountInformation(init);
@@ -996,10 +924,6 @@ public class EditAccountActivity extends OmemoActivity
             this.binding.accountJid.setAdapter(mKnownHostsAdapter);
         }
 
-        if (pendingUri != null) {
-            processFingerprintVerification(pendingUri, false);
-            pendingUri = null;
-        }
         updatePortLayout();
         updateSaveButton();
         invalidateOptionsMenu();
@@ -1318,10 +1242,7 @@ public class EditAccountActivity extends OmemoActivity
             }
             this.binding.stanzaRxTx.setText(Joiner.on('/').join(stanzaRxTxValues));
             if (connection.getManager(PepManager.class).isAvailable()) {
-                AxolotlService axolotlService = this.mAccount.getAxolotlService();
-                if (axolotlService != null && axolotlService.isPepBroken()) {
-                    this.binding.serverInfoPep.setText(R.string.server_info_broken);
-                } else if (connection.getManager(PepManager.class).hasPublishOptions()) {
+                if (connection.getManager(PepManager.class).hasPublishOptions()) {
                     this.binding.serverInfoPep.setText(R.string.server_info_available);
                 } else {
                     this.binding.serverInfoPep.setText(R.string.server_info_partial);
@@ -1373,69 +1294,8 @@ public class EditAccountActivity extends OmemoActivity
             } else {
                 this.binding.pgpFingerprintBox.setVisibility(View.GONE);
             }
-            final String ownAxolotlFingerprint =
-                    this.mAccount.getAxolotlService().getOwnFingerprint();
-            if (ownAxolotlFingerprint != null) {
-                this.binding.axolotlFingerprintBox.setVisibility(View.VISIBLE);
-                this.binding.axolotlFingerprintBox.setOnCreateContextMenuListener(
-                        (menu, v, menuInfo) -> {
-                            getMenuInflater().inflate(R.menu.omemo_key_context, menu);
-                            menu.findItem(R.id.verify_scan).setVisible(false);
-                            menu.findItem(R.id.distrust_key).setVisible(false);
-                            this.mSelectedFingerprint = ownAxolotlFingerprint;
-                        });
-                if (ownAxolotlFingerprint.equals(messageFingerprint)) {
-                    this.binding.ownFingerprintDesc.setTextColor(
-                            MaterialColors.getColor(
-                                    binding.ownFingerprintDesc,
-                                    com.google.android.material.R.attr.colorPrimaryVariant));
-                    this.binding.ownFingerprintDesc.setText(
-                            R.string.omemo_fingerprint_selected_message);
-                } else {
-                    this.binding.ownFingerprintDesc.setTextColor(
-                            MaterialColors.getColor(
-                                    binding.ownFingerprintDesc,
-                                    com.google.android.material.R.attr.colorOnSurface));
-                    this.binding.ownFingerprintDesc.setText(R.string.omemo_fingerprint);
-                }
-                this.binding.axolotlFingerprint.setText(
-                        CryptoHelper.prettifyFingerprint(ownAxolotlFingerprint.substring(2)));
-                this.binding.showQrCodeButton.setVisibility(View.VISIBLE);
-                this.binding.showQrCodeButton.setOnClickListener(v -> showQrCode());
-            } else {
-                this.binding.axolotlFingerprintBox.setVisibility(View.GONE);
-            }
-            boolean hasKeys = false;
-            boolean showUnverifiedWarning = false;
-            binding.otherDeviceKeys.removeAllViews();
-            for (final XmppAxolotlSession session :
-                    mAccount.getAxolotlService().findOwnSessions()) {
-                final FingerprintStatus trust = session.getTrust();
-                if (!trust.isCompromised()) {
-                    boolean highlight = session.getFingerprint().equals(messageFingerprint);
-                    addFingerprintRow(binding.otherDeviceKeys, session, highlight);
-                    hasKeys = true;
-                }
-                if (trust.isUnverified()) {
-                    showUnverifiedWarning = true;
-                }
-            }
-            if (hasKeys) { // TODO: either the button should be visible if we
-                // print an active device or the device list should
-                // be fed with reactivated devices
-                this.binding.otherDeviceKeysCard.setVisibility(View.VISIBLE);
-                Set<Integer> otherDevices = mAccount.getAxolotlService().getOwnDeviceIds();
-                if (otherDevices == null || otherDevices.isEmpty()) {
-                    binding.clearDevices.setVisibility(View.GONE);
-                } else {
-                    binding.clearDevices.setVisibility(View.VISIBLE);
-                }
-                binding.unverifiedWarning.setVisibility(
-                        showUnverifiedWarning ? View.VISIBLE : View.GONE);
-                binding.scanButton.setVisibility(showUnverifiedWarning ? View.VISIBLE : View.GONE);
-            } else {
-                this.binding.otherDeviceKeysCard.setVisibility(View.GONE);
-            }
+            this.binding.axolotlFingerprintBox.setVisibility(View.GONE);
+            this.binding.otherDeviceKeysCard.setVisibility(View.GONE);
             this.binding.serviceOutage.setVisibility(View.GONE);
         } else {
             final TextInputLayout errorLayout;
@@ -1615,18 +1475,6 @@ public class EditAccountActivity extends OmemoActivity
         }
     }
 
-    public void showWipePepDialog() {
-        final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
-        builder.setTitle(getString(R.string.clear_other_devices));
-        builder.setIconAttribute(android.R.attr.alertDialogIcon);
-        builder.setMessage(getString(R.string.clear_other_devices_desc));
-        builder.setNegativeButton(getString(R.string.cancel), null);
-        builder.setPositiveButton(
-                getString(R.string.accept),
-                (dialog, which) -> mAccount.getAxolotlService().wipeOtherPepDevices());
-        builder.create().show();
-    }
-
     private void editMamPrefs() {
         final var account = this.mAccount;
         if (account == null) {
@@ -1692,11 +1540,6 @@ public class EditAccountActivity extends OmemoActivity
                             .show();
                 }
             };
-
-    @Override
-    public void onKeyStatusUpdated(AxolotlService.FetchStatus report) {
-        refreshUi();
-    }
 
     @Override
     public void onCaptchaRequested(final Account account, final Data data, final Bitmap captcha) {

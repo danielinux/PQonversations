@@ -40,9 +40,6 @@ import de.gultsch.common.MiniUri;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
-import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
-import eu.siacs.conversations.crypto.axolotl.XmppAxolotlSession;
 import eu.siacs.conversations.databinding.ActivityContactDetailsBinding;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Contact;
@@ -64,7 +61,6 @@ import eu.siacs.conversations.utils.Emoticons;
 import eu.siacs.conversations.utils.IrregularUnicodeDetector;
 import eu.siacs.conversations.utils.PhoneNumberUtilWrapper;
 import eu.siacs.conversations.xmpp.Jid;
-import eu.siacs.conversations.xmpp.OnKeyStatusUpdated;
 import eu.siacs.conversations.xmpp.OnUpdateBlocklist;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import eu.siacs.conversations.xmpp.manager.BlockingManager;
@@ -80,7 +76,6 @@ public class ContactDetailsActivity extends OmemoActivity
         implements OnAccountUpdate,
                 OnRosterUpdate,
                 OnUpdateBlocklist,
-                OnKeyStatusUpdated,
                 OnMediaLoaded {
     public static final String ACTION_VIEW_CONTACT = "view_contact";
     private final int REQUEST_SYNC_CONTACTS = 0x28cf;
@@ -137,7 +132,6 @@ public class ContactDetailsActivity extends OmemoActivity
     private Jid contactJid;
     private boolean showDynamicTags = false;
     private boolean showLastSeen = false;
-    private boolean showInactiveOmemo = false;
     private String messageFingerprint;
 
     private void checkContactPermissionAndShowAddDialog() {
@@ -234,9 +228,6 @@ public class ContactDetailsActivity extends OmemoActivity
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        showInactiveOmemo =
-                savedInstanceState != null
-                        && savedInstanceState.getBoolean("show_inactive_omemo", false);
         if (getIntent().getAction().equals(ACTION_VIEW_CONTACT)) {
             try {
                 this.accountJid = Jid.of(getIntent().getExtras().getString(EXTRA_ACCOUNT));
@@ -253,11 +244,7 @@ public class ContactDetailsActivity extends OmemoActivity
 
         setSupportActionBar(binding.toolbar);
         configureActionBar(getSupportActionBar());
-        binding.showInactiveDevices.setOnClickListener(
-                v -> {
-                    showInactiveOmemo = !showInactiveOmemo;
-                    populateView();
-                });
+        binding.showInactiveDevices.setVisibility(View.GONE);
         binding.addContactButton.setOnClickListener(v -> showAddToRosterDialog(contact));
 
         mMediaAdapter = new MediaAdapter(this, R.dimen.media_size);
@@ -267,7 +254,6 @@ public class ContactDetailsActivity extends OmemoActivity
 
     @Override
     public void onSaveInstanceState(final Bundle savedInstanceState) {
-        savedInstanceState.putBoolean("show_inactive_omemo", showInactiveOmemo);
         super.onSaveInstanceState(savedInstanceState);
     }
 
@@ -518,53 +504,8 @@ public class ContactDetailsActivity extends OmemoActivity
         binding.detailsContactKeys.removeAllViews();
         boolean hasKeys = false;
         final LayoutInflater inflater = getLayoutInflater();
-        final AxolotlService axolotlService = contact.getAccount().getAxolotlService();
-        if (axolotlService != null) {
-            final Collection<XmppAxolotlSession> sessions =
-                    axolotlService.findSessionsForContact(contact);
-            boolean anyActive = false;
-            for (XmppAxolotlSession session : sessions) {
-                anyActive = session.getTrust().isActive();
-                if (anyActive) {
-                    break;
-                }
-            }
-            boolean skippedInactive = false;
-            boolean showsInactive = false;
-            boolean showUnverifiedWarning = false;
-            for (final XmppAxolotlSession session : sessions) {
-                final FingerprintStatus trust = session.getTrust();
-                hasKeys |= !trust.isCompromised();
-                if (!trust.isActive() && anyActive) {
-                    if (showInactiveOmemo) {
-                        showsInactive = true;
-                    } else {
-                        skippedInactive = true;
-                        continue;
-                    }
-                }
-                if (!trust.isCompromised()) {
-                    boolean highlight = session.getFingerprint().equals(messageFingerprint);
-                    addFingerprintRow(binding.detailsContactKeys, session, highlight);
-                }
-                if (trust.isUnverified()) {
-                    showUnverifiedWarning = true;
-                }
-            }
-            binding.unverifiedWarning.setVisibility(
-                    showUnverifiedWarning ? View.VISIBLE : View.GONE);
-            if (showsInactive || skippedInactive) {
-                binding.showInactiveDevices.setText(
-                        showsInactive
-                                ? R.string.hide_inactive_devices
-                                : R.string.show_inactive_devices);
-                binding.showInactiveDevices.setVisibility(View.VISIBLE);
-            } else {
-                binding.showInactiveDevices.setVisibility(View.GONE);
-            }
-        } else {
-            binding.showInactiveDevices.setVisibility(View.GONE);
-        }
+        binding.unverifiedWarning.setVisibility(View.GONE);
+        binding.showInactiveDevices.setVisibility(View.GONE);
         final boolean isCameraFeatureAvailable = isCameraFeatureAvailable();
         binding.scanButton.setVisibility(
                 hasKeys && isCameraFeatureAvailable ? View.VISIBLE : View.GONE);
@@ -675,21 +616,8 @@ public class ContactDetailsActivity extends OmemoActivity
     }
 
     @Override
-    public void onKeyStatusUpdated(AxolotlService.FetchStatus report) {
-        refreshUi();
-    }
-
-    @Override
     protected void processFingerprintVerification(final MiniUri.Xmpp uri) {
-        if (contact != null
-                && contact.getAddress().asBareJid().equals(uri.asJid())
-                && uri.hasOmemoFingerprints()) {
-            if (xmppConnectionService.verifyFingerprints(contact, uri.getOmemoFingerprints())) {
-                Toast.makeText(this, R.string.verified_fingerprints, Toast.LENGTH_SHORT).show();
-            }
-        } else {
-            Toast.makeText(this, R.string.invalid_barcode, Toast.LENGTH_SHORT).show();
-        }
+        Toast.makeText(this, R.string.invalid_barcode, Toast.LENGTH_SHORT).show();
     }
 
     @Override
