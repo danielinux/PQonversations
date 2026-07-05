@@ -2,26 +2,17 @@ package im.conversations.android.xmpp.processor;
 
 import static eu.siacs.conversations.utils.Random.SECURE_RANDOM;
 
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.content.Intent;
 import android.util.Log;
-import androidx.core.app.NotificationCompat;
 import eu.siacs.conversations.Config;
-import eu.siacs.conversations.R;
 import eu.siacs.conversations.crypto.x3dhpq.LocalKeyBootstrap;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.http.ServiceOutageStatus;
-import eu.siacs.conversations.services.NotificationService;
 import eu.siacs.conversations.services.XmppConnectionService;
-import eu.siacs.conversations.ui.PairToExistingActivity;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import eu.siacs.conversations.xmpp.manager.ClientStateIndicationManager;
 import eu.siacs.conversations.xmpp.manager.JingleManager;
 import eu.siacs.conversations.xmpp.manager.MultiUserChatManager;
-import eu.siacs.conversations.xmpp.manager.VerifyDeviceManager;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public class AccountStateProcessor extends XmppConnection.Delegate
@@ -61,66 +52,10 @@ public class AccountStateProcessor extends XmppConnection.Delegate
             }
             // publish devicelist + bundle on every login (PEP dedupes by item id)
             account.getX3dhpqService().publishLocalState();
-            // announce new device to peer resources only on fresh bootstrap (first sign-in)
-            if (x3dhpqBootstrap.wasNewlyCreated) {
-                final var verifyMgr = getManager(VerifyDeviceManager.class);
-                verifyMgr.announceNewDevice(x3dhpqBootstrap.deviceId, (peersCount, err) -> {
-                    if (err != null) {
-                        Log.d(Config.LOGTAG, "verify-device announce failed: " + err.getMessage());
-                        return;
-                    }
-                    Log.d(Config.LOGTAG, "verify-device announced; peers=" + peersCount);
-                    if (peersCount == null || peersCount <= 0) {
-                        // First device on this account — nothing to do.
-                        return;
-                    }
-                    // Secondary device: auto-launch the pairing wizard. Prefer
-                    // an in-foreground activity over a passive notification so
-                    // the user is dropped straight into the sync-code prompt.
-                    // Falls back to a notification if the activity launch
-                    // can't fire (e.g., app is fully backgrounded).
-                    final Intent pairIntent =
-                            PairToExistingActivity.makeIntent(context, account.getUuid());
-                    pairIntent.setFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK
-                                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
-                                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                    try {
-                        context.startActivity(pairIntent);
-                    } catch (final Exception e) {
-                        Log.w(
-                                Config.LOGTAG,
-                                "could not foreground PairToExistingActivity; posting notification",
-                                e);
-                        final PendingIntent pendingIntent =
-                                PendingIntent.getActivity(
-                                        context,
-                                        account.getUuid().hashCode(),
-                                        pairIntent,
-                                        PendingIntent.FLAG_UPDATE_CURRENT
-                                                | PendingIntent.FLAG_IMMUTABLE);
-                        final NotificationCompat.Builder builder =
-                                new NotificationCompat.Builder(
-                                                context,
-                                                NotificationService.MESSAGES_NOTIFICATION_CHANNEL)
-                                        .setSmallIcon(R.drawable.ic_app_icon_notification)
-                                        .setContentTitle(
-                                                context.getString(
-                                                        R.string.x3dhpq_secondary_device_detected_title))
-                                        .setContentText(
-                                                context.getString(
-                                                        R.string.x3dhpq_secondary_device_detected_text,
-                                                        peersCount))
-                                        .setAutoCancel(true)
-                                        .setContentIntent(pendingIntent);
-                        final NotificationManager nm =
-                                (NotificationManager)
-                                        context.getSystemService(
-                                                android.content.Context.NOTIFICATION_SERVICE);
-                        nm.notify(account.getUuid().hashCode(), builder.build());
-                    }
-                });
-            }
+            // Pairing rendezvous is now serverless (§10.1a): a joining device finds an existing
+            // primary by publishing <pair-hello> to its own PEP (method B) or by a scanned-QR
+            // directed <pair-hello> (method A). We no longer ask the server to fan out a
+            // <verify-device> headline on connect, and nothing here depends on it.
             synchronized (this.service.mLowPingTimeoutMode) {
                 if (this.service.mLowPingTimeoutMode.remove(account.getJid().asBareJid())) {
                     Log.d(

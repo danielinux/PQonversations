@@ -13,7 +13,6 @@ import eu.siacs.conversations.xmpp.forms.Data;
 import eu.siacs.conversations.xmpp.pep.PublishOptions;
 import im.conversations.android.xmpp.model.stanza.Iq;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
-import im.conversations.android.xmpp.model.x3dhpq.pair.VerifyDevice;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.util.Set;
@@ -226,19 +225,5 @@ public class IqGenerator extends AbstractGenerator {
         options.putString("pubsub#persist_items", "true");
         options.putString("pubsub#max_items", "10"); // headroom for re-publishes
         return publish(Namespace.X3DHPQ_BUNDLE, item, options);
-    }
-
-    /**
-     * Asks the local server to fan out a verify-device hint to the user's other
-     * authenticated resources. Used by a freshly-bound device with no DC yet
-     * to discover existing primary resources for pairing. See XEP §15.8.
-     * Sent to the bare JID; server reply contains <peers count='N'/>.
-     */
-    public Iq generateX3dhpqVerifyDevice(final int deviceId) {
-        final var packet = new Iq(Iq.Type.SET);
-        final VerifyDevice verify = packet.addExtension(new VerifyDevice());
-        verify.setDeviceId(deviceId);
-        verify.setTransport("message");
-        return packet;
     }
 }
