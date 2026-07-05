@@ -2502,6 +2502,20 @@ public class DatabaseBackend extends SQLiteOpenHelper
         getWritableDatabase().endTransaction();
     }
 
+    // ---- x3dhpq at-rest encryption ----
+    // Secret private-key columns are wrapped with a hardware-backed AES-256-GCM key
+    // (AndroidKeyStore) before storage and unwrapped on read. Legacy plaintext rows pass
+    // through unchanged and are re-wrapped on the next write. Only secret columns are routed
+    // through here; public/queryable columns are stored as-is.
+
+    private static byte[] x3dhpqWrap(final byte[] plaintext) {
+        return eu.siacs.conversations.crypto.x3dhpq.X3dhpqKeyVault.getInstance().wrap(plaintext);
+    }
+
+    private static byte[] x3dhpqUnwrap(final byte[] blob) {
+        return eu.siacs.conversations.crypto.x3dhpq.X3dhpqKeyVault.getInstance().unwrap(blob);
+    }
+
     // ---- x3dhpq DAO: account_identity ----
 
     public void putX3dhpqAccountIdentity(
@@ -2509,7 +2523,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         final SQLiteDatabase db = getWritableDatabase();
         final ContentValues v = new ContentValues();
         v.put("account_uuid", accountUuid);
-        v.put("aik_priv_marshal", aikPriv);
+        v.put("aik_priv_marshal", x3dhpqWrap(aikPriv));
         v.put("aik_pub_marshal", aikPub);
         v.put("fingerprint", fingerprint);
         db.insertWithOnConflict(
@@ -2531,7 +2545,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
             if (!c.moveToFirst()) return null;
             return new X3dhpqAccountIdentityRow(
                     c.getString(c.getColumnIndexOrThrow("account_uuid")),
-                    c.getBlob(c.getColumnIndexOrThrow("aik_priv_marshal")),
+                    x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("aik_priv_marshal"))),
                     c.getBlob(c.getColumnIndexOrThrow("aik_pub_marshal")),
                     c.getString(c.getColumnIndexOrThrow("fingerprint")));
         } finally {
@@ -2597,7 +2611,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         final ContentValues v = new ContentValues();
         v.put("account_uuid", accountUuid);
         v.put("device_id", deviceId);
-        v.put("dik_priv_marshal", dikPriv);
+        v.put("dik_priv_marshal", x3dhpqWrap(dikPriv));
         v.put("dc_marshal", dc);
         v.put("created_at", createdAt);
         v.put("flags", flags);
@@ -2632,7 +2646,8 @@ public class DatabaseBackend extends SQLiteOpenHelper
                         new X3dhpqLocalDeviceRow(
                                 c.getString(c.getColumnIndexOrThrow("account_uuid")),
                                 c.getInt(c.getColumnIndexOrThrow("device_id")),
-                                c.getBlob(c.getColumnIndexOrThrow("dik_priv_marshal")),
+                                x3dhpqUnwrap(
+                                        c.getBlob(c.getColumnIndexOrThrow("dik_priv_marshal"))),
                                 c.getBlob(c.getColumnIndexOrThrow("dc_marshal")),
                                 c.getLong(c.getColumnIndexOrThrow("created_at")),
                                 c.getInt(c.getColumnIndexOrThrow("flags"))));
@@ -2658,7 +2673,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         v.put("account_uuid", accountUuid);
         v.put("key_id", keyId);
         v.put("public_x25519", pubX);
-        v.put("private_x25519", privX);
+        v.put("private_x25519", x3dhpqWrap(privX));
         v.put("signature_ed25519", sigEd);
         v.put("signature_mldsa", sigMldsa);
         v.put("created_at", createdAt);
@@ -2711,7 +2726,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 c.getString(c.getColumnIndexOrThrow("account_uuid")),
                 c.getInt(c.getColumnIndexOrThrow("key_id")),
                 c.getBlob(c.getColumnIndexOrThrow("public_x25519")),
-                c.getBlob(c.getColumnIndexOrThrow("private_x25519")),
+                x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("private_x25519"))),
                 c.getBlob(c.getColumnIndexOrThrow("signature_ed25519")),
                 c.getBlob(c.getColumnIndexOrThrow("signature_mldsa")),
                 c.getLong(c.getColumnIndexOrThrow("created_at")));
@@ -2726,7 +2741,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         v.put("account_uuid", accountUuid);
         v.put("key_id", keyId);
         v.put("public_key", pub);
-        v.put("private_key", priv);
+        v.put("private_key", x3dhpqWrap(priv));
         db.insertWithOnConflict(
                 "x3dhpq_kem_pre_key", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
@@ -2748,7 +2763,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     c.getString(c.getColumnIndexOrThrow("account_uuid")),
                     c.getInt(c.getColumnIndexOrThrow("key_id")),
                     c.getBlob(c.getColumnIndexOrThrow("public_key")),
-                    c.getBlob(c.getColumnIndexOrThrow("private_key")));
+                    x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("private_key"))));
         } finally {
             c.close();
         }
@@ -2783,7 +2798,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         v.put("account_uuid", accountUuid);
         v.put("key_id", keyId);
         v.put("public_x25519", pubX);
-        v.put("private_x25519", privX);
+        v.put("private_x25519", x3dhpqWrap(privX));
         v.put("consumed", 0);
         db.insertWithOnConflict(
                 "x3dhpq_one_time_pre_key", null, v, SQLiteDatabase.CONFLICT_IGNORE);
@@ -2806,7 +2821,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     c.getString(c.getColumnIndexOrThrow("account_uuid")),
                     c.getInt(c.getColumnIndexOrThrow("key_id")),
                     c.getBlob(c.getColumnIndexOrThrow("public_x25519")),
-                    c.getBlob(c.getColumnIndexOrThrow("private_x25519")),
+                    x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("private_x25519"))),
                     c.getInt(c.getColumnIndexOrThrow("consumed")) != 0);
         } finally {
             c.close();
@@ -3063,7 +3078,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         v.put("account_uuid", accountUuid);
         v.put("peer_jid", peerJid);
         v.put("device_id", deviceId);
-        v.put("state_blob", stateBlob);
+        v.put("state_blob", x3dhpqWrap(stateBlob));
         v.put("updated_at", updatedAt);
         db.insertWithOnConflict(
                 "x3dhpq_session", null, v, SQLiteDatabase.CONFLICT_REPLACE);
@@ -3116,7 +3131,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 c.getString(c.getColumnIndexOrThrow("account_uuid")),
                 c.getString(c.getColumnIndexOrThrow("peer_jid")),
                 c.getInt(c.getColumnIndexOrThrow("device_id")),
-                c.getBlob(c.getColumnIndexOrThrow("state_blob")),
+                x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("state_blob"))),
                 c.getLong(c.getColumnIndexOrThrow("updated_at")));
     }
 
@@ -3194,7 +3209,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         v.put("account_uuid", accountUuid);
         v.put("room_jid", roomJid);
         v.put("epoch", epoch);
-        v.put("state_blob", stateBlob);
+        v.put("state_blob", x3dhpqWrap(stateBlob));
         v.put("updated_at", updatedAt);
         db.insertWithOnConflict(
                 "x3dhpq_group_session", null, v, SQLiteDatabase.CONFLICT_REPLACE);
@@ -3217,7 +3232,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     c.getString(c.getColumnIndexOrThrow("account_uuid")),
                     c.getString(c.getColumnIndexOrThrow("room_jid")),
                     c.getLong(c.getColumnIndexOrThrow("epoch")),
-                    c.getBlob(c.getColumnIndexOrThrow("state_blob")),
+                    x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("state_blob"))),
                     c.getLong(c.getColumnIndexOrThrow("updated_at")));
         } finally {
             c.close();
@@ -3286,7 +3301,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         v.put("role", role);
         v.put("peer_jid", peerJid);
         v.put("code", code);
-        v.put("state_blob", stateBlob);
+        v.put("state_blob", x3dhpqWrap(stateBlob));
         v.put("expires_at", expiresAt);
         db.insertWithOnConflict(
                 "x3dhpq_pairing_session", null, v, SQLiteDatabase.CONFLICT_REPLACE);
@@ -3316,7 +3331,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
     public void updateX3dhpqPairingState(byte[] sid, byte[] stateBlob) {
         final SQLiteDatabase db = getWritableDatabase();
         final ContentValues v = new ContentValues();
-        v.put("state_blob", stateBlob);
+        v.put("state_blob", x3dhpqWrap(stateBlob));
         db.update(
                 "x3dhpq_pairing_session",
                 v,
@@ -3349,7 +3364,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 c.getInt(c.getColumnIndexOrThrow("role")),
                 c.getString(c.getColumnIndexOrThrow("peer_jid")),
                 c.getString(c.getColumnIndexOrThrow("code")),
-                c.getBlob(c.getColumnIndexOrThrow("state_blob")),
+                x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("state_blob"))),
                 c.getLong(c.getColumnIndexOrThrow("expires_at")));
     }
 
