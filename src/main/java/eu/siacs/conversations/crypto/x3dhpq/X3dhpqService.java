@@ -597,8 +597,11 @@ public class X3dhpqService {
             } catch (final Exception e) {
                 return null;
             }
+            // Retain the verbatim base64-decoded <cert> bytes as received; the verify
+            // path must reconstruct the SignedPart over these exact bytes (§8.4), not
+            // over a re-marshaled cert. The parsed cert is kept for DC verify (§7.3).
             entries.add(new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
-                    id & 0xffffffffL, addedAt, flags, cert));
+                    id & 0xffffffffL, addedAt, flags, cert, dcBytes));
         }
         entries.sort(java.util.Comparator.comparingLong(
                 im.conversations.x3dhpq.types.DeviceList.DeviceListEntry::getDeviceId));
@@ -981,7 +984,11 @@ public class X3dhpqService {
         final byte[][] certs = new byte[entries.size()][];
         int size = DEVICELIST_SIGNED_HEADER_LEN;
         for (int i = 0; i < entries.size(); i++) {
-            certs[i] = entries.get(i).getCert().marshal();
+            // Prefer the verbatim wire cert bytes when present (verify path, §8.4) so
+            // the SignedPart is reconstructed over the issuer's exact bytes; fall back
+            // to a fresh marshal for locally built entries (publish path).
+            final byte[] raw = entries.get(i).getRawCert();
+            certs[i] = raw != null ? raw : entries.get(i).getCert().marshal();
             size += 4 + 8 + 1 + 4 + certs[i].length;
         }
         final ByteBuffer buf = ByteBuffer.allocate(size).order(java.nio.ByteOrder.BIG_ENDIAN);

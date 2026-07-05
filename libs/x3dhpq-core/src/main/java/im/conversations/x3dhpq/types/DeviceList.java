@@ -37,19 +37,32 @@ public final class DeviceList {
         final long addedAt;    // int64
         final byte flags;      // uint8
         final DeviceCertificate cert;
+        // Verbatim base64-decoded <cert> bytes exactly as received on the wire, or
+        // null when the entry was built locally (publish path). When present, these
+        // MUST be fed into the SignedPart instead of cert.marshal() so an inbound
+        // devicelist verifies over the issuer's exact bytes (x3dhpq §8.4).
+        final byte[] rawCert;
 
         public DeviceListEntry(long deviceId, long addedAt, byte flags, DeviceCertificate cert) {
+            this(deviceId, addedAt, flags, cert, null);
+        }
+
+        public DeviceListEntry(
+                long deviceId, long addedAt, byte flags, DeviceCertificate cert, byte[] rawCert) {
             if (cert == null) throw new IllegalArgumentException("cert must not be null");
             this.deviceId = deviceId;
             this.addedAt  = addedAt;
             this.flags    = flags;
             this.cert     = cert;
+            this.rawCert  = rawCert != null ? Arrays.copyOf(rawCert, rawCert.length) : null;
         }
 
         public long getDeviceId()       { return deviceId; }
         public long getAddedAt()        { return addedAt; }
         public byte getFlags()          { return flags; }
         public DeviceCertificate getCert() { return cert; }
+        /** Verbatim wire cert bytes for verify-side SignedPart reconstruction, or null. */
+        public byte[] getRawCert()      { return rawCert != null ? Arrays.copyOf(rawCert, rawCert.length) : null; }
     }
 
     final long listVersion;  // uint64 — must strictly increase
