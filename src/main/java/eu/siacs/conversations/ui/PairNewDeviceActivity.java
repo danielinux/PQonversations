@@ -157,11 +157,13 @@ public class PairNewDeviceActivity extends XmppActivity {
         mSid = new byte[32];
         rng.nextBytes(mSid);
 
-        // Render QR: xmppqr-pair:<bare_jid>?code=<raw_code>&sid=<base64url_sid>
-        final String bareJid = mAccount.getJid().asBareJid().toString();
+        // Render QR (§10.1a method A): xmppqr-pair:<full_jid>?code=<raw_code>&sid=<base64url_sid>
+        // The full JID (including this device's resource) is where the scanning device sends the
+        // directed <pair-hello> trigger, so we receive it and send PAKE1 back.
+        final String fullJid = mAccount.getJid().toString();
         final String sidB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(mSid);
         final String qrUri =
-                "xmppqr-pair:" + bareJid + "?code=" + mRawCode + "&sid=" + sidB64;
+                "xmppqr-pair:" + fullJid + "?code=" + mRawCode + "&sid=" + sidB64;
 
         try {
             final int sizePx = 512; // pixels; ImageView is 240dp, 512 is sufficient

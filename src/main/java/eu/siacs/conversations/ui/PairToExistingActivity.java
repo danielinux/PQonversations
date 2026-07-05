@@ -198,11 +198,12 @@ public class PairToExistingActivity extends XmppActivity {
     }
 
     /**
-     * Parses {@code xmppqr-pair:<bare_jid>?code=<10digits>&sid=<base64-url-sid>} and initiates
-     * the new-side pairing FSM.
+     * Parses {@code xmppqr-pair:<full_jid>?code=<10digits>&sid=<base64-url-sid>} (§10.1a method A)
+     * and initiates the new-side pairing FSM, then sends a directed {@code <pair-hello>} to the
+     * existing device's full JID so it initiates PAKE1 back toward us.
      */
     private void handlePairingUri(final String uri) {
-        // Expected form: xmppqr-pair:<bare_jid>?code=<code>&sid=<base64-url-sid>
+        // Expected form: xmppqr-pair:<full_jid>?code=<code>&sid=<base64-url-sid>
         final String PREFIX = "xmppqr-pair:";
         if (!uri.startsWith(PREFIX)) {
             Log.w(Config.LOGTAG, LOGTAG + ": not a pairing URI: " + uri);
@@ -217,7 +218,7 @@ public class PairToExistingActivity extends XmppActivity {
             return;
         }
 
-        final String bareJidStr = rest.substring(0, qMark);
+        final String fullJidStr = rest.substring(0, qMark);
         final String query = rest.substring(qMark + 1);
 
         // Parse query parameters: code= and sid=
@@ -255,23 +256,24 @@ public class PairToExistingActivity extends XmppActivity {
             return;
         }
 
-        // Validate that the JID in the QR belongs to our account (wrong-account safeguard).
-        final Jid peerBareJid;
+        // Parse the existing device's FULL JID (including resource) from the QR.
+        final Jid peerFullJid;
         try {
-            peerBareJid = Jid.of(bareJidStr);
+            peerFullJid = Jid.of(fullJidStr);
         } catch (final IllegalArgumentException e) {
-            Log.w(Config.LOGTAG, LOGTAG + ": invalid JID in QR: " + bareJidStr);
+            Log.w(Config.LOGTAG, LOGTAG + ": invalid JID in QR: " + fullJidStr);
             mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
             return;
         }
 
+        // Validate that the JID in the QR belongs to our account (wrong-account safeguard).
         final Jid myBareJid = mAccount.getJid().asBareJid();
-        if (!myBareJid.equals(peerBareJid.asBareJid())) {
+        if (!myBareJid.equals(peerFullJid.asBareJid())) {
             Log.w(
                     Config.LOGTAG,
                     LOGTAG
                             + ": QR JID "
-                            + peerBareJid
+                            + peerFullJid
                             + " != our JID "
                             + myBareJid
                             + "; refusing");
@@ -279,7 +281,17 @@ public class PairToExistingActivity extends XmppActivity {
             return;
         }
 
-        startPairingAsNew(sid, validatedCode, peerBareJid);
+        if (startPairingAsNew(sid, validatedCode, peerFullJid)) {
+            // Method A rendezvous (§10.1a): send a directed, secret-free <pair-hello> carrying our
+            // full JID + sid to the existing device so it initiates PAKE1 back toward us. We do NOT
+            // send PAKE1 ourselves — we wait for it.
+            final var x3dhpqService = mAccount.getX3dhpqService();
+            if (x3dhpqService != null) {
+                x3dhpqService.sendDirectedPairHello(peerFullJid, sid);
+            } else {
+                Log.w(Config.LOGTAG, LOGTAG + ": X3dhpqService unavailable; cannot send pair-hello");
+            }
+        }
     }
 
     // ---- Manual code entry ----
