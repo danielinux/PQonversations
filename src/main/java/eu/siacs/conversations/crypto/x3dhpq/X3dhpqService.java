@@ -1255,6 +1255,94 @@ public class X3dhpqService {
                 });
     }
 
+    // ---- Pairing rendezvous: <pair-hello> (XEP §10.1a) ----
+
+    /**
+     * Method B rendezvous (§10.1a): publishes a {@code <pair-hello>} item to THIS device's own PEP
+     * node {@code urn:xmppqr:x3dhpq:pair:0} (item {@code current}, whitelist access) carrying only
+     * our own device-id, full JID and the CPace {@code sid}. An existing primary resource on the
+     * same account receives it via self-PEP {@code +notify} and initiates the pairing FSM toward us.
+     * Carries no secret material; the pairing code travels out-of-band only.
+     */
+    public void publishPairHello(final byte[] sid) {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": publishPairHello ignored — no db/account/service");
+            return;
+        }
+        final Integer deviceId = getOwnDeviceIdOrNull();
+        if (deviceId == null) {
+            Log.w(Config.LOGTAG, getLogprefix() + "publishPairHello skipped — no local device row");
+            return;
+        }
+        final im.conversations.android.xmpp.model.x3dhpq.pair.PairHello hello =
+                buildPairHello(deviceId, account.getJid(), sid);
+
+        final Iq iq = new Iq(Iq.Type.SET);
+        final PubSub ps = iq.addExtension(new PubSub());
+        final im.conversations.android.xmpp.model.pubsub.Publish pub =
+                ps.addExtension(new im.conversations.android.xmpp.model.pubsub.Publish());
+        pub.setNode(Namespace.X3DHPQ_PAIR);
+        final PubSub.Item item = pub.addExtension(new PubSub.Item());
+        item.setId("current");
+        item.addExtension(hello);
+        ps.addExtension(
+                im.conversations.android.xmpp.model.pubsub.PublishOptions.of(
+                        im.conversations.android.xmpp.NodeConfiguration.WHITELIST));
+
+        Log.d(Config.LOGTAG, getLogprefix() + "publishing pair-hello (method B) for device-id="
+                + Integer.toUnsignedString(deviceId));
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            if (response.getType() == Iq.Type.ERROR) {
+                Log.w(Config.LOGTAG, getLogprefix() + "pair-hello publish failed: " + response);
+            } else {
+                Log.d(Config.LOGTAG, getLogprefix() + "pair-hello published to own PEP");
+            }
+        });
+    }
+
+    /**
+     * Method A rendezvous (§10.1a): sends the same {@code <pair-hello>} element as a directed,
+     * secret-free {@code <message>} to {@code existingFullJid} (learned from the scanned QR). The
+     * existing device handles it identically to the self-PEP path and initiates the pairing FSM
+     * back toward us.
+     */
+    public void sendDirectedPairHello(final Jid existingFullJid, final byte[] sid) {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": sendDirectedPairHello ignored — no db/account/service");
+            return;
+        }
+        final Integer deviceId = getOwnDeviceIdOrNull();
+        if (deviceId == null) {
+            Log.w(Config.LOGTAG, getLogprefix() + "sendDirectedPairHello skipped — no local device row");
+            return;
+        }
+        final im.conversations.android.xmpp.model.x3dhpq.pair.PairHello hello =
+                buildPairHello(deviceId, account.getJid(), sid);
+
+        final im.conversations.android.xmpp.model.stanza.Message message =
+                new im.conversations.android.xmpp.model.stanza.Message(
+                        im.conversations.android.xmpp.model.stanza.Message.Type.CHAT);
+        message.setTo(existingFullJid);
+        message.setFrom(account.getJid());
+        message.addExtension(hello);
+
+        Log.d(Config.LOGTAG, getLogprefix() + "sending directed pair-hello (method A) to "
+                + existingFullJid);
+        mXmppConnectionService.sendMessagePacket(account, message);
+    }
+
+    /** Builds a {@code <pair-hello>} carrying our own device-id + full JID + base64url sid. */
+    private im.conversations.android.xmpp.model.x3dhpq.pair.PairHello buildPairHello(
+            final int deviceId, final Jid fullJid, final byte[] sid) {
+        final im.conversations.android.xmpp.model.x3dhpq.pair.PairHello hello =
+                new im.conversations.android.xmpp.model.x3dhpq.pair.PairHello();
+        hello.setDeviceId(deviceId);
+        hello.setFullJid(fullJid.toString());
+        hello.setSid(
+                com.google.common.io.BaseEncoding.base64Url().omitPadding().encode(sid));
+        return hello;
+    }
+
     private String getLogprefix() {
         // account may be null only in the test-only no-arg constructor
         final String jid = account != null ? account.getJid().asBareJid().toString() : "test";

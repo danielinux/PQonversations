@@ -296,28 +296,38 @@ public class PairToExistingActivity extends XmppActivity {
             return;
         }
 
-        // For manual entry we don't have a peer JID from a QR — use our own bare JID as
-        // the peerJid parameter (informational only; the existing device initiates PAKE1 to us).
+        // For manual entry (method B) we don't have a peer full JID from a QR — use our own
+        // bare JID as the peerJid parameter (informational; the existing device initiates PAKE1).
         final Jid ownBareJid = mAccount.getJid().asBareJid();
 
-        // Generate a fresh 32-byte random session id.
+        // Generate a fresh 32-byte random session id (method B: the new device owns the sid).
         final byte[] sid = new byte[32];
         new SecureRandom().nextBytes(sid);
 
-        startPairingAsNew(sid, validatedCode, ownBareJid);
+        if (startPairingAsNew(sid, validatedCode, ownBareJid)) {
+            // Method B rendezvous (§10.1a): publish <pair-hello> to our own PEP node so an
+            // existing primary resource receives it via self-PEP +notify and sends PAKE1.
+            final var x3dhpqService = mAccount.getX3dhpqService();
+            if (x3dhpqService != null) {
+                x3dhpqService.publishPairHello(sid);
+            } else {
+                Log.w(Config.LOGTAG, LOGTAG + ": X3dhpqService unavailable; cannot publish pair-hello");
+            }
+        }
     }
 
     // ---- Core initiation ----
 
-    private void startPairingAsNew(
-            final byte[] sid, final String code, final Jid peerBareJid) {
+    private boolean startPairingAsNew(
+            final byte[] sid, final String code, final Jid peerJid) {
         mStatusView.setText(R.string.x3dhpq_pair_status_waiting);
         mScanQrButton.setEnabled(false);
         mPairButton.setEnabled(false);
 
         try {
-            mPairingService.prepareAsNew(sid, code, peerBareJid);
+            mPairingService.prepareAsNew(sid, code, peerJid);
             Log.d(Config.LOGTAG, LOGTAG + ": prepareAsNew registered, waiting for PAKE1 from existing device");
+            return true;
         } catch (final Exception e) {
             Log.e(Config.LOGTAG, LOGTAG + ": prepareAsNew failed", e);
             final String reason = e.getMessage();
@@ -327,6 +337,7 @@ public class PairToExistingActivity extends XmppActivity {
                             reason != null ? reason : "setup failed"));
             mScanQrButton.setEnabled(true);
             mPairButton.setEnabled(true);
+            return false;
         }
     }
 
