@@ -1,22 +1,23 @@
-name: Build release APK
+name: Release APK
 
-# Builds a fresh PQonversations APK on every commit to master and publishes
-# it as a GitHub Release. The conversationsFree debug variant is used: it has
-# no proprietary Google/FCM dependencies and is debug-signed, so it builds and
+# Builds a PQonversations APK and publishes it as a GitHub Release whenever a
+# new tag is pushed. The conversationsFree debug variant is used: it has no
+# proprietary Google/FCM dependencies and is debug-signed, so it builds and
 # installs without any signing secrets. See the note in the release body for
 # how to switch to a properly release-signed build.
 
 on:
   push:
-    branches: [master]
+    tags:
+      - '*'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-apk
-  cancel-in-progress: true
+  group: release-apk-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -50,23 +51,20 @@ jobs:
             find . -path '*/outputs/apk/*' -name '*.apk' >&2 || true
             exit 1
           fi
-          short="$(git rev-parse --short HEAD)"
-          out="PQonversations-conversationsFree-debug-${short}.apk"
+          out="PQonversations-${GITHUB_REF_NAME}.apk"
           cp "$apk" "$out"
           echo "file=$out" >> "$GITHUB_OUTPUT"
-          echo "short=$short" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ci-${{ github.run_number }}
-          name: PQonversations ${{ steps.apk.outputs.short }}
+          tag_name: ${{ github.ref_name }}
+          name: PQonversations ${{ github.ref_name }}
           body: |
-            Automated PQonversations build for commit ${{ github.sha }}.
+            PQonversations ${{ github.ref_name }} — automated build for tag `${{ github.ref_name }}` (commit ${{ github.sha }}).
 
-            Variant: `conversationsFree` **debug-signed** — sideload only; this is not a
-            Play/F-Droid release. To produce a properly release-signed APK, add a keystore
-            plus a `signingConfig`, and switch the build step to `assembleConversationsFreeRelease`
-            (store the keystore/password as encrypted repository secrets).
-          prerelease: true
+            Variant: `conversationsFree` **debug-signed** — sideload only. To produce a
+            properly release-signed APK, add a keystore plus a `signingConfig`, and switch
+            the build step to `assembleConversationsFreeRelease` (store the keystore and
+            passwords as encrypted repository secrets).
           files: ${{ steps.apk.outputs.file }}
