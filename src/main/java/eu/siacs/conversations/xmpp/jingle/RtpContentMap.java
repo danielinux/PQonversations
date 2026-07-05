@@ -18,7 +18,6 @@ import eu.siacs.conversations.xmpp.jingle.stanzas.GenericDescription;
 import eu.siacs.conversations.xmpp.jingle.stanzas.GenericTransportInfo;
 import eu.siacs.conversations.xmpp.jingle.stanzas.Group;
 import eu.siacs.conversations.xmpp.jingle.stanzas.IceUdpTransportInfo;
-import eu.siacs.conversations.xmpp.jingle.stanzas.OmemoVerifiedIceUdpTransportInfo;
 import eu.siacs.conversations.xmpp.jingle.stanzas.RtpDescription;
 import im.conversations.android.xmpp.model.jingle.Jingle;
 import java.util.Collection;
@@ -38,28 +37,7 @@ public class RtpContentMap extends AbstractContentMap<RtpDescription, IceUdpTran
     public static RtpContentMap of(final Jingle jinglePacket) {
         final Map<String, DescriptionTransport<RtpDescription, IceUdpTransportInfo>> contents =
                 of(jinglePacket.getJingleContents());
-        if (isOmemoVerified(contents)) {
-            return new OmemoVerifiedRtpContentMap(jinglePacket.getGroup(), contents);
-        } else {
-            return new RtpContentMap(jinglePacket.getGroup(), contents);
-        }
-    }
-
-    private static boolean isOmemoVerified(
-            Map<String, DescriptionTransport<RtpDescription, IceUdpTransportInfo>> contents) {
-        final Collection<DescriptionTransport<RtpDescription, IceUdpTransportInfo>> values =
-                contents.values();
-        if (values.isEmpty()) {
-            return false;
-        }
-        for (final DescriptionTransport<RtpDescription, IceUdpTransportInfo> descriptionTransport :
-                values) {
-            if (descriptionTransport.transport instanceof OmemoVerifiedIceUdpTransportInfo) {
-                continue;
-            }
-            return false;
-        }
-        return true;
+        return new RtpContentMap(jinglePacket.getGroup(), contents);
     }
 
     public static RtpContentMap of(
@@ -451,10 +429,7 @@ public class RtpContentMap extends AbstractContentMap<RtpDescription, IceUdpTran
         } else {
             throw new UnsupportedTransportException("Content does not contain ICE-UDP transport");
         }
-        return new DescriptionTransport<>(
-                senders,
-                rtpDescription,
-                OmemoVerifiedIceUdpTransportInfo.upgrade(iceUdpTransportInfo));
+        return new DescriptionTransport<>(senders, rtpDescription, iceUdpTransportInfo);
     }
 
     private static DescriptionTransport<RtpDescription, IceUdpTransportInfo> of(

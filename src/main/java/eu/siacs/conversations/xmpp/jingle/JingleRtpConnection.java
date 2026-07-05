@@ -25,9 +25,6 @@ import com.google.common.util.concurrent.MoreExecutors;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.BuildConfig;
 import eu.siacs.conversations.Config;
-import eu.siacs.conversations.crypto.axolotl.AxolotlService;
-import eu.siacs.conversations.crypto.axolotl.CryptoFailedException;
-import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
 import eu.siacs.conversations.entities.Conversation;
 import eu.siacs.conversations.entities.Conversational;
 import eu.siacs.conversations.entities.Message;
@@ -90,7 +87,6 @@ public class JingleRtpConnection extends AbstractJingleConnection
     private final Queue<
                     Map.Entry<String, DescriptionTransport<RtpDescription, IceUdpTransportInfo>>>
             pendingIceCandidates = new LinkedList<>();
-    private final OmemoVerification omemoVerification = new OmemoVerification();
     private final CallIntegration callIntegration;
     private final Message message;
 
@@ -297,11 +293,8 @@ public class JingleRtpConnection extends AbstractJingleConnection
             return;
         }
         if (isInState(State.SESSION_ACCEPTED)) {
-            final boolean hasFullTransportInfo = modification.hasFullTransportInfo();
             final ListenableFuture<RtpContentMap> future =
-                    receiveRtpContentMap(
-                            modification,
-                            this.omemoVerification.hasFingerprint() && hasFullTransportInfo);
+                    receiveRtpContentMap(modification, false);
             Futures.addCallback(
                     future,
                     new FutureCallback<>() {
@@ -409,11 +402,8 @@ public class JingleRtpConnection extends AbstractJingleConnection
         if (ourSummary.equals(ContentAddition.summary(receivedContentAccept))) {
             this.outgoingContentAdd = null;
             respondOk(jinglePacket);
-            final boolean hasFullTransportInfo = receivedContentAccept.hasFullTransportInfo();
             final ListenableFuture<RtpContentMap> future =
-                    receiveRtpContentMap(
-                            receivedContentAccept,
-                            this.omemoVerification.hasFingerprint() && hasFullTransportInfo);
+                    receiveRtpContentMap(receivedContentAccept, false);
             Futures.addCallback(
                     future,
                     new FutureCallback<>() {
@@ -1108,30 +1098,7 @@ public class JingleRtpConnection extends AbstractJingleConnection
                         + ",expectVerification="
                         + expectVerification
                         + ")");
-        if (receivedContentMap instanceof OmemoVerifiedRtpContentMap) {
-            final ListenableFuture<AxolotlService.OmemoVerifiedPayload<RtpContentMap>> future =
-                    id.account
-                            .getAxolotlService()
-                            .decrypt((OmemoVerifiedRtpContentMap) receivedContentMap, id.with);
-            return Futures.transform(
-                    future,
-                    omemoVerifiedPayload -> {
-                        // TODO test if an exception here triggers a correct abort
-                        omemoVerification.setOrEnsureEqual(omemoVerifiedPayload);
-                        Log.d(
-                                Config.LOGTAG,
-                                id.account.getJid().asBareJid()
-                                        + ": received verifiable DTLS fingerprint via "
-                                        + omemoVerification);
-                        return omemoVerifiedPayload.getPayload();
-                    },
-                    MoreExecutors.directExecutor());
-        } else if (Config.REQUIRE_RTP_VERIFICATION || expectVerification) {
-            return Futures.immediateFailedFuture(
-                    new SecurityException("DTLS fingerprint was unexpectedly not verifiable"));
-        } else {
-            return Futures.immediateFuture(receivedContentMap);
-        }
+        return Futures.immediateFuture(receivedContentMap);
     }
 
     private void receiveSessionInitiate(final Iq jinglePacket, final Jingle jingle) {
@@ -1223,8 +1190,7 @@ public class JingleRtpConnection extends AbstractJingleConnection
             receiveOutOfOrderAction(jinglePacket, Jingle.Action.SESSION_ACCEPT);
             return;
         }
-        final ListenableFuture<RtpContentMap> future =
-                receiveRtpContentMap(jingle, this.omemoVerification.hasFingerprint());
+        final ListenableFuture<RtpContentMap> future = receiveRtpContentMap(jingle, false);
         Futures.addCallback(
                 future,
                 new FutureCallback<>() {
@@ -1473,25 +1439,7 @@ public class JingleRtpConnection extends AbstractJingleConnection
 
     private ListenableFuture<RtpContentMap> prepareOutgoingContentMap(
             final RtpContentMap rtpContentMap) {
-        if (this.omemoVerification.hasDeviceId()) {
-            ListenableFuture<AxolotlService.OmemoVerifiedPayload<OmemoVerifiedRtpContentMap>>
-                    verifiedPayloadFuture =
-                            id.account
-                                    .getAxolotlService()
-                                    .encrypt(
-                                            rtpContentMap,
-                                            id.with,
-                                            omemoVerification.getDeviceId());
-            return Futures.transform(
-                    verifiedPayloadFuture,
-                    verifiedPayload -> {
-                        omemoVerification.setOrEnsureEqual(verifiedPayload);
-                        return verifiedPayload.getPayload();
-                    },
-                    MoreExecutors.directExecutor());
-        } else {
-            return Futures.immediateFuture(rtpContentMap);
-        }
+        return Futures.immediateFuture(rtpContentMap);
     }
 
     public synchronized void deliveryMessage(
@@ -1743,19 +1691,6 @@ public class JingleRtpConnection extends AbstractJingleConnection
                         this.message.setServerMsgId(serverMsgId);
                     }
                     this.message.setTime(timestamp);
-                    final Integer remoteDeviceId = proceed.getDeviceId();
-                    if (isOmemoEnabled()) {
-                        this.omemoVerification.setDeviceId(remoteDeviceId);
-                    } else {
-                        if (remoteDeviceId != null) {
-                            Log.d(
-                                    Config.LOGTAG,
-                                    id.account.getJid().asBareJid()
-                                            + ": remote party signaled support for OMEMO"
-                                            + " verification but we have OMEMO disabled");
-                        }
-                        this.omemoVerification.setDeviceId(null);
-                    }
                     this.sendSessionInitiate(media, State.SESSION_INITIALIZED_PRE_APPROVED);
                 } else {
                     Log.d(
@@ -1958,43 +1893,7 @@ public class JingleRtpConnection extends AbstractJingleConnection
 
     private ListenableFuture<RtpContentMap> encryptSessionInitiate(
             final RtpContentMap rtpContentMap) {
-        if (this.omemoVerification.hasDeviceId()) {
-            final ListenableFuture<AxolotlService.OmemoVerifiedPayload<OmemoVerifiedRtpContentMap>>
-                    verifiedPayloadFuture =
-                            id.account
-                                    .getAxolotlService()
-                                    .encrypt(
-                                            rtpContentMap,
-                                            id.with,
-                                            omemoVerification.getDeviceId());
-            final ListenableFuture<RtpContentMap> future =
-                    Futures.transform(
-                            verifiedPayloadFuture,
-                            verifiedPayload -> {
-                                omemoVerification.setSessionFingerprint(
-                                        verifiedPayload.getFingerprint());
-                                return verifiedPayload.getPayload();
-                            },
-                            MoreExecutors.directExecutor());
-            if (Config.REQUIRE_RTP_VERIFICATION) {
-                return future;
-            }
-            return Futures.catching(
-                    future,
-                    CryptoFailedException.class,
-                    e -> {
-                        Log.w(
-                                Config.LOGTAG,
-                                id.account.getJid().asBareJid()
-                                        + ": unable to use OMEMO DTLS verification on outgoing"
-                                        + " session initiate. falling back",
-                                e);
-                        return rtpContentMap;
-                    },
-                    MoreExecutors.directExecutor());
-        } else {
-            return Futures.immediateFuture(rtpContentMap);
-        }
+        return Futures.immediateFuture(rtpContentMap);
     }
 
     protected void sendSessionTerminate(final Reason reason) {
@@ -2202,13 +2101,7 @@ public class JingleRtpConnection extends AbstractJingleConnection
     }
 
     public boolean isVerified() {
-        final String fingerprint = this.omemoVerification.getFingerprint();
-        if (fingerprint == null) {
-            return false;
-        }
-        final FingerprintStatus status =
-                id.account.getAxolotlService().getFingerprintTrust(fingerprint);
-        return status != null && status.isVerified();
+        return false;
     }
 
     public boolean addMedia(final Media media) {
@@ -2369,12 +2262,7 @@ public class JingleRtpConnection extends AbstractJingleConnection
         xmppConnectionService.getNotificationService().cancelIncomingCallNotification();
         this.callIntegration.startAudioRouting();
         id.account.getXmppConnection().getManager(JingleMessageManager.class).accept(id.sessionId);
-        final Integer deviceId;
-        if (isOmemoEnabled()) {
-            deviceId = id.account.getAxolotlService().getOwnDeviceId();
-        } else {
-            deviceId = null;
-        }
+        final Integer deviceId = null;
         id.account
                 .getXmppConnection()
                 .getManager(JingleMessageManager.class)
@@ -2404,15 +2292,6 @@ public class JingleRtpConnection extends AbstractJingleConnection
         webRTCWrapper.close();
         sendSessionTerminate(new Reason.Decline());
         xmppConnectionService.getNotificationService().cancelIncomingCallNotification();
-    }
-
-    private boolean isOmemoEnabled() {
-        final Conversational conversational = message.getConversation();
-        if (conversational instanceof Conversation) {
-            return ((Conversation) conversational).getNextEncryption()
-                    == Message.ENCRYPTION_AXOLOTL;
-        }
-        return false;
     }
 
     private void acceptCallFromSessionInitialized() {
