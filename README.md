@@ -1,14 +1,9 @@
-<h1 align="center">Conversations</h1>
+<h1 align="center">PQonversations</h1>
 
-<p align="center">Conversations: the very last word in instant messaging</p>
+<p align="center">Post-quantum end-to-end encrypted messaging for XMPP</p>
 
 <p align="center">
-  <a href="https://play.google.com/store/apps/details?id=eu.siacs.conversations&amp;referrer=utm_source%3Dcodeberg">
-    <img src="https://conversations.im/images/get-it-on-play.png" alt="Get it on Google Play" height="80">
-  </a>
-  <a href="https://f-droid.org/packages/eu.siacs.conversations">
-    <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">
-  </a>
+  <em>A fork of <a href="https://codeberg.org/iNPUTmice/Conversations">Conversations</a> that replaces OMEMO with the post-quantum <strong>x3dhpq</strong> protocol.</em>
 </p>
 
 <p align="center">
@@ -19,11 +14,23 @@
 <img src="https://codeberg.org/iNPUTmice/Conversations/raw/branch/master/fastlane/metadata/android/en-US/images/phoneScreenshots/05.png" width="216"/>
 </p>
 
-A free and open-source Jabber/XMPP client for Android. Easy to use, reliable, and battery-friendly. With built-in support for images, group chats, and location sharing. End-to-end encrypted by default. Connects to all modern Jabber, XMPP, and Snikket servers.
+PQonversations is a free and open-source Jabber/XMPP client for Android. Easy to use, reliable, and battery-friendly. With built-in support for images, group chats, and location sharing. End-to-end encrypted by default. Connects to all modern Jabber, XMPP, and Snikket servers.
 
+## About this fork
+
+PQonversations is a fork of [Conversations](https://codeberg.org/iNPUTmice/Conversations), the widely-used Android XMPP client. It keeps the entire Conversations user experience and feature set, but **replaces OMEMO (XEP-0384) end-to-end encryption with x3dhpq** — a hybrid post-quantum E2EE protocol.
+
+Why x3dhpq is more secure than OMEMO:
+
+* **Post-quantum confidentiality.** Every session combines classical X25519 with ML-KEM-768 (FIPS 203) key encapsulation, so traffic recorded today cannot be decrypted by a future quantum computer (it defeats *harvest-now-decrypt-later* attacks). OMEMO's X3DH and Double Ratchet are broken by a quantum adversary.
+* **Post-quantum identity.** Long-term identities are signed with a hybrid Ed25519 + ML-DSA-65 (FIPS 204) key; both signatures must verify, so a break in either primitive alone cannot forge an identity.
+* **Verify a person once, not every device.** Trust is anchored in a per-account identity key: verify a contact's fingerprint once and all of their current and future devices are trusted automatically, with an append-only audit log to detect unauthorized device additions.
+* **Standard XMPP, no special server.** x3dhpq is transport-only and runs on any standards-compliant XMPP server (Prosody, ejabberd, …) — the same deployment model as OMEMO.
+
+x3dhpq and OMEMO are **not** interoperable: PQonversations users talk to other x3dhpq clients (e.g. the [Dino](https://dino.im) fork with x3dhpq support). The protocol is specified in the accompanying `x3dhpq` draft. PQonversations is licensed under GPLv3, inherited from Conversations, and gratefully builds on the upstream project's work.
 
 ## Features
-* End-to-end encryption with [OMEMO](http://conversations.im/omemo/) or [OpenPGP](http://openpgp.org/about/)
+* Post-quantum end-to-end encryption with **x3dhpq** (hybrid X25519 + ML-KEM-768 key agreement, Ed25519 + ML-DSA-65 identities), replacing OMEMO — or [OpenPGP](http://openpgp.org/about/)
 * Send and receive images and other kinds of files
 * Encrypted audio and video calls ([DTLS-SRTP](https://help.conversations.im))
 * Advanced machine-in-the-middle detection via channel binding (requires opt-in)
@@ -52,13 +59,19 @@ A free and open-source Jabber/XMPP client for Android. Easy to use, reliable, an
 
 ## FAQ
 
-### How do I install Conversations?
+### How do I install PQonversations?
 
-Conversations is entirely open source and licensed under GPLv3. So if you are a
-software developer you can check out the sources from Codeberg and use Gradle to
-build your APK file.
+PQonversations is open source and licensed under GPLv3 (inherited from Conversations).
+If you are a software developer you can check out the sources and use Gradle to build
+your own APK, or download the latest build from the repository's **Releases** — a fresh
+APK is published automatically on every commit to `master`.
 
-Conversations is available on [Google Play](https://play.google.com/store/apps/details?id=eu.siacs.conversations) and on [F-Droid](https://f-droid.org/en/packages/eu.siacs.conversations/).
+PQonversations is a fork and is **not** published on Google Play or F-Droid. Those stores
+host the original [Conversations](https://play.google.com/store/apps/details?id=eu.siacs.conversations),
+which uses OMEMO, not x3dhpq.
+
+> The rest of this document is the upstream Conversations FAQ; it applies to PQonversations
+> as well, except that end-to-end encryption is provided by x3dhpq rather than OMEMO.
 
 ### How do I create an account?
 XMPP, like email, is a federated protocol, which means that there is not one company you can create an *official XMPP account* with. Instead there are hundreds, or even thousands, of providers out there. One of those providers is our very own [conversations.im](https://account.conversations.im). If you don’t like to use *conversations.im* use a web search engine of your choice to find another provider. Or maybe your university has one. Or you can run your own. Or ask a friend to run one. Once you've found one, you can use Conversations to create an account. Just select *register new account* on server within the create account dialog.
