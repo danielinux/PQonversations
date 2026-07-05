@@ -138,6 +138,12 @@ public class GroupCryptoService {
         final byte[] payload = entry.asBytes();
         processMembershipEntryBytes(roomJid.asBareJid(), itemId, payload);
         flushAnnouncementQueue(roomJid.asBareJid().toString());
+        // Surface the membership change (add/remove) to the UI so the roster and
+        // conversation views reflect the new group state without a manual refresh.
+        if (mXmppConnectionService != null) {
+            mXmppConnectionService.updateConversationUi();
+            mXmppConnectionService.updateMucRosterUi();
+        }
     }
 
     private void processMembershipEntryBytes(final Jid roomJidBare, final String itemId, final byte[] entryBytes) {
