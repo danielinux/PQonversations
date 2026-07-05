@@ -206,23 +206,9 @@ public class X3dhpqService {
     public void handleItems(final Jid from, final Items items) {
         final String node = items.getNode();
         if (Namespace.X3DHPQ_DEVICELIST.equals(node)) {
-            // The <sig>/<mldsa-sig> live as siblings of <devicelist> inside the
-            // item (§8.4), so route via the raw Item to carry them through.
-            for (final var item : items.getItems()) {
-                final DeviceList list = item.getExtension(DeviceList.class);
-                if (list == null) {
-                    continue;
-                }
-                final Sig sig = item.getExtension(Sig.class);
-                final MldsaSig mldsaSig = item.getExtension(MldsaSig.class);
-                handleInboundDeviceList(
-                        from, list,
-                        sig != null ? sig.asBytes() : null,
-                        mldsaSig != null ? mldsaSig.asBytes() : null);
-                if (deviceListListener != null) {
-                    deviceListListener.onDeviceListReceived(from, list);
-                }
-                break; // only the 'current' item is relevant
+            final var entry = items.getFirstItemWithId(DeviceList.class);
+            if (entry != null) {
+                handleEvent(from, node, entry.getKey(), entry.getValue());
             }
         } else if (Namespace.X3DHPQ_BUNDLE.equals(node)) {
             final var entry = items.getFirstItemWithId(Bundle.class);
@@ -347,14 +333,14 @@ public class X3dhpqService {
                                 "x3dhpq: devicelist fetch returned non-RESULT for " + peerBareJid);
                         return;
                     }
-                    final DeviceListItem dli = extractDeviceListItem(response);
-                    if (dli == null) {
+                    final Extension payload = extractPubsubPayload(response, DeviceList.class);
+                    if (payload == null) {
                         Log.w(Config.LOGTAG,
                                 "x3dhpq: devicelist fetch RESULT carried no DeviceList payload"
                                         + " for " + peerBareJid + "; iq body=" + response);
                         return;
                     }
-                    handleInboundDeviceList(peerBareJid, dli.list, dli.edSig, dli.mlSig);
+                    handleInboundDeviceList(peerBareJid, (DeviceList) payload);
                 });
     }
 
@@ -392,21 +378,13 @@ public class X3dhpqService {
                 });
     }
 
-    /** Legacy/test entry point: inbound devicelist without carried signatures. */
-    void handleInboundDeviceList(final Jid peerBareJid, final DeviceList list) {
-        handleInboundDeviceList(peerBareJid, list, null, null);
-    }
-
     /**
      * Handles an inbound devicelist: enforces the hybrid-signature + monotonic
      * version gate (§8.2/§8.5), then persists remote_device rows and schedules
-     * missing bundle fetches. {@code edSig}/{@code mldsaSig} are the {@code <sig>}
-     * / {@code <mldsa-sig>} siblings of the devicelist in the PEP item; null for
-     * a legacy unsigned list.
+     * missing bundle fetches. The {@code <sig>}/{@code <mldsa-sig>} are read from
+     * the last children of the {@code <devicelist>} element (§8.4).
      */
-    void handleInboundDeviceList(
-            final Jid peerBareJid, final DeviceList list,
-            final byte[] edSig, final byte[] mldsaSig) {
+    void handleInboundDeviceList(final Jid peerBareJid, final DeviceList list) {
         if (db == null) return;
         final String accountUuid = account != null ? account.getUuid() : "test";
         final String peer = peerBareJid.asBareJid().toString();
@@ -414,7 +392,7 @@ public class X3dhpqService {
 
         // §8.2/§8.5 gate: reject rollback/fork/downgrade/bad-signature lists
         // before trusting any of their contents.
-        if (!deviceListGate(accountUuid, peer, list, edSig, mldsaSig, now)) {
+        if (!deviceListGate(accountUuid, peer, list, now)) {
             Log.w(Config.LOGTAG,
                     "x3dhpq: REJECTED inbound devicelist from " + peer + " (see gate log)");
             return;
@@ -483,8 +461,12 @@ public class X3dhpqService {
      * unsigned/legacy list after a signed one was already accepted — downgrade lock).
      */
     private boolean deviceListGate(
-            final String accountUuid, final String peer, final DeviceList list,
-            final byte[] edSig, final byte[] mldsaSig, final long now) {
+            final String accountUuid, final String peer, final DeviceList list, final long now) {
+        // <sig>/<mldsa-sig> are the last children of <devicelist> (§8.4).
+        final Sig sigEl = list.getSig();
+        final MldsaSig mldsaEl = list.getMldsaSig();
+        final byte[] edSig = sigEl != null ? sigEl.asBytes() : null;
+        final byte[] mldsaSig = mldsaEl != null ? mldsaEl.asBytes() : null;
         final boolean hasSig =
                 edSig != null && edSig.length > 0 && mldsaSig != null && mldsaSig.length > 0;
 
@@ -553,10 +535,7 @@ public class X3dhpqService {
             }
         }
 
-        final byte[] signedPart =
-                new im.conversations.x3dhpq.types.DeviceList(
-                                version, issuedAt, entries, new byte[0], new byte[0])
-                        .signedPart();
+        final byte[] signedPart = deviceListSignedPart(version, issuedAt, entries);
         final boolean edOk = X3dhpqCrypto.ed25519Verify(peerAik.getPubEd25519(), signedPart, edSig);
         final boolean mlOk = X3dhpqCrypto.mldsa65Verify(peerAik.getPubMLDSA(), signedPart, mldsaSig);
         if (!edOk || !mlOk) {
@@ -973,41 +952,6 @@ public class X3dhpqService {
         }
     }
 
-    /** A devicelist plus its {@code <sig>}/{@code <mldsa-sig>} siblings from one item. */
-    private static final class DeviceListItem {
-        final DeviceList list;
-        final byte[] edSig;
-        final byte[] mlSig;
-
-        DeviceListItem(final DeviceList list, final byte[] edSig, final byte[] mlSig) {
-            this.list = list;
-            this.edSig = edSig;
-            this.mlSig = mlSig;
-        }
-    }
-
-    // Navigate iq → pubsub → items → the item holding a <devicelist>, returning it
-    // together with its <sig>/<mldsa-sig> siblings (§8.4). Null on any miss.
-    private static DeviceListItem extractDeviceListItem(final Iq iq) {
-        final PubSub pubsub = iq.getExtension(PubSub.class);
-        if (pubsub == null) return null;
-        final im.conversations.android.xmpp.model.pubsub.Items items = pubsub.getItems();
-        if (items == null) return null;
-        for (final var item : items.getItems()) {
-            final DeviceList list = item.getExtension(DeviceList.class);
-            if (list == null) {
-                continue;
-            }
-            final Sig sig = item.getExtension(Sig.class);
-            final MldsaSig mldsaSig = item.getExtension(MldsaSig.class);
-            return new DeviceListItem(
-                    list,
-                    sig != null ? sig.asBytes() : null,
-                    mldsaSig != null ? mldsaSig.asBytes() : null);
-        }
-        return null;
-    }
-
     // Navigate iq → pubsub → items → item(0) → child of type clazz; returns null on any miss.
     private static <T extends Extension> T extractPubsubPayload(final Iq iq, final Class<T> clazz) {
         final PubSub pubsub = iq.getExtension(PubSub.class);
@@ -1017,20 +961,50 @@ public class X3dhpqService {
         return items.getFirstItem(clazz);
     }
 
+    // Domain separator for the devicelist SignedPart (layout A): 20 ASCII + 0x00.
+    private static final byte[] DEVICELIST_SIGNED_PREFIX = {
+        'X', '3', 'D', 'H', 'P', 'Q', '-', 'D', 'e', 'v', 'i', 'c', 'e',
+        'L', 'i', 's', 't', '-', 'v', '1', 0x00
+    };
     // SignedPart header preceding the per-device records: prefix(21) + version(8)
-    // + issued_at(8) + num_devices(2). Stripping it yields the version/issued_at-
-    // independent "content" whose hash decides when the monotonic version bumps.
-    private static final int DEVICELIST_SIGNED_PART_HEADER_LEN = 21 + 8 + 8 + 2;
+    // + issued_at(8). Layout A has NO num_devices and NO version_marker — each
+    // device is self-delimiting via its cert_len — so this dedicated builder is
+    // used instead of the core DeviceList.signedPart() (which prepends a uint16
+    // num_devices field and would NOT cross-verify with the Dino fork).
+    private static final int DEVICELIST_SIGNED_HEADER_LEN = 21 + 8 + 8;
+
+    /** The canonical devicelist SignedPart (layout A) over devices sorted by id asc. */
+    private static byte[] deviceListSignedPart(
+            final long version,
+            final long issuedAt,
+            final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries) {
+        final byte[][] certs = new byte[entries.size()][];
+        int size = DEVICELIST_SIGNED_HEADER_LEN;
+        for (int i = 0; i < entries.size(); i++) {
+            certs[i] = entries.get(i).getCert().marshal();
+            size += 4 + 8 + 1 + 4 + certs[i].length;
+        }
+        final ByteBuffer buf = ByteBuffer.allocate(size).order(java.nio.ByteOrder.BIG_ENDIAN);
+        buf.put(DEVICELIST_SIGNED_PREFIX);
+        buf.putLong(version);
+        buf.putLong(issuedAt);
+        for (int i = 0; i < entries.size(); i++) {
+            final im.conversations.x3dhpq.types.DeviceList.DeviceListEntry e = entries.get(i);
+            buf.putInt((int) (e.getDeviceId() & 0xffffffffL));
+            buf.putLong(e.getAddedAt());
+            buf.put(e.getFlags());
+            buf.putInt(certs[i].length);
+            buf.put(certs[i]);
+        }
+        return buf.array();
+    }
 
     /** Hash of the device-records portion of the SignedPart (excludes version + issued_at). */
     private static byte[] deviceListContentHash(
             final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries) {
-        final byte[] sp =
-                new im.conversations.x3dhpq.types.DeviceList(
-                                0L, 0L, entries, new byte[0], new byte[0])
-                        .signedPart();
+        final byte[] sp = deviceListSignedPart(0L, 0L, entries);
         final byte[] records =
-                Arrays.copyOfRange(sp, DEVICELIST_SIGNED_PART_HEADER_LEN, sp.length);
+                Arrays.copyOfRange(sp, DEVICELIST_SIGNED_HEADER_LEN, sp.length);
         return X3dhpqCrypto.SHA256.hash(records);
     }
 
@@ -1089,10 +1063,7 @@ public class X3dhpqService {
                     + e.getMessage());
             return;
         }
-        final byte[] signedPart =
-                new im.conversations.x3dhpq.types.DeviceList(
-                                version, issuedAt, entries, new byte[0], new byte[0])
-                        .signedPart();
+        final byte[] signedPart = deviceListSignedPart(version, issuedAt, entries);
         final byte[] sigEd = X3dhpqCrypto.ed25519Sign(aik.getPrivEd25519(), signedPart);
         final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(aik.getPrivMLDSA(), signedPart);
 
@@ -1102,10 +1073,13 @@ public class X3dhpqService {
 
         final DeviceList list =
                 X3dhpqStanzaBuilder.buildDeviceList(db, accountUuid, version, issuedAt);
+        // <sig>/<mldsa-sig> are the last children of <devicelist> (§8.4).
+        list.setSig(sigEd);
+        list.setMldsaSig(sigMl);
         final im.conversations.android.xmpp.model.stanza.Iq iq =
                 mXmppConnectionService
                         .getIqGenerator()
-                        .generateX3dhpqPublishDeviceList(list, "current", sigEd, sigMl);
+                        .generateX3dhpqPublishDeviceList(list, "current");
         mXmppConnectionService.sendIqPacket(
                 account,
                 iq,

@@ -13,6 +13,8 @@ import im.conversations.x3dhpq.crypto.KeyPair;
 import im.conversations.x3dhpq.crypto.X3dhpqCrypto;
 import im.conversations.x3dhpq.types.AccountIdentityPub;
 import im.conversations.x3dhpq.types.DeviceCertificate;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -168,7 +170,89 @@ public class X3dhpqInboundEventTest {
         Assert.assertNull("device 400 not stored", loadRemoteDevice(ACCOUNT_UUID, peer, id2));
     }
 
+    // ---- signed devicelist gate (§8.2/§8.5) ----
+
+    @Test
+    public void inboundSignedDeviceList_acceptsAndRejectsRollback() {
+        final String peer = PEER.asBareJid().toString();
+        final long now = System.currentTimeMillis() / 1000L;
+        // Pin the peer AIK by seeding a cached bundle (resolvePinnedPeerAik path).
+        dao.putX3dhpqRemoteDevice(ACCOUNT_UUID, peer, DEVICE_ID, dcMarshal, now);
+        dao.putX3dhpqRemoteBundle(ACCOUNT_UUID, peer, DEVICE_ID, aipMarshal, new byte[] {0x01}, now);
+
+        final long addedAt = now - 1000L;
+        final DeviceList v5 = buildSignedDeviceList(
+                5L, now, DEVICE_ID, dcMarshal, addedAt, (byte) 1, aikEdPair, aikMlPair);
+        service.handleInboundDeviceList(PEER, v5);
+
+        final DatabaseBackend.X3dhpqDeviceListStateRow st =
+                dao.loadX3dhpqDeviceListState(ACCOUNT_UUID, peer);
+        Assert.assertNotNull("signed list must persist devicelist state", st);
+        Assert.assertEquals("version 5 accepted", 5L, st.version());
+        Assert.assertTrue("acceptedSigned flips true", st.acceptedSigned());
+
+        // A lower-version (rollback) list from the same signer MUST be rejected;
+        // the persisted state stays at version 5.
+        final DeviceList v3 = buildSignedDeviceList(
+                3L, now, DEVICE_ID, dcMarshal, addedAt, (byte) 1, aikEdPair, aikMlPair);
+        service.handleInboundDeviceList(PEER, v3);
+        Assert.assertEquals("rollback rejected — version unchanged",
+                5L, dao.loadX3dhpqDeviceListState(ACCOUNT_UUID, peer).version());
+
+        // A tampered signature MUST be rejected too.
+        final DeviceList v6bad = buildSignedDeviceList(
+                6L, now, DEVICE_ID, dcMarshal, addedAt, (byte) 1, aikEdPair, aikMlPair);
+        v6bad.getSig().setContent(new byte[64]); // zeroed Ed25519 sig
+        service.handleInboundDeviceList(PEER, v6bad);
+        Assert.assertEquals("bad-signature list rejected — version unchanged",
+                5L, dao.loadX3dhpqDeviceListState(ACCOUNT_UUID, peer).version());
+    }
+
     // ---- helpers ----
+
+    // Independent (test-side) implementation of the §8.3 layout-A SignedPart:
+    // "X3DHPQ-DeviceList-v1\0"(21) || u64 version || i64 issued_at ||
+    //   per device sorted by id asc: u32 id || i64 added_at || u8 flags || u32 cert_len || cert.
+    // NO num_devices / version_marker — mirrors the Dino fork byte-for-byte.
+    private static byte[] deviceListSignedPartA(
+            long version, long issuedAt, int deviceId, byte[] cert, long addedAt, byte flags) {
+        final byte[] label =
+                "X3DHPQ-DeviceList-v1".getBytes(java.nio.charset.StandardCharsets.US_ASCII); // 20 bytes
+        final byte[] prefix = new byte[21]; // label + trailing 0x00 domain-separator
+        System.arraycopy(label, 0, prefix, 0, 20);
+        final ByteBuffer buf =
+                ByteBuffer.allocate(prefix.length + 8 + 8 + 4 + 8 + 1 + 4 + cert.length)
+                        .order(ByteOrder.BIG_ENDIAN);
+        buf.put(prefix);
+        buf.putLong(version);
+        buf.putLong(issuedAt);
+        buf.putInt(deviceId);
+        buf.putLong(addedAt);
+        buf.put(flags);
+        buf.putInt(cert.length);
+        buf.put(cert);
+        return buf.array();
+    }
+
+    private static DeviceList buildSignedDeviceList(
+            long version, long issuedAt, int deviceId, byte[] cert, long addedAt, byte flags,
+            KeyPair aikEd, KeyPair aikMl) {
+        final DeviceList list = new DeviceList();
+        list.setVersion(Long.toUnsignedString(version));
+        list.setIssuedAt(Long.toString(issuedAt));
+        final Device d = new Device();
+        d.setDeviceId(deviceId);
+        d.setAddedAt(addedAt);
+        d.setFlags(Integer.toString(flags & 0xff));
+        final Cert certEl = new Cert();
+        certEl.setContent(cert);
+        d.setCert(certEl);
+        list.addDevice(d);
+        final byte[] sp = deviceListSignedPartA(version, issuedAt, deviceId, cert, addedAt, flags);
+        list.setSig(X3dhpqCrypto.ed25519Sign(aikEd.priv, sp));
+        list.setMldsaSig(X3dhpqCrypto.mldsa65Sign(aikMl.priv, sp));
+        return list;
+    }
 
     private static byte[] buildSignedDc(int deviceId, KeyPair aikEd, KeyPair aikMl) {
         final KeyPair dikEd = X3dhpqCrypto.ed25519GenerateKeypair();

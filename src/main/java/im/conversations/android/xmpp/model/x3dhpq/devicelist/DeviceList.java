@@ -36,4 +36,28 @@ public class DeviceList extends Extension {
     public void addDevice(final Device device) {
         this.addExtension(device);
     }
+
+    // The hybrid AIK signatures are carried as the last children of <devicelist>
+    // (§8.4, as corrected): <sig> (Ed25519) and <mldsa-sig> (ML-DSA-65). They are
+    // NOT covered by the SignedPart. Placing them inside <devicelist> (rather than
+    // as siblings in the PEP <item>) keeps them reachable on the +notify path.
+    public Sig getSig() {
+        return this.getExtension(Sig.class);
+    }
+
+    public void setSig(final byte[] sigEd25519) {
+        final Sig sig = new Sig();
+        sig.setContent(sigEd25519);
+        this.addExtension(sig);
+    }
+
+    public MldsaSig getMldsaSig() {
+        return this.getExtension(MldsaSig.class);
+    }
+
+    public void setMldsaSig(final byte[] sigMldsa) {
+        final MldsaSig mldsaSig = new MldsaSig();
+        mldsaSig.setContent(sigMldsa);
+        this.addExtension(mldsaSig);
+    }
 }
