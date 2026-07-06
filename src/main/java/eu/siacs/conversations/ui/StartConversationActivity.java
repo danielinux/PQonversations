@@ -102,6 +102,7 @@ public class StartConversationActivity extends XmppActivity
                 OnRosterUpdate,
                 OnUpdateBlocklist,
                 CreatePrivateGroupChatDialog.CreateConferenceDialogListener,
+                CreateSecretGroupChatDialog.CreateSecretGroupChatDialogListener,
                 JoinConferenceDialog.JoinConferenceDialogListener,
                 SwipeRefreshLayout.OnRefreshListener,
                 CreatePublicChannelDialog.CreatePublicChannelDialogListener {
@@ -113,6 +114,7 @@ public class StartConversationActivity extends XmppActivity
 
     private final int REQUEST_SYNC_CONTACTS = 0x28cf;
     private final int REQUEST_CREATE_CONFERENCE = 0x39da;
+    private final int REQUEST_CREATE_SECRET_GROUP = 0x39db;
     private final PendingItem<Intent> pendingViewIntent = new PendingItem<>();
     private final PendingItem<String> mInitialSearchValue = new PendingItem<>();
     private final AtomicBoolean oneShotKeyboardSuppress = new AtomicBoolean();
@@ -381,6 +383,9 @@ public class StartConversationActivity extends XmppActivity
                             break;
                         case R.id.join_public_channel:
                             showJoinConferenceDialog(prefilled);
+                            break;
+                        case R.id.create_secret_group:
+                            showCreateSecretGroupChatDialog();
                             break;
                         case R.id.create_private_group_chat:
                             showCreatePrivateGroupChatDialog();
@@ -696,6 +701,41 @@ public class StartConversationActivity extends XmppActivity
         createConferenceFragment.show(ft, FRAGMENT_TAG_DIALOG);
     }
 
+    private void showCreateSecretGroupChatDialog() {
+        // Server capability gate: only offer the secret-group creation if at
+        // least one activated account has a discovered MUC/conference service.
+        // Otherwise the creation would fail server-side, so we explain instead.
+        if (!anyAccountCanCreateGroup()) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.create_secret_group)
+                    .setMessage(R.string.secret_group_no_muc_any)
+                    .setPositiveButton(R.string.ok, null)
+                    .show();
+            return;
+        }
+        FragmentTransaction ft = getSupportFragmentManager().beginTransaction();
+        Fragment prev = getSupportFragmentManager().findFragmentByTag(FRAGMENT_TAG_DIALOG);
+        if (prev != null) {
+            ft.remove(prev);
+        }
+        ft.addToBackStack(null);
+        CreateSecretGroupChatDialog dialog =
+                CreateSecretGroupChatDialog.newInstance(mActivatedAccounts);
+        dialog.show(ft, FRAGMENT_TAG_DIALOG);
+    }
+
+    private boolean anyAccountCanCreateGroup() {
+        if (xmppConnectionService == null) {
+            return true; // service not bound yet; re-checked at submit time
+        }
+        for (final Account account : xmppConnectionService.getAccounts()) {
+            if (account.isEnabled() && CreateSecretGroupChatDialog.canCreateGroup(account)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void showPublicChannelDialog() {
         FragmentTransaction ft = getSupportFragmentManager().beginTransaction();
         Fragment prev = getSupportFragmentManager().findFragmentByTag(FRAGMENT_TAG_DIALOG);
@@ -858,6 +898,15 @@ public class StartConversationActivity extends XmppActivity
                     final var future =
                             xmppConnectionService.createAdhocConference(account, name, addresses);
                     Futures.addCallback(future, adhocCallback, ContextCompat.getMainExecutor(this));
+                } else if (requestCode == REQUEST_CREATE_SECRET_GROUP) {
+                    Account account = extractAccount(intent);
+                    final String name =
+                            intent.getStringExtra(ChooseContactActivity.EXTRA_GROUP_CHAT_NAME);
+                    final List<Jid> addresses = ChooseContactActivity.extractJabberIds(intent);
+                    if (account == null || addresses.isEmpty()) {
+                        return;
+                    }
+                    createSecretGroup(account, name, addresses);
                 }
             } else {
                 this.mPostponedActivityResult = new Pair<>(requestCode, intent);
@@ -1208,6 +1257,68 @@ public class StartConversationActivity extends XmppActivity
                 ChooseContactActivity.EXTRA_ACCOUNT, account.getJid().asBareJid().toString());
         intent.putExtra(ChooseContactActivity.EXTRA_TITLE_RES_ID, R.string.choose_participants);
         startActivityForResult(intent, REQUEST_CREATE_CONFERENCE);
+    }
+
+    @Override
+    public void onCreateSecretGroupChat(AutoCompleteTextView spinner, String name) {
+        if (!xmppConnectionServiceBound) {
+            return;
+        }
+        final Account account = getSelectedAccount(this, spinner);
+        if (account == null) {
+            return;
+        }
+        if (!CreateSecretGroupChatDialog.canCreateGroup(account)) {
+            Toast.makeText(this, R.string.secret_group_no_muc, Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent intent = new Intent(getApplicationContext(), ChooseContactActivity.class);
+        intent.putExtra(ChooseContactActivity.EXTRA_SHOW_ENTER_JID, false);
+        intent.putExtra(ChooseContactActivity.EXTRA_SELECT_MULTIPLE, true);
+        intent.putExtra(ChooseContactActivity.EXTRA_GROUP_CHAT_NAME, name.trim());
+        intent.putExtra(
+                ChooseContactActivity.EXTRA_ACCOUNT, account.getJid().asBareJid().toString());
+        intent.putExtra(ChooseContactActivity.EXTRA_TITLE_RES_ID, R.string.choose_participants);
+        startActivityForResult(intent, REQUEST_CREATE_SECRET_GROUP);
+    }
+
+    /**
+     * Creates a Secret Post-Quantum Group. The room is created members-only,
+     * non-anonymous and persistent (see {@code defaultGroupChatConfiguration})
+     * and the x3dhpq membership journal is bootstrapped automatically as each
+     * invitee is added (genesis AddMember + per-member AddMember). x3dhpq
+     * encryption is therefore always on for the resulting conversation.
+     */
+    private void createSecretGroup(
+            final Account account, final String name, final List<Jid> addresses) {
+        warnAboutInviteesWithoutKeys(account, addresses);
+        mToast = Toast.makeText(this, R.string.creating_secret_group, Toast.LENGTH_LONG);
+        mToast.show();
+        final var future = xmppConnectionService.createAdhocConference(account, name, addresses);
+        Futures.addCallback(future, adhocCallback, ContextCompat.getMainExecutor(this));
+    }
+
+    /**
+     * Surfaces a clear message (rather than a silent failure) when an invitee
+     * has not published an x3dhpq devicelist/bundle and therefore cannot yet
+     * receive encrypted group messages.
+     */
+    private void warnAboutInviteesWithoutKeys(final Account account, final List<Jid> addresses) {
+        final var gcs = xmppConnectionService.getGroupCryptoService(account);
+        if (gcs == null) {
+            return;
+        }
+        for (final Jid address : addresses) {
+            if (!gcs.hasX3dhpqDevices(address.asBareJid())) {
+                Toast.makeText(
+                                this,
+                                getString(
+                                        R.string.secret_group_contact_no_keys,
+                                        address.asBareJid().toString()),
+                                Toast.LENGTH_LONG)
+                        .show();
+            }
+        }
     }
 
     @Override

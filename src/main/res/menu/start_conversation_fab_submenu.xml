@@ -13,6 +13,10 @@
         android:icon="@drawable/ic_login_24dp"
         android:title="@string/join_public_channel" />
     <item
+        android:id="@+id/create_secret_group"
+        android:icon="@drawable/ic_security_24dp"
+        android:title="@string/create_secret_group" />
+    <item
         android:id="@+id/create_private_group_chat"
         android:icon="@drawable/ic_group_24dp"
         android:title="@string/create_private_group_chat" />
