@@ -1121,6 +1121,101 @@ public class GroupCryptoService {
     }
 
     // -------------------------------------------------------------------------
+    // Read-only UI queries (member management view)
+    // -------------------------------------------------------------------------
+
+    /** Per-member x3dhpq trust/verification state, for the member-management UI. */
+    public enum MemberTrust {
+        /** Not an encrypted group room (or member has no real JID). */
+        NOT_APPLICABLE,
+        /** No x3dhpq devicelist/bundle known for this JID; cannot be encrypted to. */
+        NO_KEY,
+        /** AIK is known but not (yet) present in the signed membership journal. */
+        UNVERIFIED,
+        /** AIK is pinned and present in the room's owner-signed membership journal. */
+        VERIFIED
+    }
+
+    /**
+     * Returns true if we have at least one cached x3dhpq device for the peer,
+     * i.e. the peer has published an x3dhpq devicelist/bundle and can be added
+     * to a secret group. Read-only; safe to call from the UI thread.
+     */
+    public boolean hasX3dhpqDevices(final Jid peerBareJid) {
+        if (peerBareJid == null) {
+            return false;
+        }
+        if (account.getJid().asBareJid().equals(peerBareJid.asBareJid())) {
+            return db.loadX3dhpqAccountIdentity(account.getUuid()) != null;
+        }
+        final List<DatabaseBackend.X3dhpqRemoteDeviceRow> devices =
+                db.listX3dhpqRemoteDevices(account.getUuid(), peerBareJid.asBareJid().toString());
+        return devices != null && !devices.isEmpty();
+    }
+
+    /**
+     * Resolve the verification/trust state of a member of an x3dhpq group. The
+     * member is VERIFIED when their pinned AIK fingerprint is present in the
+     * room's owner-signed membership journal, UNVERIFIED when we know an AIK for
+     * them but it is not (yet) in the journal, and NO_KEY when no x3dhpq bundle
+     * has been published for them. Read-only; does not mutate crypto state.
+     */
+    public MemberTrust getMemberTrust(final Conversation conversation, final Jid memberBareJid) {
+        if (conversation == null
+                || conversation.getMode() != Conversation.MODE_MULTI
+                || memberBareJid == null) {
+            return MemberTrust.NOT_APPLICABLE;
+        }
+        final String roomStr = conversation.getAddress().asBareJid().toString();
+        final RoomState state = rooms.get(roomStr);
+        final AccountIdentityPub aik = loadKnownAik(memberBareJid.asBareJid());
+        if (aik == null) {
+            return MemberTrust.NO_KEY;
+        }
+        if (state == null) {
+            return MemberTrust.UNVERIFIED;
+        }
+        final String fpHex = MembershipJournal.fingerprintHex(blakeFpBytes(aik));
+        return state.journal.isMember(fpHex) ? MemberTrust.VERIFIED : MemberTrust.UNVERIFIED;
+    }
+
+    /**
+     * True when the room has a live x3dhpq group session (encryption is active).
+     */
+    public boolean isGroupEncryptionEnabled(final Conversation conversation) {
+        if (conversation == null || conversation.getMode() != Conversation.MODE_MULTI) {
+            return false;
+        }
+        final RoomState state = rooms.get(conversation.getAddress().asBareJid().toString());
+        return state != null && state.session != null;
+    }
+
+    /** Best-effort AIK lookup for a JID from our own identity or cached bundles. */
+    private AccountIdentityPub loadKnownAik(final Jid bareJid) {
+        try {
+            if (account.getJid().asBareJid().equals(bareJid)) {
+                final DatabaseBackend.X3dhpqAccountIdentityRow row =
+                        db.loadX3dhpqAccountIdentity(account.getUuid());
+                return row == null ? null : AccountIdentityPub.unmarshal(row.aikPub());
+            }
+            final List<DatabaseBackend.X3dhpqRemoteDeviceRow> devices =
+                    db.listX3dhpqRemoteDevices(account.getUuid(), bareJid.toString());
+            if (devices != null) {
+                for (final DatabaseBackend.X3dhpqRemoteDeviceRow d : devices) {
+                    final DatabaseBackend.X3dhpqRemoteBundleRow bundle =
+                            db.loadX3dhpqRemoteBundle(account.getUuid(), bareJid.toString(), d.deviceId());
+                    if (bundle != null && bundle.aikPubMarshal() != null) {
+                        return AccountIdentityPub.unmarshal(bundle.aikPubMarshal());
+                    }
+                }
+            }
+        } catch (final Exception e) {
+            Log.d(Config.LOGTAG, TAG + ": loadKnownAik failed for " + bareJid + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
     // Exception type
     // -------------------------------------------------------------------------
 
