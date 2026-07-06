@@ -83,10 +83,18 @@ public final class X3dhpqKeyVault {
         }
         try {
             final SecretKey key = getOrCreateKey();
-            final byte[] iv = new byte[IV_LENGTH];
-            secureRandom.nextBytes(iv);
             final Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            // AndroidKeyStore AES-GCM keys forbid a caller-supplied IV on ENCRYPT — the
+            // Keystore generates the IV itself (this is what prevents catastrophic GCM
+            // IV reuse). Init without an IV spec, then read the generated 12-byte IV
+            // back via getIV(). (DECRYPT, in unwrap(), does supply the IV, which is allowed.)
+            cipher.init(Cipher.ENCRYPT_MODE, key);
+            final byte[] iv = cipher.getIV();
+            if (iv == null || iv.length != IV_LENGTH) {
+                throw new IllegalStateException(
+                        "x3dhpq key vault: unexpected GCM IV length "
+                                + (iv == null ? -1 : iv.length));
+            }
             final byte[] ciphertext = cipher.doFinal(plaintext);
             final byte[] blob = new byte[HEADER_LENGTH + ciphertext.length];
             System.arraycopy(MAGIC, 0, blob, 0, MAGIC.length);
