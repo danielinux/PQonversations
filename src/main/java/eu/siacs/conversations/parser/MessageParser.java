@@ -68,6 +68,31 @@ public class MessageParser extends AbstractParser
         super(service, connection);
     }
 
+    /**
+     * Recursively checks whether {@code element} (or any descendant, e.g. a
+     * carbon/MAM {@code <forwarded>} inner message) carries an x3dhpq message
+     * envelope: {@code <x3dhpq>} or {@code <x3dhpq-group>} in the
+     * {@code urn:xmppqr:x3dhpq:envelope:0} namespace. Used to suppress the
+     * sender's legacy plaintext {@code <body>} fallback on delivery paths where
+     * the typed envelope extension was not detected.
+     */
+    private static boolean carriesX3dhpqEnvelope(final Element element) {
+        if (element == null) {
+            return false;
+        }
+        for (final Element child : element.getChildren()) {
+            if (Namespace.X3DHPQ_ENVELOPE.equals(child.getNamespace())
+                    && ("x3dhpq".equals(child.getName())
+                            || "x3dhpq-group".equals(child.getName()))) {
+                return true;
+            }
+            if (carriesX3dhpqEnvelope(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Message parseX3dhpqChat(
             final Envelope envelopeEl,
             final Jid from,
@@ -602,6 +627,23 @@ public class MessageParser extends AbstractParser
                         status = Message.STATUS_RECEIVED;
                     }
                 }
+            }
+            // x3dhpq envelope is authoritative. The sender attaches a legacy
+            // plaintext <body> fallback ("[This message is x3dhpq encrypted]") to
+            // every x3dhpq stanza purely so NON-x3dhpq clients render something. An
+            // x3dhpq-aware client must never display that fallback. The typed
+            // envelope branches below already suppress the body on the direct path,
+            // but on carbon/MAM <forwarded> copies the typed detection at
+            // getOnlyExtension(Envelope.class) can miss the envelope and fall through
+            // to the plaintext <body> branch, leaking a spurious message. Guard by
+            // scanning the effective packet (and any nested forwarded message) for an
+            // <x3dhpq>/<x3dhpq-group> element by namespace: if one is present but was
+            // not decrypted above, drop the stanza rather than show the fallback.
+            if (pgpEncrypted == null
+                    && x3dhpqEnvelope == null
+                    && x3dhpqGroupEnvelope == null
+                    && carriesX3dhpqEnvelope(packet)) {
+                return;
             }
             final Message message;
             if (pgpEncrypted != null) {
