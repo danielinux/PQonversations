@@ -638,6 +638,8 @@ public class ConferenceDetailsActivity extends XmppActivity
             this.binding.mucSubject.setVisibility(View.GONE);
         }
         this.binding.mucYourNick.setText(mucOptions.getActualNick());
+        this.binding.secretGroupBadge.setVisibility(
+                mConversation.isX3dhpqSecretGroup() ? View.VISIBLE : View.GONE);
         UserAdapter.setHats(this.binding.tags, self.getDynamicTags());
         if (mucOptions.online()) {
             this.binding.jidWarning.setVisibility(
@@ -712,7 +714,13 @@ public class ConferenceDetailsActivity extends XmppActivity
                     this.mUserPreviewAdapter.submitList(list);
                 });
         final var userCount = mucOptions.getUserCount();
-        this.binding.invite.setVisibility(mucOptions.canInvite() ? View.VISIBLE : View.GONE);
+        // Secret post-quantum groups are owner-managed: only the owner may add
+        // members, so hide the invite affordance for everyone else.
+        final boolean canInvite =
+                mConversation.isX3dhpqSecretGroup()
+                        ? mucOptions.getSelf().ranks(Affiliation.OWNER)
+                        : mucOptions.canInvite();
+        this.binding.invite.setVisibility(canInvite ? View.VISIBLE : View.GONE);
         this.binding.showUsers.setVisibility(userCount == 0 ? View.GONE : View.VISIBLE);
         this.binding.showUsers.setText(
                 getResources().getQuantityString(R.plurals.view_users, userCount, userCount));

@@ -126,7 +126,9 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
         } else {
             viewHolder.binding.contactJid.setVisibility(View.GONE);
         }
-        if (user.getMucOptions().isPrivateAndNonAnonymous() && user.getPgpKeyId() != 0) {
+        if (user.getConversation().isX3dhpqSecretGroup() && user.getRealJid() != null) {
+            bindX3dhpqTrust(viewHolder, user);
+        } else if (user.getMucOptions().isPrivateAndNonAnonymous() && user.getPgpKeyId() != 0) {
             viewHolder.binding.key.setVisibility(View.VISIBLE);
             viewHolder.binding.key.setOnClickListener(
                     v -> {
@@ -157,6 +159,50 @@ public class UserAdapter extends ListAdapter<MucOptions.User, UserAdapter.ViewHo
             viewHolder.binding.key.setVisibility(View.GONE);
         }
         setHats(viewHolder.binding.tags, user.getDynamicTags());
+    }
+
+    /**
+     * Renders the member's x3dhpq AIK verification/trust state in the key chip
+     * for secret post-quantum groups. VERIFIED (AIK in the owner-signed
+     * membership journal), UNVERIFIED (AIK known but not yet in the journal) or
+     * NO_KEY (no x3dhpq bundle published).
+     */
+    private static void bindX3dhpqTrust(final ViewHolder viewHolder, final MucOptions.User user) {
+        final TextView key = viewHolder.binding.key;
+        final XmppActivity activity = XmppActivity.find(viewHolder.binding.getRoot());
+        final XmppConnectionService service =
+                activity == null ? null : activity.xmppConnectionService;
+        final var gcs =
+                service == null ? null : service.getGroupCryptoService(user.getAccount());
+        if (gcs == null) {
+            key.setVisibility(View.GONE);
+            return;
+        }
+        final var trust = gcs.getMemberTrust(user.getConversation(), user.getRealJid());
+        final @StringRes int text;
+        final @ColorRes int color;
+        switch (trust) {
+            case VERIFIED -> {
+                text = R.string.secret_group_member_verified;
+                color = R.color.green_800;
+            }
+            case UNVERIFIED -> {
+                text = R.string.secret_group_member_unverified;
+                color = R.color.amber_800;
+            }
+            case NO_KEY -> {
+                text = R.string.secret_group_member_no_key;
+                color = R.color.red_800;
+            }
+            default -> {
+                key.setVisibility(View.GONE);
+                return;
+            }
+        }
+        key.setText(text);
+        key.setTextColor(ContextCompat.getColor(key.getContext(), color));
+        key.setOnClickListener(null);
+        key.setVisibility(View.VISIBLE);
     }
 
     public static void setHats(final ConstraintLayout layout, final List<DynamicTag> tags) {

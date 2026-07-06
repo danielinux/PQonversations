@@ -83,13 +83,19 @@ public final class MucDetailsContextMenuHelper {
         }
         if (showAllOptions) {
             if (user.getRole() == Role.NONE) {
-                invite.setVisible(true);
+                // Secret post-quantum groups are owner-managed: only the owner
+                // may (re-)invite members. Public channels keep prior behaviour.
+                invite.setVisible(!isGroupChat || self.ranks(Affiliation.OWNER));
             }
             if ((self.ranks(Affiliation.ADMIN) && self.outranks(user.getAffiliation()))
                     || self.getAffiliation() == Affiliation.OWNER) {
                 if (!user.ranks(Affiliation.MEMBER)) {
                     giveMembership.setVisible(true);
-                } else if (user.getAffiliation() == Affiliation.MEMBER && !isGroupChat) {
+                } else if (user.getAffiliation() == Affiliation.MEMBER
+                        && (!isGroupChat || self.ranks(Affiliation.OWNER))) {
+                    // In secret post-quantum groups the owner removes a member
+                    // here; this revokes the affiliation and publishes a
+                    // RemoveMember entry to the x3dhpq membership journal.
                     removeMembership.setVisible(true);
                 }
                 removeFromRoom.setVisible(true);
