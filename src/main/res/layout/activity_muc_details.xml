@@ -138,6 +138,20 @@
                             </LinearLayout>
                         </RelativeLayout>
 
+                        <TextView
+                            android:id="@+id/secret_group_badge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:drawablePadding="6dp"
+                            android:gravity="center_vertical"
+                            android:textAppearance="?textAppearanceBodyMedium"
+                            android:textColor="?attr/colorPrimary"
+                            android:text="@string/secret_group_badge"
+                            android:visibility="gone"
+                            app:drawableStartCompat="@drawable/ic_security_24dp"
+                            app:drawableTint="?attr/colorPrimary" />
+
                         <RelativeLayout
                             android:id="@+id/muc_settings"
                             android:layout_width="fill_parent"

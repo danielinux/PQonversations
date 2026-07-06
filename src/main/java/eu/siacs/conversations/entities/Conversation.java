@@ -766,6 +766,16 @@ public class Conversation extends AbstractEntity
         return getMucOptions().isPrivateAndNonAnonymous();
     }
 
+    /**
+     * A "Secret Post-Quantum Group": a members-only, non-anonymous group chat.
+     * In this fork such rooms are always x3dhpq encrypted and invite-only, so
+     * this predicate drives the always-on encryption and PQ/invite-only
+     * labelling in the UI.
+     */
+    public boolean isX3dhpqSecretGroup() {
+        return mode == MODE_MULTI && isPrivateAndNonAnonymous();
+    }
+
     public synchronized MucOptions getMucOptions() {
         return getAccount()
                 .getXmppConnection()
@@ -786,6 +796,11 @@ public class Conversation extends AbstractEntity
     }
 
     public int getNextEncryption() {
+        // Secret post-quantum groups always encrypt with x3dhpq; there is no
+        // per-message toggle, so ignore any stored per-conversation override.
+        if (isX3dhpqSecretGroup()) {
+            return Message.ENCRYPTION_X3DHPQ;
+        }
         if (OmemoSetting.isAlways()) {
             return suitableForOmemoByDefault(this)
                     ? Message.ENCRYPTION_X3DHPQ

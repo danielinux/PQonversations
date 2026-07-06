@@ -83,6 +83,19 @@ public class ConversationMenuConfigurator {
         final MenuItem pgp = menu.findItem(R.id.encryption_choice_pgp);
         final MenuItem x3dhpq = menu.findItem(R.id.encryption_choice_x3dhpq);
 
+        // Secret post-quantum groups are always x3dhpq encrypted: expose a
+        // locked indicator with no per-message toggle (only x3dhpq selectable).
+        if (conversation.isX3dhpqSecretGroup()) {
+            menuSecure.setVisible(true);
+            menuSecure.setIcon(R.drawable.ic_lock_24dp);
+            menuSecure.setTitle(R.string.encrypted_with_x3dhpq);
+            none.setVisible(false);
+            pgp.setVisible(false);
+            x3dhpq.setVisible(true);
+            x3dhpq.setChecked(true);
+            return;
+        }
+
         final int next = conversation.getNextEncryption();
 
         boolean visible;
