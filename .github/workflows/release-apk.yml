@@ -45,13 +45,21 @@ jobs:
         id: apk
         run: |
           set -e
-          apk="$(find . -path '*/outputs/apk/conversationsFree/debug/*.apk' | head -n1)"
+          # ABI splits are enabled in build.gradle, so the build emits per-ABI
+          # APKs (armeabi-v7a / x86 / x86_64 / arm64-v8a) PLUS a universal one.
+          # Publish the UNIVERSAL APK so it installs on every device — a per-ABI
+          # split is rejected as "app not compatible" on a non-matching phone.
+          dir='*/outputs/apk/conversationsFree/debug'
+          apk="$(find . -path "$dir/*universal*.apk" | head -n1)"
+          [ -z "$apk" ] && apk="$(find . -path "$dir/*arm64-v8a*.apk" | head -n1)"
+          [ -z "$apk" ] && apk="$(find . -path "$dir/*.apk" | head -n1)"
           if [ -z "$apk" ]; then
             echo "No conversationsFree debug APK found" >&2
             find . -path '*/outputs/apk/*' -name '*.apk' >&2 || true
             exit 1
           fi
-          out="PQonversations-${GITHUB_REF_NAME}.apk"
+          echo "Selected APK: $apk"
+          out="PQonversations-${GITHUB_REF_NAME}-universal.apk"
           cp "$apk" "$out"
           echo "file=$out" >> "$GITHUB_OUTPUT"
 
