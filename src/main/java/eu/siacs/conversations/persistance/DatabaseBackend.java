@@ -67,7 +67,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 58;
+    private static final int DATABASE_VERSION = 59;
 
     // Column/table names for the legacy OMEMO tables, kept only so historical DB
     // migrations continue to work after the OMEMO code was removed.
@@ -436,6 +436,24 @@ public class DatabaseBackend extends SQLiteOpenHelper
     private static final String CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX =
             "CREATE INDEX x3dhpq_pairing_session_expiry ON x3dhpq_pairing_session(expires_at)";
 
+    // Co-account devices: OTHER physical devices under this account's AIK that this
+    // install did not generate itself (e.g. enrolled via pairing while acting as the
+    // existing/primary side). Holds only the public DeviceCertificate — never a
+    // private key — so the devicelist publish path (§8.2) can union these with
+    // x3dhpq_local_device to build the account's authoritative device set instead of
+    // clobbering it with local-only devices (added in DATABASE_VERSION = 59).
+    private static final String CREATE_X3DHPQ_CO_ACCOUNT_DEVICE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_co_account_device ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "device_id INTEGER NOT NULL,"
+                    + "dc_marshal BLOB NOT NULL,"          // DeviceCertificate.marshal(), issued by our AIK
+                    + "added_at INTEGER NOT NULL,"
+                    + "flags INTEGER NOT NULL DEFAULT 0,"
+                    + "PRIMARY KEY (account_uuid, device_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+
     private static final String RESOLVER_RESULTS_TABLENAME = "resolver_results";
 
     private static final String CREATE_RESOLVER_RESULTS_TABLE =
@@ -715,6 +733,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         db.execSQL(CREATE_X3DHPQ_DEVICELIST_STATE);
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION);
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
+        db.execSQL(CREATE_X3DHPQ_CO_ACCOUNT_DEVICE);
     }
 
     @Override
@@ -1325,6 +1344,10 @@ public class DatabaseBackend extends SQLiteOpenHelper
         // x3dhpq_devicelist_state table (added in DATABASE_VERSION = 58).
         if (oldVersion < 58 && newVersion >= 58) {
             db.execSQL(CREATE_X3DHPQ_DEVICELIST_STATE);
+        }
+        // x3dhpq_co_account_device table (added in DATABASE_VERSION = 59).
+        if (oldVersion < 59 && newVersion >= 59) {
+            db.execSQL(CREATE_X3DHPQ_CO_ACCOUNT_DEVICE);
         }
     }
 
@@ -2410,6 +2433,16 @@ public class DatabaseBackend extends SQLiteOpenHelper
             long createdAt,
             int flags) {}
 
+    // A device under this account's AIK that this install did not generate itself
+    // (e.g. enrolled via pairing while acting as the existing/primary side). No
+    // private key: dc is the public DeviceCertificate issued to the enrolled device.
+    public record X3dhpqCoAccountDeviceRow(
+            String accountUuid,
+            int deviceId,
+            byte[] dc,
+            long addedAt,
+            int flags) {}
+
     public record X3dhpqSignedPreKeyRow(
             String accountUuid,
             int keyId,
@@ -2650,6 +2683,55 @@ public class DatabaseBackend extends SQLiteOpenHelper
                                         c.getBlob(c.getColumnIndexOrThrow("dik_priv_marshal"))),
                                 c.getBlob(c.getColumnIndexOrThrow("dc_marshal")),
                                 c.getLong(c.getColumnIndexOrThrow("created_at")),
+                                c.getInt(c.getColumnIndexOrThrow("flags"))));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    // ---- x3dhpq DAO: co_account_device ----
+
+    /**
+     * Persists a co-account device (§8.2 union set): a device enrolled under this
+     * account's AIK that this install did not generate itself — e.g. a newly paired
+     * device when acting as the existing/primary side. Holds only the public DC;
+     * the private key lives on the enrolled device, never here.
+     */
+    public void putX3dhpqCoAccountDevice(
+            String accountUuid, int deviceId, byte[] dc, long addedAt, int flags) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("device_id", deviceId);
+        v.put("dc_marshal", dc);
+        v.put("added_at", addedAt);
+        v.put("flags", flags);
+        db.insertWithOnConflict(
+                "x3dhpq_co_account_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public List<X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_co_account_device",
+                        null,
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        null);
+        final List<X3dhpqCoAccountDeviceRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                result.add(
+                        new X3dhpqCoAccountDeviceRow(
+                                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                                c.getInt(c.getColumnIndexOrThrow("device_id")),
+                                c.getBlob(c.getColumnIndexOrThrow("dc_marshal")),
+                                c.getLong(c.getColumnIndexOrThrow("added_at")),
                                 c.getInt(c.getColumnIndexOrThrow("flags"))));
             }
         } finally {

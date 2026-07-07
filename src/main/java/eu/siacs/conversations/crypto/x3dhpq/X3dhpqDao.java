@@ -24,6 +24,14 @@ public interface X3dhpqDao {
     List<DatabaseBackend.X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid);
     void deleteX3dhpqLocalDevice(String accountUuid, int deviceId);
 
+    // --- co-account device: OTHER physical devices under this account's AIK that this
+    // install did not itself generate (e.g. enrolled via pairing while acting as the
+    // existing/primary side). Holds only the public DeviceCertificate; the private key
+    // lives on the enrolled device. Unioned with x3dhpq_local_device when (re)publishing
+    // the devicelist (§8.2) so every device the account knows about stays on `current`. ---
+    void putX3dhpqCoAccountDevice(String accountUuid, int deviceId, byte[] dc, long addedAt, int flags);
+    List<DatabaseBackend.X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(String accountUuid);
+
     // --- signed pre-key ---
     void putX3dhpqSignedPreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX, byte[] sigEd, byte[] sigMldsa, long createdAt);
     DatabaseBackend.X3dhpqSignedPreKeyRow loadLatestX3dhpqSignedPreKey(String accountUuid);

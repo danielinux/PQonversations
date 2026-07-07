@@ -69,6 +69,29 @@ public class PairNewDeviceActivity extends XmppActivity {
                         final byte[] sid,
                         final PairingFsm.Result result,
                         final DeviceCertificate issuedCert) {
+                    // Existing/primary side: issuedCert is the DC we just minted (under
+                    // our own AIK) for the newly enrolled device. Persist it into the
+                    // account-wide co-device store and republish the signed devicelist
+                    // so contacts — and any other co-account device — learn about it.
+                    // Without this the new device stays invisible on `current` and
+                    // messages sent to it are silently dropped (§8.2).
+                    if (issuedCert != null && mAccount != null) {
+                        try {
+                            xmppConnectionService.databaseBackend.putX3dhpqCoAccountDevice(
+                                    mAccount.getUuid(),
+                                    (int) issuedCert.getDeviceId(),
+                                    issuedCert.marshal(),
+                                    issuedCert.getCreatedAt(),
+                                    issuedCert.getFlags() & 0xff);
+                            mAccount.getX3dhpqService().publishDeviceList();
+                        } catch (final Exception e) {
+                            Log.e(
+                                    Config.LOGTAG,
+                                    LOGTAG
+                                            + ": failed to persist/publish newly enrolled device",
+                                    e);
+                        }
+                    }
                     mHandler.post(
                             () -> {
                                 mStatusView.setText(R.string.x3dhpq_pair_status_done);

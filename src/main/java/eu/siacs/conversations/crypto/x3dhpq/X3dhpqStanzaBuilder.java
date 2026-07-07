@@ -23,7 +23,9 @@ import im.conversations.x3dhpq.types.AccountIdentityPub;
 import im.conversations.x3dhpq.types.DeviceIdentityKey;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builds DeviceList and Bundle Extension trees from persisted x3dhpq state.
@@ -46,10 +48,19 @@ public final class X3dhpqStanzaBuilder {
     }
 
     /**
-     * Builds the DeviceList Extension for all local devices, with an explicit
-     * monotonic {@code version} and {@code issuedAt} (§8.2). Devices are emitted
-     * sorted by device_id ascending (unsigned) so the XML matches the canonical
-     * signed input order of §8.3.
+     * Builds the DeviceList Extension for the UNION of all devices this account's
+     * AIK has certified, with an explicit monotonic {@code version} and
+     * {@code issuedAt} (§8.2). The union covers devices whose private key lives on
+     * THIS install ({@code x3dhpq_local_device}) plus co-account devices this side
+     * has certified but does not hold the key for — e.g. a device enrolled via
+     * pairing while acting as the existing/primary side
+     * ({@code x3dhpq_co_account_device}). A locally-generated row always wins over
+     * a co-account entry for the same device id (should not normally collide).
+     * Devices are emitted sorted by device_id ascending (unsigned) so the XML
+     * matches the canonical signed input order of §8.3. Without this union, each
+     * physical device would publish a list containing only itself, clobbering the
+     * account's authoritative {@code current} item and silently dropping messages
+     * to every other device.
      */
     public static DeviceList buildDeviceList(
             final X3dhpqDao dao,
@@ -60,29 +71,43 @@ public final class X3dhpqStanzaBuilder {
         deviceList.setVersion(Long.toUnsignedString(version));
         deviceList.setIssuedAt(Long.toString(issuedAt));
 
-        final List<DatabaseBackend.X3dhpqLocalDeviceRow> localDevices =
-                new ArrayList<>(dao.listX3dhpqLocalDevices(accountUuid));
+        final Map<Long, Device> byDeviceId = new LinkedHashMap<>();
+        for (final DatabaseBackend.X3dhpqLocalDeviceRow row : dao.listX3dhpqLocalDevices(accountUuid)) {
+            byDeviceId.put(
+                    row.deviceId() & 0xffffffffL,
+                    toDevice(row.deviceId(), row.createdAt(), row.flags(), row.dc()));
+        }
+        for (final DatabaseBackend.X3dhpqCoAccountDeviceRow row :
+                dao.listX3dhpqCoAccountDevices(accountUuid)) {
+            byDeviceId.putIfAbsent(
+                    row.deviceId() & 0xffffffffL,
+                    toDevice(row.deviceId(), row.addedAt(), row.flags(), row.dc()));
+        }
+
         // Sort by device_id ascending (unsigned) — canonical order of §8.3.
-        localDevices.sort(
-                Comparator.comparingLong(r -> ((DatabaseBackend.X3dhpqLocalDeviceRow) r).deviceId()
-                        & 0xffffffffL));
-        for (final DatabaseBackend.X3dhpqLocalDeviceRow row : localDevices) {
-            final Device device = new Device();
-            device.setDeviceId(row.deviceId());
-            // added-at is the device's stable first-seen time (its DC creation
-            // time); it is part of the signed input (§8.3) so it MUST be on the
-            // wire (§8.4) and MUST NOT drift between republishes of the same list.
-            device.setAddedAt(row.createdAt());
-            // flags=1 means x3dhpq-capable per protocol spec
-            device.setFlags(Integer.toString(row.flags()));
-
-            final Cert cert = new Cert();
-            cert.setContent(row.dc()); // dc() is the serialised DeviceCertificate
-            device.setCert(cert);
-
-            deviceList.addDevice(device);
+        final List<Long> ids = new ArrayList<>(byDeviceId.keySet());
+        ids.sort(Comparator.naturalOrder());
+        for (final Long id : ids) {
+            deviceList.addDevice(byDeviceId.get(id));
         }
         return deviceList;
+    }
+
+    // Builds a wire <device> element: id/flags attrs, added-at (part of the
+    // signed input, §8.3 — MUST be on the wire per §8.4 and MUST NOT drift
+    // between republishes of the same list), and the DC as its <cert> child.
+    private static Device toDevice(
+            final int deviceId, final long addedAt, final int flags, final byte[] dcMarshal) {
+        final Device device = new Device();
+        device.setDeviceId(deviceId);
+        device.setAddedAt(addedAt);
+        // flags=1 means x3dhpq-capable per protocol spec
+        device.setFlags(Integer.toString(flags));
+
+        final Cert cert = new Cert();
+        cert.setContent(dcMarshal); // dcMarshal is the serialised DeviceCertificate
+        device.setCert(cert);
+        return device;
     }
 
     /**

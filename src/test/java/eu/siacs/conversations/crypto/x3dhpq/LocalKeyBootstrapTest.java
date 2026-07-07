@@ -111,6 +111,24 @@ public class LocalKeyBootstrapTest {
             }
         }
 
+        final Map<String, List<DatabaseBackend.X3dhpqCoAccountDeviceRow>> coAccountDeviceRows =
+                new HashMap<>();
+
+        @Override
+        public void putX3dhpqCoAccountDevice(
+                String accountUuid, int deviceId, byte[] dc, long addedAt, int flags) {
+            coAccountDeviceRows
+                    .computeIfAbsent(accountUuid, k -> new ArrayList<>())
+                    .add(new DatabaseBackend.X3dhpqCoAccountDeviceRow(
+                            accountUuid, deviceId, dc, addedAt, flags));
+        }
+
+        @Override
+        public List<DatabaseBackend.X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(
+                String accountUuid) {
+            return coAccountDeviceRows.getOrDefault(accountUuid, new ArrayList<>());
+        }
+
         @Override
         public void putX3dhpqSignedPreKey(
                 String accountUuid,

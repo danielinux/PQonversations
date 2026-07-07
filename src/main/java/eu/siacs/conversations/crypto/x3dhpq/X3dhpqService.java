@@ -1036,18 +1036,30 @@ public class X3dhpqService {
         return X3dhpqCrypto.SHA256.hash(records);
     }
 
-    private void publishDeviceList() {
+    /**
+     * (Re)publishes the account's single authoritative devicelist. Builds the
+     * signed-input entries from the UNION of two sources: devices whose private
+     * key lives on THIS install ({@code x3dhpq_local_device}) and co-account
+     * devices this side has certified but does not hold the key for — e.g. a
+     * device enrolled via pairing while acting as the existing/primary side
+     * ({@code x3dhpq_co_account_device}). Publishing from local rows alone would
+     * let each physical device overwrite the account's {@code current} item with
+     * only itself, silently dropping messages to every other device (§8.2).
+     * Public so callers outside this class (e.g. the pairing UI, on enrolling a
+     * new device) can trigger a republish once the union changes.
+     */
+    public void publishDeviceList() {
         final String accountUuid = account.getUuid();
         final String ownerJid = account.getJid().asBareJid().toString();
 
-        // Build the canonical core entries from local rows, sorted by device_id
-        // ascending (unsigned) — the §8.3 signed-input order.
-        final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
-                new ArrayList<>(db.listX3dhpqLocalDevices(accountUuid));
-        rows.sort(java.util.Comparator.comparingLong(r -> r.deviceId() & 0xffffffffL));
-        final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries =
-                new ArrayList<>();
-        for (final DatabaseBackend.X3dhpqLocalDeviceRow row : rows) {
+        // Build the canonical core entries from the union, keyed by device_id so a
+        // locally-generated row always wins over a cached co-account entry for the
+        // same id (should not normally collide), then sorted ascending (unsigned)
+        // — the §8.3 signed-input order.
+        final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> byDeviceId =
+                new java.util.LinkedHashMap<>();
+
+        for (final DatabaseBackend.X3dhpqLocalDeviceRow row : db.listX3dhpqLocalDevices(accountUuid)) {
             final DeviceCertificate cert;
             try {
                 cert = DeviceCertificate.unmarshal(row.dc());
@@ -1056,8 +1068,33 @@ public class X3dhpqService {
                         + " with unparseable DC: " + e.getMessage());
                 continue;
             }
-            entries.add(new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
-                    row.deviceId() & 0xffffffffL, row.createdAt(), (byte) row.flags(), cert));
+            byDeviceId.put(row.deviceId() & 0xffffffffL,
+                    new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
+                            row.deviceId() & 0xffffffffL, row.createdAt(), (byte) row.flags(), cert));
+        }
+        for (final DatabaseBackend.X3dhpqCoAccountDeviceRow row : db.listX3dhpqCoAccountDevices(accountUuid)) {
+            final long id = row.deviceId() & 0xffffffffL;
+            if (byDeviceId.containsKey(id)) {
+                continue;
+            }
+            final DeviceCertificate cert;
+            try {
+                cert = DeviceCertificate.unmarshal(row.dc());
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": skipping co-account device " + row.deviceId()
+                        + " with unparseable DC: " + e.getMessage());
+                continue;
+            }
+            byDeviceId.put(id, new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
+                    id, row.addedAt(), (byte) row.flags(), cert));
+        }
+
+        final List<Long> sortedIds = new ArrayList<>(byDeviceId.keySet());
+        sortedIds.sort(java.util.Comparator.naturalOrder());
+        final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries =
+                new ArrayList<>();
+        for (final Long id : sortedIds) {
+            entries.add(byDeviceId.get(id));
         }
 
         // Decide the monotonic version (§8.2): first publish => 1; content change

@@ -27,15 +27,15 @@ import java.util.Map;
 //   - nonce: first 12 bytes of HKDF-SHA-512(salt=zeros[64], ikm=mk, info="X3DHPQ-MessageKey-v0", length=44)
 //   - AES key: first 32 bytes of the same 44-byte HKDF output
 //   - KEM checkpoint interval: 50 messages or 3600 seconds (from Go's kemCheckpointK / kemCheckpointT)
-//   - Skipped keys bounded at MAX_SKIPPED=256 (plan requirement; Go uses 1000)
+//   - Skipped keys bounded at MAX_SKIPPED=1000 (spec §9.4.2; matches the Go reference)
 public final class Session {
 
     // KEM checkpoint fires when either threshold is crossed.
     public static final int  KEM_CHECKPOINT_INTERVAL_MESSAGES = 50;
     public static final long KEM_CHECKPOINT_INTERVAL_SECONDS  = 3600L; // 1 hour, matching Go
 
-    // Skipped-key table bound (plan §: MAX_SKIPPED=256).
-    public static final int MAX_SKIPPED = 256;
+    // Skipped-key table bound (spec §9.4.2: MAX_SKIPPED=1000, matches the Go reference).
+    public static final int MAX_SKIPPED = 1000;
 
     // Info strings verbatim from xmppqr/internal/x3dhpqcrypto/x3dh.go.
     private static final byte[] INFO_ROOT_KEY =
