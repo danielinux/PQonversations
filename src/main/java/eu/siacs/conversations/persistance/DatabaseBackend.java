@@ -2712,6 +2712,36 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 "x3dhpq_co_account_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    /**
+     * Drop every x3dhpq_co_account_device row for {@code accountUuid} whose
+     * deviceId is NOT in {@code keepIds}. Called after processing the account's
+     * OWN authoritative devicelist so a device the account itself dropped does
+     * not linger in the co-account set and get resurrected on the next publish.
+     */
+    public void pruneX3dhpqCoAccountDevicesNotIn(
+            String accountUuid, java.util.Collection<Integer> keepIds) {
+        final SQLiteDatabase db = getWritableDatabase();
+        // Build "id NOT IN (?, ?, ...)" — empty keepIds means "drop all rows
+        // for this account".
+        if (keepIds == null || keepIds.isEmpty()) {
+            db.delete("x3dhpq_co_account_device",
+                    "account_uuid=?",
+                    new String[] {accountUuid});
+            return;
+        }
+        final StringBuilder placeholders = new StringBuilder();
+        final String[] args = new String[keepIds.size() + 1];
+        args[0] = accountUuid;
+        int i = 1;
+        for (Integer id : keepIds) {
+            if (placeholders.length() > 0) placeholders.append(',');
+            placeholders.append('?');
+            args[i++] = Integer.toString(id);
+        }
+        final String where = "account_uuid=? AND device_id NOT IN (" + placeholders + ")";
+        db.delete("x3dhpq_co_account_device", where, args);
+    }
+
     public List<X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(String accountUuid) {
         final SQLiteDatabase db = getReadableDatabase();
         final Cursor c =

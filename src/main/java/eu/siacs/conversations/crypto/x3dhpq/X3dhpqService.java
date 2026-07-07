@@ -419,12 +419,33 @@ public class X3dhpqService {
             return;
         }
 
+        // Self-heal (mirrors Dino): x3dhpq_co_account_device has exactly one
+        // writer elsewhere in this class (the pairing UI, when acting as the
+        // existing/primary side), so a newly-paired non-primary device starts
+        // with an EMPTY co-account table and would otherwise clobber the
+        // account's devicelist with a self-only one on its next publish
+        // (§8.2). Fix: whenever we receive the account's OWN authoritative
+        // devicelist, remember every sibling device (i.e. every entry that
+        // isn't this install's own local device) in x3dhpq_co_account_device
+        // so publishDeviceList() — which unions x3dhpq_local_device with
+        // x3dhpq_co_account_device — republishes the full list intact.
+        final boolean isOwnList =
+                account != null && peerBareJid.asBareJid().equals(account.getJid().asBareJid());
+        final java.util.Set<Integer> localIds = new java.util.HashSet<>();
+        if (isOwnList) {
+            for (final DatabaseBackend.X3dhpqLocalDeviceRow row :
+                    db.listX3dhpqLocalDevices(accountUuid)) {
+                localIds.add(row.deviceId());
+            }
+        }
+
         final Collection<Device> devices = list.getDevices();
         Log.d(Config.LOGTAG,
                 "x3dhpq: handleInboundDeviceList for " + peer
                         + " — list contains " + devices.size() + " device(s); xml="
                         + StreamElementWriter.asStringUnchecked(list));
         final java.util.Set<Integer> liveIds = new java.util.HashSet<>();
+        final java.util.Set<Integer> coAccountLiveIds = new java.util.HashSet<>();
         for (final Device device : devices) {
             final Integer id = device.getDeviceId();
             final Cert certEl = device.getCert();
@@ -451,6 +472,23 @@ public class X3dhpqService {
                 liveIds.add(id);
                 Log.d(Config.LOGTAG,
                         "x3dhpq: stored remote_device for " + peer + "/" + id);
+
+                if (isOwnList && !localIds.contains(id)) {
+                    final long deviceAddedAt = addedAt != null ? addedAt : now;
+                    int flags;
+                    try {
+                        flags = Integer.parseInt(
+                                com.google.common.base.Strings.nullToEmpty(device.getFlags())
+                                        .trim());
+                    } catch (final NumberFormatException nfe) {
+                        flags = 0;
+                    }
+                    db.putX3dhpqCoAccountDevice(accountUuid, id, dcBytes, deviceAddedAt, flags);
+                    coAccountLiveIds.add(id);
+                    Log.d(Config.LOGTAG,
+                            "x3dhpq: stored co_account_device for " + peer + "/" + id
+                                    + " (self-heal from own devicelist)");
+                }
             } catch (Exception e) {
                 Log.w(Config.LOGTAG,
                         "x3dhpq: malformed peer DC from " + peer + "/" + id + ": " + e.getMessage());
@@ -471,6 +509,12 @@ public class X3dhpqService {
         // pairwise envelopes (e.g. SenderChainAnnouncements) to ghost
         // device ids that the peer regenerated and abandoned.
         db.pruneX3dhpqRemoteDevicesNotIn(accountUuid, peer, liveIds);
+        if (isOwnList) {
+            // Same reasoning for the co-account self-heal set: a device the
+            // account itself dropped from its authoritative list must not
+            // resurrect on our next publish.
+            db.pruneX3dhpqCoAccountDevicesNotIn(accountUuid, coAccountLiveIds);
+        }
     }
 
     /**
@@ -1041,7 +1085,9 @@ public class X3dhpqService {
      * signed-input entries from the UNION of two sources: devices whose private
      * key lives on THIS install ({@code x3dhpq_local_device}) and co-account
      * devices this side has certified but does not hold the key for — e.g. a
-     * device enrolled via pairing while acting as the existing/primary side
+     * device enrolled via pairing while acting as the existing/primary side, or
+     * any device that has self-healed its co-account set from the account's own
+     * inbound devicelist (see {@link #handleInboundDeviceList}, §8.2)
      * ({@code x3dhpq_co_account_device}). Publishing from local rows alone would
      * let each physical device overwrite the account's {@code current} item with
      * only itself, silently dropping messages to every other device (§8.2).

@@ -117,16 +117,28 @@ public class LocalKeyBootstrapTest {
         @Override
         public void putX3dhpqCoAccountDevice(
                 String accountUuid, int deviceId, byte[] dc, long addedAt, int flags) {
-            coAccountDeviceRows
-                    .computeIfAbsent(accountUuid, k -> new ArrayList<>())
-                    .add(new DatabaseBackend.X3dhpqCoAccountDeviceRow(
-                            accountUuid, deviceId, dc, addedAt, flags));
+            // mirrors the real DAO's PRIMARY KEY (account_uuid, device_id) upsert
+            // (CONFLICT_REPLACE) — replace any existing row for this device id.
+            final List<DatabaseBackend.X3dhpqCoAccountDeviceRow> rows =
+                    coAccountDeviceRows.computeIfAbsent(accountUuid, k -> new ArrayList<>());
+            rows.removeIf(r -> r.deviceId() == deviceId);
+            rows.add(new DatabaseBackend.X3dhpqCoAccountDeviceRow(
+                    accountUuid, deviceId, dc, addedAt, flags));
         }
 
         @Override
         public List<DatabaseBackend.X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(
                 String accountUuid) {
             return coAccountDeviceRows.getOrDefault(accountUuid, new ArrayList<>());
+        }
+
+        @Override
+        public void pruneX3dhpqCoAccountDevicesNotIn(
+                String accountUuid, java.util.Collection<Integer> keepIds) {
+            final List<DatabaseBackend.X3dhpqCoAccountDeviceRow> rows =
+                    coAccountDeviceRows.get(accountUuid);
+            if (rows == null) return;
+            rows.removeIf(r -> keepIds == null || !keepIds.contains(r.deviceId()));
         }
 
         @Override

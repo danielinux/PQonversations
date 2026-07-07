@@ -31,6 +31,7 @@ public interface X3dhpqDao {
     // the devicelist (§8.2) so every device the account knows about stays on `current`. ---
     void putX3dhpqCoAccountDevice(String accountUuid, int deviceId, byte[] dc, long addedAt, int flags);
     List<DatabaseBackend.X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(String accountUuid);
+    void pruneX3dhpqCoAccountDevicesNotIn(String accountUuid, java.util.Collection<Integer> keepIds);
 
     // --- signed pre-key ---
     void putX3dhpqSignedPreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX, byte[] sigEd, byte[] sigMldsa, long createdAt);
