@@ -32,6 +32,15 @@ public interface X3dhpqDao {
     void putX3dhpqCoAccountDevice(String accountUuid, int deviceId, byte[] dc, long addedAt, int flags);
     List<DatabaseBackend.X3dhpqCoAccountDeviceRow> listX3dhpqCoAccountDevices(String accountUuid);
     void pruneX3dhpqCoAccountDevicesNotIn(String accountUuid, java.util.Collection<Integer> keepIds);
+    void deleteX3dhpqCoAccountDevice(String accountUuid, int deviceId);
+
+    // --- committed device-id set (devicelist shrink guard): the device ids of the
+    // most recently ACCEPTED (inbound, own list) or PUBLISHED (outbound) authoritative
+    // devicelist. Independent of x3dhpq_local_device / x3dhpq_co_account_device (the
+    // volatile tables used to BUILD the outbound list) so the guard in
+    // X3dhpqService#publishDeviceList is not circular. ---
+    void putX3dhpqCommittedDevices(String accountUuid, java.util.Collection<Integer> ids);
+    java.util.Set<Integer> loadX3dhpqCommittedDeviceIds(String accountUuid);
 
     // --- signed pre-key ---
     void putX3dhpqSignedPreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX, byte[] sigEd, byte[] sigMldsa, long createdAt);

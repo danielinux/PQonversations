@@ -514,6 +514,11 @@ public class X3dhpqService {
             // account itself dropped from its authoritative list must not
             // resurrect on our next publish.
             db.pruneX3dhpqCoAccountDevicesNotIn(accountUuid, coAccountLiveIds);
+            // Accepting the account's OWN authoritative devicelist re-baselines the
+            // shrink guard's committed set (publishDeviceList) to exactly what we
+            // just accepted, so a legitimate remote removal does not later look
+            // like an unauthorized shrink and block our next publish.
+            db.putX3dhpqCommittedDevices(accountUuid, liveIds);
         }
     }
 
@@ -1095,6 +1100,22 @@ public class X3dhpqService {
      * new device) can trigger a republish once the union changes.
      */
     public void publishDeviceList() {
+        publishDeviceList(java.util.Collections.emptySet());
+    }
+
+    /**
+     * Overload of {@link #publishDeviceList()} that additionally names the device
+     * ids being explicitly revoked in this call (§8.6). Every other caller should
+     * keep using the no-arg overload, which passes an empty set.
+     *
+     * <p>Before signing/sending, this enforces the "no accidental/injected
+     * devicelist shrink without revocation" guard: a device set SMALLER than the
+     * account's last committed authoritative set (see {@code
+     * DatabaseBackend#putX3dhpqCommittedDevices}) — other than the ids in {@code
+     * allowRemovals} — is refused outright, so a transient/buggy/injected partial
+     * local state can never silently drop a contact's devices.
+     */
+    public void publishDeviceList(final java.util.Set<Integer> allowRemovals) {
         final String accountUuid = account.getUuid();
         final String ownerJid = account.getJid().asBareJid().toString();
 
@@ -1143,6 +1164,31 @@ public class X3dhpqService {
             entries.add(byDeviceId.get(id));
         }
 
+        // Guard: refuse to publish a devicelist that drops a previously-known
+        // device without an explicit §8.6 revocation. prevIds is the committed
+        // set — independent of x3dhpq_local_device/x3dhpq_co_account_device (the
+        // volatile tables just unioned above) — so this cannot be a circular
+        // check. First-ever publish (prevIds empty), an identical republish, and
+        // a growing list are all unaffected (missing stays empty).
+        final java.util.Set<Integer> newIds = new java.util.LinkedHashSet<>();
+        for (final Long id : sortedIds) {
+            newIds.add((int) (long) id);
+        }
+        final java.util.Set<Integer> prevIds = db.loadX3dhpqCommittedDeviceIds(accountUuid);
+        final java.util.Set<Integer> missing =
+                devicesDroppedWithoutRevocation(prevIds, newIds, allowRemovals);
+        if (!missing.isEmpty()) {
+            final StringBuilder missingIds = new StringBuilder();
+            for (final Integer id : missing) {
+                if (missingIds.length() > 0) missingIds.append(',');
+                missingIds.append(id);
+            }
+            Log.w(Config.LOGTAG, LOGPREFIX
+                    + ": refusing to publish a devicelist that drops known device(s) "
+                    + missingIds + " without revocation");
+            return;
+        }
+
         // Decide the monotonic version (§8.2): first publish => 1; content change
         // => previous + 1; unchanged republish => reuse. Never hardcoded.
         final byte[] contentHash = deviceListContentHash(entries);
@@ -1181,6 +1227,8 @@ public class X3dhpqService {
         // Persist our own monotonic state (we always publish signed).
         db.putX3dhpqDeviceListState(accountUuid, ownerJid, version, contentHash, true,
                 System.currentTimeMillis() / 1000L);
+        // Re-baseline the shrink guard's committed set to what we are publishing now.
+        db.putX3dhpqCommittedDevices(accountUuid, newIds);
 
         final DeviceList list =
                 X3dhpqStanzaBuilder.buildDeviceList(db, accountUuid, version, issuedAt);
@@ -1211,6 +1259,28 @@ public class X3dhpqService {
     }
 
     /**
+     * Pure decision logic for the {@link #publishDeviceList(java.util.Set)} shrink
+     * guard: the set of device ids present in {@code prevIds} (the last committed
+     * authoritative set) that are about to be silently dropped by publishing {@code
+     * newIds} — i.e. neither still present in {@code newIds} nor explicitly named in
+     * {@code allowRemovals} (§8.6). A non-empty result means the publish must be
+     * refused. {@code allowRemovals} may be {@code null}, treated as empty. Package-
+     * visible and side-effect free so it can be unit-tested without a live
+     * connection service.
+     */
+    static java.util.Set<Integer> devicesDroppedWithoutRevocation(
+            final java.util.Set<Integer> prevIds,
+            final java.util.Set<Integer> newIds,
+            final java.util.Set<Integer> allowRemovals) {
+        final java.util.Set<Integer> missing = new java.util.LinkedHashSet<>(prevIds);
+        missing.removeAll(newIds);
+        if (allowRemovals != null) {
+            missing.removeAll(allowRemovals);
+        }
+        return missing;
+    }
+
+    /**
      * Revokes one of the account's own devices (§8.6). Deletes its local key
      * material, republishes the signed devicelist with the device omitted and the
      * version bumped (the authoritative removal — item ③ machinery), and appends a
@@ -1227,13 +1297,19 @@ public class X3dhpqService {
         final String accountUuid = account.getUuid();
         final String ownerJid = account.getJid().asBareJid().toString();
 
-        // 1. Drop the local device so it is omitted from the republished list.
+        // 1. Drop the device so it is omitted from the republished list — from both
+        //    the local table (device whose key lives on this install) and the
+        //    co-account table (device certified here but keyed elsewhere), since
+        //    publishDeviceList() unions both (§8.2).
         db.deleteX3dhpqLocalDevice(accountUuid, deviceId);
+        db.deleteX3dhpqCoAccountDevice(accountUuid, deviceId);
 
-        // 2. Republish the signed devicelist. Because the content changed, the
-        //    monotonic version strictly increases, making the removal authoritative
-        //    for contacts and co-account devices (§8.6 step 1).
-        publishDeviceList();
+        // 2. Republish the signed devicelist, naming deviceId as an explicitly
+        //    allowed removal so the shrink guard permits dropping exactly this id.
+        //    Because the content changed, the monotonic version strictly increases,
+        //    making the removal authoritative for contacts and co-account devices
+        //    (§8.6 step 1).
+        publishDeviceList(java.util.Set.of(deviceId));
 
         // 3. Append + publish the RemoveDevice audit entry (§8.6 step 2). Best-effort:
         //    the removal is already authoritative via the signed list above.

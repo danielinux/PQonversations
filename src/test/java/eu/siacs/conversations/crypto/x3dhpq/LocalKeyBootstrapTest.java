@@ -142,6 +142,33 @@ public class LocalKeyBootstrapTest {
         }
 
         @Override
+        public void deleteX3dhpqCoAccountDevice(String accountUuid, int deviceId) {
+            final List<DatabaseBackend.X3dhpqCoAccountDeviceRow> rows =
+                    coAccountDeviceRows.get(accountUuid);
+            if (rows != null) {
+                rows.removeIf(r -> r.deviceId() == deviceId);
+            }
+        }
+
+        // committed device-id set (devicelist shrink guard); key: accountUuid
+        final Map<String, java.util.Set<Integer>> committedDeviceIds = new HashMap<>();
+
+        @Override
+        public void putX3dhpqCommittedDevices(
+                String accountUuid, java.util.Collection<Integer> ids) {
+            committedDeviceIds.put(
+                    accountUuid,
+                    ids == null
+                            ? new java.util.HashSet<>()
+                            : new java.util.HashSet<>(ids));
+        }
+
+        @Override
+        public java.util.Set<Integer> loadX3dhpqCommittedDeviceIds(String accountUuid) {
+            return committedDeviceIds.getOrDefault(accountUuid, new java.util.HashSet<>());
+        }
+
+        @Override
         public void putX3dhpqSignedPreKey(
                 String accountUuid,
                 int keyId,

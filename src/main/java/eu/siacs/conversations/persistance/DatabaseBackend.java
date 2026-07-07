@@ -67,7 +67,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 59;
+    private static final int DATABASE_VERSION = 60;
 
     // Column/table names for the legacy OMEMO tables, kept only so historical DB
     // migrations continue to work after the OMEMO code was removed.
@@ -454,6 +454,23 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     + " ON DELETE CASCADE"
                     + ")";
 
+    // Committed device-id set: the device ids of the most recently ACCEPTED (inbound,
+    // own list) or PUBLISHED (outbound) authoritative devicelist for the account.
+    // Deliberately independent of x3dhpq_local_device / x3dhpq_co_account_device
+    // (the volatile tables used to BUILD the outbound list) so publishDeviceList()
+    // can compare "what we are about to publish" against "what was last known
+    // authoritative" without the comparison being circular. Used to refuse a
+    // publish that silently drops a previously-known device without an explicit
+    // §8.6 revocation (added in DATABASE_VERSION = 60).
+    private static final String CREATE_X3DHPQ_COMMITTED_DEVICE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_committed_device ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "device_id INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, device_id),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+
     private static final String RESOLVER_RESULTS_TABLENAME = "resolver_results";
 
     private static final String CREATE_RESOLVER_RESULTS_TABLE =
@@ -734,6 +751,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION);
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
         db.execSQL(CREATE_X3DHPQ_CO_ACCOUNT_DEVICE);
+        db.execSQL(CREATE_X3DHPQ_COMMITTED_DEVICE);
     }
 
     @Override
@@ -1348,6 +1366,10 @@ public class DatabaseBackend extends SQLiteOpenHelper
         // x3dhpq_co_account_device table (added in DATABASE_VERSION = 59).
         if (oldVersion < 59 && newVersion >= 59) {
             db.execSQL(CREATE_X3DHPQ_CO_ACCOUNT_DEVICE);
+        }
+        // x3dhpq_committed_device table (added in DATABASE_VERSION = 60).
+        if (oldVersion < 60 && newVersion >= 60) {
+            db.execSQL(CREATE_X3DHPQ_COMMITTED_DEVICE);
         }
     }
 
@@ -2712,6 +2734,15 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 "x3dhpq_co_account_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    /** Deletes a single co-account device row (§8.6 revocation; mirrors deleteX3dhpqLocalDevice). */
+    public void deleteX3dhpqCoAccountDevice(String accountUuid, int deviceId) {
+        final SQLiteDatabase db = getWritableDatabase();
+        db.delete(
+                "x3dhpq_co_account_device",
+                "account_uuid=? AND device_id=?",
+                new String[] {accountUuid, Integer.toString(deviceId)});
+    }
+
     /**
      * Drop every x3dhpq_co_account_device row for {@code accountUuid} whose
      * deviceId is NOT in {@code keepIds}. Called after processing the account's
@@ -2763,6 +2794,57 @@ public class DatabaseBackend extends SQLiteOpenHelper
                                 c.getBlob(c.getColumnIndexOrThrow("dc_marshal")),
                                 c.getLong(c.getColumnIndexOrThrow("added_at")),
                                 c.getInt(c.getColumnIndexOrThrow("flags"))));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    // ---- x3dhpq DAO: committed_device (devicelist shrink guard) ----
+
+    /**
+     * Replaces the committed device-id set for {@code accountUuid} with {@code ids}:
+     * the device ids of the most recently ACCEPTED (inbound, own list) or PUBLISHED
+     * (outbound) authoritative devicelist. Deliberately independent of
+     * x3dhpq_local_device / x3dhpq_co_account_device so publishDeviceList()'s
+     * shrink guard is not circular.
+     */
+    public void putX3dhpqCommittedDevices(String accountUuid, java.util.Collection<Integer> ids) {
+        final SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.delete("x3dhpq_committed_device", "account_uuid=?", new String[] {accountUuid});
+            if (ids != null) {
+                for (final Integer id : ids) {
+                    final ContentValues v = new ContentValues();
+                    v.put("account_uuid", accountUuid);
+                    v.put("device_id", id);
+                    db.insertWithOnConflict(
+                            "x3dhpq_committed_device", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+                }
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public java.util.Set<Integer> loadX3dhpqCommittedDeviceIds(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_committed_device",
+                        new String[] {"device_id"},
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        null);
+        final java.util.Set<Integer> result = new java.util.HashSet<>();
+        try {
+            while (c.moveToNext()) {
+                result.add(c.getInt(c.getColumnIndexOrThrow("device_id")));
             }
         } finally {
             c.close();
