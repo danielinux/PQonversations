@@ -566,7 +566,27 @@ public class X3dhpqService {
         }
 
         // Signed list. We need the peer AIK to verify.
-        final AccountIdentityPub peerAik = resolvePinnedPeerAik(accountUuid, peer);
+        AccountIdentityPub peerAik = resolvePinnedPeerAik(accountUuid, peer);
+        final boolean isOwnList =
+                account != null && peer.equals(account.getJid().asBareJid().toString());
+        if (peerAik == null && isOwnList) {
+            // Our OWN devicelist must verify against our CURRENT AIK — never
+            // deferred. After an identity reset the server still serves the
+            // pre-reset list (signed by the OLD AIK, listing devices certified by
+            // it); verifying against our own AIK rejects that stale list here
+            // instead of self-healing its dead devices back into our published
+            // list, which would otherwise present two devices under two different
+            // AIKs to contacts (breaking their signature verification).
+            final DatabaseBackend.X3dhpqAccountIdentityRow ownRow =
+                    db.loadX3dhpqAccountIdentity(accountUuid);
+            if (ownRow != null) {
+                try {
+                    peerAik = AccountIdentityPub.unmarshal(ownRow.aikPub());
+                } catch (final Exception ex) {
+                    peerAik = null;
+                }
+            }
+        }
         if (peerAik == null) {
             // First-contact caveat: bundle (hence AIK) not fetched yet. Defer the
             // gate — process the list so bundle fetches are scheduled; a later
