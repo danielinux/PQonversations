@@ -38,11 +38,15 @@ public class PairNewDeviceActivity extends XmppActivity {
 
     public static final String EXTRA_ACCOUNT = "account_uuid";
 
+    /** Request code for scanning a PENDING device's own QR (§10.6.2 new-device-presents). */
+    private static final int REQUEST_SCAN_PENDING_DEVICE_QR = 0x3A1C;
+
     // Views
     private TextView mCodeView;
     private ImageView mQrView;
     private TextView mStatusView;
     private Button mCancelButton;
+    private Button mConfirmPendingDeviceButton;
 
     // State set in onBackendConnected
     private String mAccountUuid;
@@ -84,6 +88,14 @@ public class PairNewDeviceActivity extends XmppActivity {
                                     issuedCert.getCreatedAt(),
                                     issuedCert.getFlags() & 0xff);
                             mAccount.getX3dhpqService().publishDeviceList();
+                            // §10.6.3: append + publish the AddDevice audit entry so this
+                            // sibling passes the audit-chain trust gate on every device
+                            // (including this one) that later observes the account's own
+                            // devicelist — without this, X3dhpqService#verifiedAddDeviceIds
+                            // would refuse to trust the very device we just confirmed.
+                            mAccount.getX3dhpqService()
+                                    .publishAddDeviceAuditEntry(
+                                            (int) issuedCert.getDeviceId(), issuedCert);
                         } catch (final Exception e) {
                             Log.e(
                                     Config.LOGTAG,
@@ -139,10 +151,23 @@ public class PairNewDeviceActivity extends XmppActivity {
         mQrView = findViewById(R.id.pairing_qr);
         mStatusView = findViewById(R.id.pairing_status);
         mCancelButton = findViewById(R.id.pair_cancel_button);
+        mConfirmPendingDeviceButton = findViewById(R.id.confirm_pending_device_button);
 
         mStatusView.setText(R.string.x3dhpq_pair_status_waiting);
 
         mCancelButton.setOnClickListener(v -> finish());
+        mConfirmPendingDeviceButton.setOnClickListener(v -> launchPendingDeviceQrScanner());
+    }
+
+    /**
+     * §10.6.2 "new-device-presents" direction: launches the QR scanner to read a
+     * pending device's own {@code xmppqr-pair:} URI (full JID + code + sid all in
+     * one), then drives the existing-side FSM straight at it — no passive pair-hello
+     * wait needed since the QR already carries everything.
+     */
+    private void launchPendingDeviceQrScanner() {
+        final Intent intent = new Intent(this, ScanQrCodeActivity.class);
+        startActivityForResult(intent, REQUEST_SCAN_PENDING_DEVICE_QR);
     }
 
     @Override
@@ -305,6 +330,100 @@ public class PairNewDeviceActivity extends XmppActivity {
         final IntentFilter filter =
                 new IntentFilter(VerifyDeviceManager.ACTION_X3DHPQ_PAIR_NEW_DEVICE);
         registerReceiver(mPairReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    public void onActivityResult(final int requestCode, final int resultCode, final Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_SCAN_PENDING_DEVICE_QR) {
+            return;
+        }
+        if (resultCode != RESULT_OK || data == null) {
+            return;
+        }
+        final String scanned = data.getStringExtra(ScanQrCodeActivity.INTENT_EXTRA_RESULT);
+        if (scanned == null || scanned.isEmpty()) {
+            return;
+        }
+        confirmPendingDeviceFromUri(scanned);
+    }
+
+    /**
+     * Parses a pending device's own {@code xmppqr-pair:<full_jid>?code=<code>&sid=<sid>}
+     * URI (§10.6.2, same wire format as §10.1a Method A, roles reversed: HERE the
+     * scanned JID belongs to the NEW device, not an existing one) and immediately
+     * drives the existing-side FSM at it. Unlike the passive pair-hello flow used by
+     * the default "show my code" screen, no rendezvous round-trip is needed: the QR
+     * already carries full JID + code + sid together.
+     */
+    private void confirmPendingDeviceFromUri(final String uri) {
+        final String PREFIX = "xmppqr-pair:";
+        if (!uri.startsWith(PREFIX)) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
+            return;
+        }
+        final String rest = uri.substring(PREFIX.length());
+        final int qMark = rest.indexOf('?');
+        if (qMark < 0) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
+            return;
+        }
+        final String fullJidStr = rest.substring(0, qMark);
+        final String query = rest.substring(qMark + 1);
+        String code = null;
+        String sidB64 = null;
+        for (final String param : query.split("&")) {
+            if (param.startsWith("code=")) {
+                code = param.substring(5);
+            } else if (param.startsWith("sid=")) {
+                sidB64 = param.substring(4);
+            }
+        }
+        if (code == null || sidB64 == null) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
+            return;
+        }
+        final String validatedCode;
+        try {
+            validatedCode = im.conversations.x3dhpq.types.PairingCode.parse(code);
+        } catch (final IllegalArgumentException e) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
+            return;
+        }
+        final byte[] sid;
+        try {
+            sid = Base64.getUrlDecoder().decode(sidB64);
+        } catch (final IllegalArgumentException e) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
+            return;
+        }
+        final Jid pendingFullJid;
+        try {
+            pendingFullJid = Jid.of(fullJidStr);
+        } catch (final IllegalArgumentException e) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_invalid_uri);
+            return;
+        }
+        if (mAccount == null || !mAccount.getJid().asBareJid().equals(pendingFullJid.asBareJid())) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_wrong_account);
+            return;
+        }
+        if (mStartedFsm) {
+            return; // a pairing is already in flight from this screen
+        }
+        mStartedFsm = true;
+        mStatusView.setText(R.string.x3dhpq_pair_status_verifying);
+        try {
+            mPairingService.startAsExisting(sid, validatedCode, pendingFullJid, mOpts);
+        } catch (final Exception e) {
+            Log.e(Config.LOGTAG, LOGTAG + ": startAsExisting (confirm pending device) failed", e);
+            mStartedFsm = false;
+            final String reason = e.getMessage();
+            mStatusView.setText(
+                    getString(
+                            R.string.x3dhpq_pair_status_failed,
+                            reason != null ? reason : "FSM init failed"));
+        }
     }
 
     @Override

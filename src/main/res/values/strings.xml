@@ -1228,4 +1228,12 @@
     <string name="x3dhpq_pair_request_text">%1$d existing device(s) detected. Tap to start pairing.</string>
     <string name="x3dhpq_secondary_device_detected_title">Sync with existing device</string>
     <string name="x3dhpq_secondary_device_detected_text">This account already has %1$d device(s). Enter the pairing code shown on your existing device to sync.</string>
+    <string name="x3dhpq_pair_show_my_code_button">Show my code instead (have the existing device scan/enter it)</string>
+    <string name="x3dhpq_pair_confirm_pending_device_button">Confirm a device showing its own code</string>
+    <string name="x3dhpq_pending_enrollment_title">Waiting for confirmation</string>
+    <string name="x3dhpq_pending_enrollment_text">This account already has an identity on another device. Pair with it to confirm this device, or generate a new identity instead (this loses access to prior messages and groups).</string>
+    <string name="x3dhpq_generate_new_identity_button">Generate a new identity instead</string>
+    <string name="x3dhpq_generate_new_identity_confirm">This will REVOKE this device\'s pending link to the account\'s existing identity and start a brand-new one. You will lose access to prior messages and groups, and every contact will need to re-verify you. This cannot be undone. Continue?</string>
+    <string name="x3dhpq_blocked_identities_title">Contacts needing re-trust</string>
+    <string name="x3dhpq_retrust_button">Re-trust</string>
 </resources>

@@ -55,6 +55,16 @@ public class X3dhpqService {
 
     public static final String LOGPREFIX = "X3dhpqService";
 
+    /**
+     * §10.6.5 re-trust gate: {@link eu.siacs.conversations.entities.Conversation} attribute
+     * (reuses the existing generic attributes JSON — no schema change, mirrors the WS5
+     * {@code ATTRIBUTE_PQ_UPGRADED} pattern) set true when an inbound devicelist from this
+     * peer failed AIK-signature verification against our previously pinned AIK (a likely
+     * identity reconstruction / fork, §8.5). Cleared only by explicit user action via
+     * {@link #reTrustIdentity}.
+     */
+    public static final String ATTRIBUTE_X3DHPQ_IDENTITY_BLOCKED = "x3dhpq_identity_blocked";
+
     // Listener interfaces for inbound PEP event types.
 
     public interface DeviceListListener {
@@ -181,8 +191,11 @@ public class X3dhpqService {
             }
             return true;
         } else if (Namespace.X3DHPQ_AUDIT.equals(node)) {
-            if (payload instanceof AuditEntry && auditListener != null) {
-                auditListener.onAuditEntryReceived(from, itemId, (AuditEntry) payload);
+            if (payload instanceof AuditEntry) {
+                handleInboundAuditEntry(from, itemId, (AuditEntry) payload);
+                if (auditListener != null) {
+                    auditListener.onAuditEntryReceived(from, itemId, (AuditEntry) payload);
+                }
             }
             return true;
         } else if (Namespace.X3DHPQ_GROUP.equals(node)) {
@@ -329,8 +342,110 @@ public class X3dhpqService {
         } catch (Exception e) {
             Log.w(Config.LOGTAG, LOGPREFIX + ": session wipe-v1 failed: " + e.getMessage());
         }
+
+        // §10.6.1 fresh-device gating: a device that only has device-level material
+        // (DIK, no AIK yet — LocalKeyBootstrap#ensureBootstrapped left it pending)
+        // must not publish an authoritative devicelist or act as primary. Resolve the
+        // pending state against the account's own devicelist first.
+        if (isPendingEnrollment()) {
+            resolvePendingEnrollment();
+            return;
+        }
+
         publishDeviceList();
         publishOwnBundle();
+    }
+
+    /**
+     * §10.6.4b: the explicit, user-chosen "generate a new identity instead" override
+     * from the pending-enrollment registration-choice UX. Destructive — see {@link
+     * LocalKeyBootstrap#mintFreshIdentity}. Only meaningful while {@link
+     * #isPendingEnrollment()} is true; the caller (UI) is expected to have already
+     * shown the destructive-action warning from §10.6.4b before invoking this.
+     */
+    public void generateNewIdentity() {
+        if (db == null || account == null || mXmppConnectionService == null) return;
+        final LocalKeyBootstrap bootstrap = new LocalKeyBootstrap(mXmppConnectionService.databaseBackend);
+        final LocalKeyBootstrap.BootstrapResult result = bootstrap.mintFreshIdentity(account.getUuid());
+        Log.i(Config.LOGTAG, LOGPREFIX + ": " + account.getJid().asBareJid()
+                + " explicitly generated a NEW identity (§10.6.4b), fp=" + result.fingerprint);
+        if (!result.pendingEnrollment) {
+            publishDeviceList();
+            publishOwnBundle();
+        }
+    }
+
+    /** True if this install's local device is still in §10.6.1 pending-enrollment (DIK, no AIK). */
+    public boolean isPendingEnrollment() {
+        if (db == null || account == null) return false;
+        final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
+                db.listX3dhpqLocalDevices(account.getUuid());
+        if (rows.isEmpty()) return false;
+        return LocalKeyBootstrap.isPending(rows.get(0));
+    }
+
+    /**
+     * Resolves a §10.6.1 pending-enrollment device: fetches the account's own devicelist
+     * from the server. An EMPTY (or absent/error, e.g. {@code item-not-found}) response
+     * means no AIK has ever been published for this account anywhere — this is genuinely
+     * the first device, so it is promoted to primary and its (now signed) devicelist is
+     * published. A NON-empty response means an existing primary already owns this
+     * account's AIK — this device remains pending, publishes nothing, and waits to be
+     * confirmed via CPace pairing (§10.6.2), which installs a primary-issued AIK/DC and
+     * clears the pending state (see {@code PairToExistingActivity#installPairingResult}).
+     */
+    private void resolvePendingEnrollment() {
+        if (db == null || account == null || mXmppConnectionService == null) return;
+        final Jid ownBareJid = account.getJid().asBareJid();
+        Log.d(Config.LOGTAG, LOGPREFIX
+                + ": pending-enrollment — checking " + ownBareJid
+                + "'s own devicelist before minting an AIK (§10.6.1)");
+        final Iq iq =
+                mXmppConnectionService
+                        .getIqGenerator()
+                        .generateX3dhpqRequestDeviceList(ownBareJid);
+        mXmppConnectionService.sendIqPacket(
+                account,
+                iq,
+                response -> {
+                    boolean accountHasExistingIdentity = false;
+                    if (response.getType() == Iq.Type.RESULT) {
+                        final Extension payload = extractPubsubPayload(response, DeviceList.class);
+                        accountHasExistingIdentity =
+                                payload instanceof DeviceList
+                                        && !((DeviceList) payload).getDevices().isEmpty();
+                    }
+                    // Re-check pending state: a concurrent pairing may have already
+                    // confirmed this device while the fetch was in flight.
+                    if (!isPendingEnrollment()) {
+                        Log.d(Config.LOGTAG, LOGPREFIX
+                                + ": pending-enrollment resolved concurrently (pairing"
+                                + " confirmation arrived first); nothing to do");
+                        return;
+                    }
+                    if (accountHasExistingIdentity) {
+                        Log.i(Config.LOGTAG, LOGPREFIX
+                                + ": account " + ownBareJid + " already has a published"
+                                + " identity — remaining pending-enrollment, awaiting"
+                                + " confirmation by an existing device (§10.6)");
+                        // Stays pending. No publish. UX: X3dhpqSelfDevicesActivity surfaces
+                        // this state and offers the explicit "generate a new identity
+                        // instead" override (§10.6.4b) via LocalKeyBootstrap#mintFreshIdentity.
+                    } else {
+                        Log.i(Config.LOGTAG, LOGPREFIX
+                                + ": no existing identity found for " + ownBareJid
+                                + " — genuinely the first device; minting AIK and becoming"
+                                + " primary");
+                        final LocalKeyBootstrap bootstrap =
+                                new LocalKeyBootstrap(mXmppConnectionService.databaseBackend);
+                        final LocalKeyBootstrap.BootstrapResult result =
+                                bootstrap.promoteToPrimary(account.getUuid());
+                        if (!result.pendingEnrollment) {
+                            publishDeviceList();
+                            publishOwnBundle();
+                        }
+                    }
+                });
     }
 
     /** Sends a fetch IQ for the peer's devicelist; response is processed by handleInboundDeviceList. */
@@ -438,6 +553,12 @@ public class X3dhpqService {
                 localIds.add(row.deviceId());
             }
         }
+        // §10.6.3 trust gating: a sibling appearing in our own devicelist is only
+        // auto-trusted as a co-account device if it is covered by a valid, AIK-signed
+        // AddDevice audit entry (§11.4) — never by devicelist presence alone (that
+        // would let a rogue self-addition go silently trusted).
+        final java.util.Set<Integer> chainConfirmedIds =
+                isOwnList ? verifiedAddDeviceIds(accountUuid, peer) : java.util.Collections.emptySet();
 
         final Collection<Device> devices = list.getDevices();
         Log.d(Config.LOGTAG,
@@ -474,20 +595,33 @@ public class X3dhpqService {
                         "x3dhpq: stored remote_device for " + peer + "/" + id);
 
                 if (isOwnList && !localIds.contains(id)) {
-                    final long deviceAddedAt = addedAt != null ? addedAt : now;
-                    int flags;
-                    try {
-                        flags = Integer.parseInt(
-                                com.google.common.base.Strings.nullToEmpty(device.getFlags())
-                                        .trim());
-                    } catch (final NumberFormatException nfe) {
-                        flags = 0;
+                    if (chainConfirmedIds.contains(id)) {
+                        final long deviceAddedAt = addedAt != null ? addedAt : now;
+                        int flags;
+                        try {
+                            flags = Integer.parseInt(
+                                    com.google.common.base.Strings.nullToEmpty(device.getFlags())
+                                            .trim());
+                        } catch (final NumberFormatException nfe) {
+                            flags = 0;
+                        }
+                        db.putX3dhpqCoAccountDevice(accountUuid, id, dcBytes, deviceAddedAt, flags);
+                        coAccountLiveIds.add(id);
+                        Log.d(Config.LOGTAG,
+                                "x3dhpq: stored co_account_device for " + peer + "/" + id
+                                        + " (self-heal, audit-chain confirmed)");
+                    } else {
+                        // §10.6.3: NOT covered by a valid AddDevice audit entry — do not
+                        // silently trust. Leaving it out of coAccountLiveIds also means the
+                        // pruneX3dhpqCoAccountDevicesNotIn call below will drop it if it was
+                        // (wrongly) trusted before this check existed.
+                        Log.w(Config.LOGTAG,
+                                "x3dhpq: sibling device " + id + " appears in own devicelist"
+                                        + " but has NO valid AddDevice audit entry —"
+                                        + " NOT auto-trusting (§10.6.3); surfacing as a"
+                                        + " pending/unconfirmed security event");
+                        surfaceUnconfirmedSiblingEvent(id);
                     }
-                    db.putX3dhpqCoAccountDevice(accountUuid, id, dcBytes, deviceAddedAt, flags);
-                    coAccountLiveIds.add(id);
-                    Log.d(Config.LOGTAG,
-                            "x3dhpq: stored co_account_device for " + peer + "/" + id
-                                    + " (self-heal from own devicelist)");
                 }
             } catch (Exception e) {
                 Log.w(Config.LOGTAG,
@@ -631,6 +765,21 @@ public class X3dhpqService {
         if (!edOk || !mlOk) {
             Log.w(Config.LOGTAG, "x3dhpq: devicelist AIK signature FAILED for " + peer
                     + " (ed=" + edOk + " mldsa=" + mlOk + "); rejecting");
+            // §10.6.5: a signed devicelist that fails to verify against the AIK we have
+            // TOFU-pinned for this peer (as opposed to the "peerAik == null, first
+            // contact" deferred path above) looks like a silent AIK reconstruction —
+            // never auto-accept it. Flag it as a security event requiring explicit
+            // user re-trust instead of just silently dropping the stanza. Skip this
+            // for our OWN account's list (isOwnList): a stale pre-reset self-list
+            // failing against our current AIK is a different (self, not peer) scenario,
+            // already logged distinctly above.
+            if (!isOwnList) {
+                try {
+                    flagIdentityReconstructionEvent(eu.siacs.conversations.xmpp.Jid.of(peer));
+                } catch (final Exception ignored) {
+                    // best-effort UX signal; never let it block the reject decision above
+                }
+            }
             return false;
         }
 
@@ -1414,6 +1563,334 @@ public class X3dhpqService {
                 Log.d(Config.LOGTAG, LOGPREFIX + ": RemoveDevice audit entry published (seq=" + seq + ")");
             }
         });
+    }
+
+    /**
+     * Builds, persists and publishes a hybrid-signed {@code AddDevice} audit entry
+     * (§11.4) for a device that was just confirmed via CPace pairing (§10.6.3). Called
+     * by the existing/primary side's pairing UI ({@code PairNewDeviceActivity}) right
+     * after issuing the device its DC and persisting it into {@code
+     * x3dhpq_co_account_device}. This is what makes the sibling pass the {@link
+     * #verifiedAddDeviceIds} gate on every device (including this one) that later
+     * observes the account's own devicelist.
+     */
+    public void publishAddDeviceAuditEntry(final int deviceId, final DeviceCertificate issuedCert) {
+        if (db == null || account == null || mXmppConnectionService == null || issuedCert == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": publishAddDeviceAuditEntry ignored — missing state");
+            return;
+        }
+        final String accountUuid = account.getUuid();
+        final String ownerJid = account.getJid().asBareJid().toString();
+        final DatabaseBackend backend = mXmppConnectionService.databaseBackend;
+
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": no AIK — cannot sign AddDevice audit entry");
+            return;
+        }
+        final AccountIdentityKey aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
+
+        final List<DatabaseBackend.X3dhpqAuditEntryRow> chain =
+                backend.loadX3dhpqAuditChain(accountUuid, ownerJid);
+        final long seq;
+        final byte[] prevHash;
+        if (chain.isEmpty()) {
+            seq = 0L;
+            prevHash = new byte[32];
+        } else {
+            final DatabaseBackend.X3dhpqAuditEntryRow last = chain.get(chain.size() - 1);
+            final im.conversations.x3dhpq.types.AuditEntry lastEntry =
+                    new im.conversations.x3dhpq.types.AuditEntry(
+                            last.seq(), last.prevHash(), last.action(), last.payload(),
+                            last.timestamp(), last.sigEd25519(), last.sigMldsa());
+            prevHash = X3dhpqCrypto.SHA256.hash(lastEntry.marshal());
+            seq = last.seq() + 1L;
+        }
+
+        // payload = uint32(device_id) | uint32(cert_len) | DC.Marshal() (§11.4 AddDevice=1)
+        final byte[] certBytes = issuedCert.marshal();
+        final byte[] payload =
+                ByteBuffer.allocate(4 + 4 + certBytes.length)
+                        .order(java.nio.ByteOrder.BIG_ENDIAN)
+                        .putInt(deviceId)
+                        .putInt(certBytes.length)
+                        .put(certBytes)
+                        .array();
+        final long ts = System.currentTimeMillis() / 1000L;
+
+        final im.conversations.x3dhpq.types.AuditEntry unsigned =
+                new im.conversations.x3dhpq.types.AuditEntry(
+                        seq, prevHash, im.conversations.x3dhpq.types.AuditEntry.ACTION_ADD_DEVICE,
+                        payload, ts, new byte[0], new byte[0]);
+        final byte[] sp = unsigned.signedPart();
+        final byte[] sigEd = X3dhpqCrypto.ed25519Sign(aik.getPrivEd25519(), sp);
+        final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(aik.getPrivMLDSA(), sp);
+        final im.conversations.x3dhpq.types.AuditEntry signed =
+                new im.conversations.x3dhpq.types.AuditEntry(
+                        seq, prevHash, im.conversations.x3dhpq.types.AuditEntry.ACTION_ADD_DEVICE,
+                        payload, ts, sigEd, sigMl);
+
+        backend.putX3dhpqAuditEntry(accountUuid, ownerJid, seq, prevHash,
+                im.conversations.x3dhpq.types.AuditEntry.ACTION_ADD_DEVICE, payload, ts, sigEd, sigMl);
+
+        final im.conversations.android.xmpp.model.stanza.Iq iq =
+                new im.conversations.android.xmpp.model.stanza.Iq(
+                        im.conversations.android.xmpp.model.stanza.Iq.Type.SET);
+        final PubSub ps = iq.addExtension(new PubSub());
+        final im.conversations.android.xmpp.model.pubsub.Publish pub =
+                ps.addExtension(new im.conversations.android.xmpp.model.pubsub.Publish());
+        pub.setNode(Namespace.X3DHPQ_AUDIT);
+        final PubSub.Item item = pub.addExtension(new PubSub.Item());
+        item.setId(Long.toString(seq));
+        final AuditEntry auditEl = item.addExtension(new AuditEntry());
+        auditEl.setContent(signed.marshal());
+
+        Log.d(Config.LOGTAG, LOGPREFIX + ": publishing AddDevice audit entry seq=" + seq
+                + " for device " + deviceId);
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            if (response.getType() == im.conversations.android.xmpp.model.stanza.Iq.Type.ERROR) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": AddDevice audit publish failed: " + response);
+            } else {
+                Log.d(Config.LOGTAG, LOGPREFIX + ": AddDevice audit entry published (seq=" + seq + ")");
+            }
+        });
+    }
+
+    /**
+     * Ingests an inbound {@code <audit-entry>} PEP item (§11): persists it (dedup by
+     * primary key, see {@code putX3dhpqAuditEntry}'s CONFLICT_IGNORE) and, when it
+     * belongs to OUR OWN account's chain, re-verifies the whole locally-stored chain
+     * against our current AIK and posts §11.6 UX notifications for newly-seen entries.
+     * A verification failure means the chain is broken/tampered — no entries are
+     * treated as confirmed in that case (fail closed; see {@link #verifiedAddDeviceIds}).
+     */
+    private void handleInboundAuditEntry(
+            final Jid from,
+            final String itemId,
+            final im.conversations.android.xmpp.model.x3dhpq.audit.AuditEntry wireEntry) {
+        if (db == null || account == null || mXmppConnectionService == null) return;
+        final byte[] raw = wireEntry.asBytes();
+        if (raw == null || raw.length == 0) return;
+
+        final im.conversations.x3dhpq.types.AuditEntry entry;
+        try {
+            entry = im.conversations.x3dhpq.types.AuditEntry.unmarshal(raw);
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": malformed inbound audit entry from " + from
+                    + ": " + e.getMessage());
+            return;
+        }
+
+        final String accountUuid = account.getUuid();
+        final String ownerJid = from.asBareJid().toString();
+        final DatabaseBackend backend = mXmppConnectionService.databaseBackend;
+        backend.putX3dhpqAuditEntry(accountUuid, ownerJid, entry.getSeq(), entry.getPrevHash(),
+                entry.getAction(), entry.getPayload(), entry.getTimestamp(),
+                entry.getSigEd25519(), entry.getSigMLDSA());
+
+        final boolean isOwnChain =
+                account.getJid().asBareJid().toString().equals(ownerJid);
+        if (!isOwnChain) {
+            // Peer audit chains (if ever subscribed to) are out of scope for the
+            // self-trust gate; only persisted above for potential future use.
+            return;
+        }
+
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null) {
+            // We are still pending-enrollment ourselves — nothing to verify against yet.
+            return;
+        }
+        final AccountIdentityPub ownAik;
+        try {
+            ownAik = AccountIdentityPub.unmarshal(aikRow.aikPub());
+        } catch (final Exception e) {
+            return;
+        }
+
+        final List<im.conversations.x3dhpq.types.AuditEntry> chain =
+                coreAuditChain(backend, accountUuid, ownerJid);
+        try {
+            final List<im.conversations.x3dhpq.types.AuditEntry> verified =
+                    new AccountAuditChainVerifier(mXmppConnectionService, db)
+                            .verifyAndStore(accountIdFor(accountUuid), ownAik, chain);
+            new AccountAuditChainVerifier(mXmppConnectionService, db)
+                    .notifyNewEntries(ownerJid, verified, verified.isEmpty() ? -1 : verified.get(0).getSeq() - 1);
+            // A newly-confirmed AddDevice may unblock a sibling the devicelist
+            // self-heal previously refused to trust (§10.6.3) — re-run it now that
+            // the chain covers it.
+            if (entry.getAction() == im.conversations.x3dhpq.types.AuditEntry.ACTION_ADD_DEVICE) {
+                requestPeerDeviceList(account.getJid().asBareJid());
+            }
+        } catch (final AccountAuditChainVerifier.InvalidAuditChainException e) {
+            Log.e(Config.LOGTAG, LOGPREFIX + ": OWN audit chain verification FAILED — "
+                    + e.getMessage() + " — no sibling device will be trusted via the chain"
+                    + " until this is resolved (§10.6.3, fail-closed)");
+        }
+    }
+
+    /**
+     * Returns the set of device ids covered by a valid, chain-verified {@code AddDevice}
+     * entry (minus any later validly-chained {@code RemoveDevice}) for {@code ownerJid}'s
+     * account audit chain. Fails closed (returns an empty set) if the chain does not
+     * verify against our own AIK, or if we have no AIK yet ourselves.
+     */
+    private java.util.Set<Integer> verifiedAddDeviceIds(final String accountUuid, final String ownerJid) {
+        final java.util.Set<Integer> ids = new java.util.HashSet<>();
+        if (mXmppConnectionService == null) return ids;
+        final DatabaseBackend backend = mXmppConnectionService.databaseBackend;
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow = db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null) return ids; // pending ourselves — cannot verify, trust nothing
+        final AccountIdentityPub ownAik;
+        try {
+            ownAik = AccountIdentityPub.unmarshal(aikRow.aikPub());
+        } catch (final Exception e) {
+            return ids;
+        }
+        final List<im.conversations.x3dhpq.types.AuditEntry> chain =
+                coreAuditChain(backend, accountUuid, ownerJid);
+        if (chain.isEmpty()) return ids;
+        try {
+            final List<im.conversations.x3dhpq.types.AuditEntry> verified =
+                    new AccountAuditChainVerifier(mXmppConnectionService, db)
+                            .verifyAndStore(accountIdFor(accountUuid), ownAik, chain);
+            for (final im.conversations.x3dhpq.types.AuditEntry e : verified) {
+                if (e.getAction() == im.conversations.x3dhpq.types.AuditEntry.ACTION_ADD_DEVICE) {
+                    final byte[] p = e.getPayload();
+                    if (p.length >= 4) {
+                        ids.add(ByteBuffer.wrap(p).order(java.nio.ByteOrder.BIG_ENDIAN).getInt());
+                    }
+                } else if (e.getAction() == im.conversations.x3dhpq.types.AuditEntry.ACTION_REMOVE_DEVICE) {
+                    final byte[] p = e.getPayload();
+                    if (p.length >= 4) {
+                        ids.remove(ByteBuffer.wrap(p).order(java.nio.ByteOrder.BIG_ENDIAN).getInt());
+                    }
+                }
+            }
+        } catch (final AccountAuditChainVerifier.InvalidAuditChainException e) {
+            Log.e(Config.LOGTAG, LOGPREFIX + ": audit chain for " + ownerJid
+                    + " failed verification — fail-closed, trusting no sibling: " + e.getMessage());
+        }
+        return ids;
+    }
+
+    private static List<im.conversations.x3dhpq.types.AuditEntry> coreAuditChain(
+            final DatabaseBackend backend, final String accountUuid, final String ownerJid) {
+        final List<im.conversations.x3dhpq.types.AuditEntry> chain = new ArrayList<>();
+        for (final DatabaseBackend.X3dhpqAuditEntryRow r :
+                backend.loadX3dhpqAuditChain(accountUuid, ownerJid)) {
+            chain.add(new im.conversations.x3dhpq.types.AuditEntry(
+                    r.seq(), r.prevHash(), r.action(), r.payload(), r.timestamp(),
+                    r.sigEd25519(), r.sigMldsa()));
+        }
+        return chain;
+    }
+
+    /**
+     * The DAO's audit-tail-hash cache ({@code getAuditTailHash}/{@code setAuditTailHash})
+     * is keyed by a numeric account id; {@code x3dhpq_audit_tail} (the backing table) does
+     * not exist yet (tracked as a lead-coordinated schema addition — see the WS4 final
+     * report). Until then this derives a stable per-account id from the UUID string so
+     * {@link AccountAuditChainVerifier} has SOME cache key; since the DAO methods are
+     * presently stubs (always miss), every call re-verifies the chain from genesis, which
+     * is correct, just not cached.
+     */
+    private static long accountIdFor(final String accountUuid) {
+        return accountUuid == null ? 0L : accountUuid.hashCode();
+    }
+
+    /** Best-effort local UX ping for an unconfirmed self-device (§10.6.3); no persistence. */
+    private void surfaceUnconfirmedSiblingEvent(final int deviceId) {
+        if (mXmppConnectionService == null || account == null) return;
+        new AccountAuditChainVerifier(mXmppConnectionService, db)
+                .notifySecurityEvent(
+                        account.getJid().asBareJid().toString(),
+                        "An unconfirmed device (id " + Integer.toUnsignedString(deviceId)
+                                + ") appeared on your account's devicelist without a valid"
+                                + " AddDevice record. It has NOT been trusted. If this was not"
+                                + " you, your account devicelist may be compromised.");
+    }
+
+    /**
+     * §10.6.5 identity-reconstruction re-trust gate: true once an inbound devicelist for
+     * {@code peerBareJid} failed AIK-signature verification against our previously
+     * pinned AIK for them (i.e. looked like a silent AIK reconstruction, §8.5 fork
+     * rejection) and the user has not yet explicitly re-trusted it via {@link
+     * #reTrustIdentity}. While true, {@link #isCapable(Conversation)} returns false for
+     * conversations with this peer so the caller (WS5's {@code
+     * Conversation#computeDefaultEncryption()}) stops offering x3dhpq to them — NOTE:
+     * that fork point is NOT owned by WS4 and currently checks the hard pq_upgraded
+     * latch BEFORE calling isCapable(), so this alone does not yet fully block sending
+     * once the latch is set; see the WS4 final report for the one-line hook still needed
+     * there.
+     */
+    public boolean isIdentityBlocked(final Jid peerBareJid) {
+        if (mXmppConnectionService == null || account == null || peerBareJid == null) return false;
+        final Conversation c =
+                mXmppConnectionService.find(account, peerBareJid.asBareJid());
+        return c != null && c.getBooleanAttribute(ATTRIBUTE_X3DHPQ_IDENTITY_BLOCKED, false);
+    }
+
+    /** Convenience overload of {@link #isIdentityBlocked(Jid)} for a conversation already in hand. */
+    public boolean isIdentityBlocked(final Conversation conversation) {
+        return conversation != null
+                && conversation.getBooleanAttribute(ATTRIBUTE_X3DHPQ_IDENTITY_BLOCKED, false);
+    }
+
+    /**
+     * Persists the §10.6.5 "stop sending, needs explicit re-trust" flag for {@code
+     * peerBareJid} as a Conversation attribute (no schema change: reuses the existing
+     * generic attributes JSON blob, mirroring the WS5 {@code ATTRIBUTE_PQ_UPGRADED}
+     * latch). Also clears the stale TOFU pin (cached bundle/devicelist-state rows) for
+     * this peer so a subsequent {@link #reTrustIdentity} cleanly re-adopts the new AIK
+     * instead of comparing against the old one again.
+     */
+    private void flagIdentityReconstructionEvent(final Jid peerBareJid) {
+        if (mXmppConnectionService == null || account == null) return;
+        final Conversation c = mXmppConnectionService.find(account, peerBareJid.asBareJid());
+        if (c != null && c.setAttribute(ATTRIBUTE_X3DHPQ_IDENTITY_BLOCKED, true)) {
+            mXmppConnectionService.databaseBackend.updateConversation(c);
+        }
+        new AccountAuditChainVerifier(mXmppConnectionService, db)
+                .notifySecurityEvent(
+                        peerBareJid.asBareJid().toString(),
+                        "This contact's identity key appears to have changed (account"
+                                + " reconstructed or wiped). Messages to them are paused until"
+                                + " you explicitly re-trust the new identity (§10.6.5).");
+    }
+
+    /**
+     * §10.6.5: explicit user action to re-trust a contact after an identity
+     * reconstruction was detected. Clears the block flag and the stale TOFU pin
+     * (cached remote devices/bundles/devicelist-state) for {@code peerBareJid} so the
+     * NEXT inbound devicelist/bundle is adopted fresh as a new first-contact pin,
+     * exactly as if this were the first time we ever saw this peer. Does not itself
+     * fetch anything — callers should follow up with {@link #requestPeerDeviceList}.
+     */
+    public void reTrustIdentity(final Jid peerBareJid) {
+        if (mXmppConnectionService == null || account == null || peerBareJid == null) return;
+        final String accountUuid = account.getUuid();
+        final String peer = peerBareJid.asBareJid().toString();
+        final Conversation c = mXmppConnectionService.find(account, peerBareJid.asBareJid());
+        if (c != null && c.setAttribute(ATTRIBUTE_X3DHPQ_IDENTITY_BLOCKED, false)) {
+            mXmppConnectionService.databaseBackend.updateConversation(c);
+        }
+        // Reset TOFU: pruneX3dhpqRemoteDevicesNotIn with an EMPTY keep-set drops every
+        // cached x3dhpq_remote_device row for this peer AND cascades into
+        // x3dhpq_remote_bundle + x3dhpq_session (see its Javadoc), so the pinned-AIK
+        // mismatch guard in handleInboundBundle has nothing stale left to compare
+        // against — the next devicelist/bundle fetch pins the NEW AIK fresh, exactly
+        // as if this were first contact.
+        db.pruneX3dhpqRemoteDevicesNotIn(accountUuid, peer, java.util.Collections.emptySet());
+        // Reset the devicelist version/fork-detection state so the reconstructed list
+        // (whatever version it is) is accepted as a fresh baseline instead of being
+        // compared against the pre-reconstruction version/content hash.
+        db.putX3dhpqDeviceListState(accountUuid, peer, -1L, new byte[0], false, 0L);
+        Log.i(Config.LOGTAG, LOGPREFIX + ": " + peer
+                + " explicitly re-trusted (§10.6.5) — TOFU pin reset, requesting fresh devicelist");
+        requestPeerDeviceList(peerBareJid);
     }
 
     private void publishOwnBundle() {

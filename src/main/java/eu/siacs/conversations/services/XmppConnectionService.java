@@ -62,6 +62,9 @@ import eu.siacs.conversations.android.JabberIdContact;
 import eu.siacs.conversations.crypto.OmemoSetting;
 import eu.siacs.conversations.crypto.PgpDecryptionService;
 import eu.siacs.conversations.crypto.PgpEngine;
+import eu.siacs.conversations.crypto.axolotl.AxolotlService;
+import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
+import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
 import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.entities.Blockable;
@@ -105,6 +108,7 @@ import eu.siacs.conversations.xml.LocalizedContent;
 import eu.siacs.conversations.xml.Namespace;
 import eu.siacs.conversations.xmpp.Jid;
 import eu.siacs.conversations.xmpp.OnContactStatusChanged;
+import eu.siacs.conversations.xmpp.OnKeyStatusUpdated;
 import eu.siacs.conversations.xmpp.OnUpdateBlocklist;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import eu.siacs.conversations.xmpp.forms.Data;
@@ -271,6 +275,8 @@ public class XmppConnectionService extends Service {
             Collections.newSetFromMap(new WeakHashMap<OnUpdateBlocklist, Boolean>());
     private final Set<OnMucRosterUpdate> mOnMucRosterUpdate =
             Collections.newSetFromMap(new WeakHashMap<OnMucRosterUpdate, Boolean>());
+    private final Set<OnKeyStatusUpdated> mOnKeyStatusUpdated =
+            Collections.newSetFromMap(new WeakHashMap<OnKeyStatusUpdated, Boolean>());
     private final Set<OnJingleRtpConnectionUpdate> onJingleRtpConnectionUpdate =
             Collections.newSetFromMap(new WeakHashMap<OnJingleRtpConnectionUpdate, Boolean>());
 
@@ -1651,6 +1657,42 @@ public class XmppConnectionService extends Service {
                         packet = mMessageGenerator.generatePgpChat(message);
                     }
                     break;
+                case Message.ENCRYPTION_AXOLOTL:
+                    // Workstream 5 / §15.4: a conversation latched to x3dhpq must
+                    // never silently fall back to OMEMO. getNextEncryption() is
+                    // the normal guard (it never returns AXOLOTL once latched),
+                    // but this is defense-in-depth for messages that were queued
+                    // with an AXOLOTL encryption value before the latch was set.
+                    if (conversation.isPqUpgraded()) {
+                        Log.w(Config.LOGTAG,
+                                account.getJid().asBareJid()
+                                        + ": refusing OMEMO downgrade for "
+                                        + conversation.getAddress()
+                                        + " — conversation is latched to x3dhpq (§15.4)");
+                        message.setEncryption(Message.ENCRYPTION_X3DHPQ);
+                        message.setStatus(Message.STATUS_WAITING);
+                        break;
+                    }
+                    message.setFingerprint(account.getAxolotlService().getOwnFingerprint());
+                    if (message.needsUploading()) {
+                        if (account.httpUploadAvailable(
+                                        fileBackend.getFile(message, false).length())
+                                || conversation.getMode() == Conversation.MODE_MULTI
+                                || message.fixCounterpart()) {
+                            this.sendFileMessage(message, delay, forceP2P);
+                        } else {
+                            break;
+                        }
+                    } else {
+                        XmppAxolotlMessage axolotlMessage =
+                                account.getAxolotlService().fetchAxolotlMessageFromCache(message);
+                        if (axolotlMessage == null) {
+                            account.getAxolotlService().preparePayloadMessage(message, delay);
+                        } else {
+                            packet = mMessageGenerator.generateAxolotlChat(message, axolotlMessage);
+                        }
+                    }
+                    break;
                 case Message.ENCRYPTION_X3DHPQ:
                     // x3dhpq hybrid post-quantum encryption path (mirrors OMEMO branch above)
                     Log.d(Config.LOGTAG,
@@ -1751,6 +1793,9 @@ public class XmppConnectionService extends Service {
                             message.setEncryption(Message.ENCRYPTION_DECRYPTED);
                         }
                     }
+                    break;
+                case Message.ENCRYPTION_AXOLOTL:
+                    message.setFingerprint(account.getAxolotlService().getOwnFingerprint());
                     break;
             }
         }
@@ -2737,6 +2782,33 @@ public class XmppConnectionService extends Service {
     }
 
 
+    public void setOnKeyStatusUpdatedListener(final OnKeyStatusUpdated listener) {
+        final boolean remainingListeners;
+        synchronized (LISTENER_LOCK) {
+            remainingListeners = checkListeners();
+            if (!this.mOnKeyStatusUpdated.add(listener)) {
+                Log.w(
+                        Config.LOGTAG,
+                        listener.getClass().getName()
+                                + " is already registered as OnKeyStatusUpdateListener");
+            }
+        }
+        if (remainingListeners) {
+            switchToForeground();
+        }
+    }
+
+    public void removeOnNewKeysAvailableListener(final OnKeyStatusUpdated listener) {
+        final boolean remainingListeners;
+        synchronized (LISTENER_LOCK) {
+            this.mOnKeyStatusUpdated.remove(listener);
+            remainingListeners = checkListeners();
+        }
+        if (remainingListeners) {
+            switchToBackground();
+        }
+    }
+
     public void setOnRtpConnectionUpdateListener(final OnJingleRtpConnectionUpdate listener) {
         final boolean remainingListeners;
         synchronized (LISTENER_LOCK) {
@@ -2799,7 +2871,8 @@ public class XmppConnectionService extends Service {
                 && this.mOnMucRosterUpdate.isEmpty()
                 && this.mOnUpdateBlocklist.isEmpty()
                 && this.mOnShowErrorToasts.isEmpty()
-                && this.onJingleRtpConnectionUpdate.isEmpty());
+                && this.onJingleRtpConnectionUpdate.isEmpty()
+                && this.mOnKeyStatusUpdated.isEmpty());
     }
 
     private void switchToForeground() {
@@ -3515,6 +3588,12 @@ public class XmppConnectionService extends Service {
         }
     }
 
+    public void keyStatusUpdated(AxolotlService.FetchStatus report) {
+        for (OnKeyStatusUpdated listener : threadSafeList(this.mOnKeyStatusUpdated)) {
+            listener.onKeyStatusUpdated(report);
+        }
+    }
+
     public Account findAccountByJid(final Jid jid) {
         for (final Account account : this.accounts) {
             if (account.getJid().asBareJid().equals(jid.asBareJid())) {
@@ -3933,6 +4012,46 @@ public class XmppConnectionService extends Service {
             }
         }
         return templates;
+    }
+
+    public boolean verifyFingerprints(
+            final Contact contact, final Collection<String> fingerprints) {
+        final var performedVerification = new AtomicBoolean(false);
+        final AxolotlService axolotlService = contact.getAccount().getAxolotlService();
+        for (final var fp : fingerprints) {
+            final String fingerprint = "05" + fp.replaceAll("\\s", "");
+            FingerprintStatus fingerprintStatus = axolotlService.getFingerprintTrust(fingerprint);
+            if (fingerprintStatus != null) {
+                if (!fingerprintStatus.isVerified()) {
+                    performedVerification.set(true);
+                    axolotlService.setFingerprintTrust(fingerprint, fingerprintStatus.toVerified());
+                }
+            } else {
+                axolotlService.preVerifyFingerprint(contact, fingerprint);
+            }
+        }
+        return performedVerification.get();
+    }
+
+    public boolean verifyFingerprints(
+            final Account account, final Collection<String> fingerprints) {
+        final AxolotlService axolotlService = account.getAxolotlService();
+        final var verifiedSomething = new AtomicBoolean(false);
+        for (final var fp : fingerprints) {
+            final String fingerprint = "05" + fp.replaceAll("\\s", "");
+            Log.d(Config.LOGTAG, "trying to verify own fp=" + fingerprint);
+            FingerprintStatus fingerprintStatus = axolotlService.getFingerprintTrust(fingerprint);
+            if (fingerprintStatus != null) {
+                if (!fingerprintStatus.isVerified()) {
+                    axolotlService.setFingerprintTrust(fingerprint, fingerprintStatus.toVerified());
+                    verifiedSomething.set(true);
+                }
+            } else {
+                axolotlService.preVerifyFingerprint(account, fingerprint);
+                verifiedSomething.set(true);
+            }
+        }
+        return verifiedSomething.get();
     }
 
     public ShortcutService getShortcutService() {

@@ -42,4 +42,19 @@
         android:layout_height="wrap_content"
         android:text="@string/cancel" />
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?android:attr/listDivider"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="16dp" />
+
+    <!-- §10.6.2 "new-device-presents" direction: scan the QR shown by a pending
+         device instead of waiting for it to scan/consume ours. -->
+    <Button
+        android:id="@+id/confirm_pending_device_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/x3dhpq_pair_confirm_pending_device_button" />
+
 </LinearLayout>

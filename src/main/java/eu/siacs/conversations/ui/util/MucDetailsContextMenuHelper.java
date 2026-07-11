@@ -73,6 +73,21 @@ public final class MucDetailsContextMenuHelper {
                 isGroupChat ? R.string.remove_from_room : R.string.remove_from_channel);
         final var invite = menu.findItem(R.id.invite);
         final var self = mucOptions.getSelf();
+        // WS3: in a secret post-quantum group, authoring rights come from the
+        // folded v2 membership DAG (owner OR admin), not from MUC affiliation
+        // rank alone. pqAdmin is true when THIS account is owner-or-admin of the
+        // room per the journal; it relaxes the owner-only gates below.
+        final Conversation pqConversation = user.getConversation();
+        final boolean pqGroup =
+                pqConversation != null && pqConversation.isX3dhpqSecretGroup();
+        boolean pqAdmin = false;
+        if (pqGroup && activity instanceof XmppActivity xmppActivity
+                && xmppActivity.xmppConnectionService != null) {
+            final var gcs =
+                    xmppActivity.xmppConnectionService.getGroupCryptoService(
+                            pqConversation.getAccount());
+            pqAdmin = gcs != null && gcs.isLocalAdminOrOwner(pqConversation);
+        }
         if (user.realJidMatchesAccount()) {
             showContactDetails.setVisible(true);
             showContactDetails.setTitle(R.string.account_details);
@@ -83,18 +98,19 @@ public final class MucDetailsContextMenuHelper {
         }
         if (showAllOptions) {
             if (user.getRole() == Role.NONE) {
-                // Secret post-quantum groups are owner-managed: only the owner
-                // may (re-)invite members. Public channels keep prior behaviour.
-                invite.setVisible(!isGroupChat || self.ranks(Affiliation.OWNER));
+                // Secret post-quantum groups: owner OR journal-admin may
+                // (re-)invite members. Public channels keep prior behaviour.
+                invite.setVisible(!isGroupChat || self.ranks(Affiliation.OWNER) || pqAdmin);
             }
             if ((self.ranks(Affiliation.ADMIN) && self.outranks(user.getAffiliation()))
-                    || self.getAffiliation() == Affiliation.OWNER) {
+                    || self.getAffiliation() == Affiliation.OWNER
+                    || pqAdmin) {
                 if (!user.ranks(Affiliation.MEMBER)) {
                     giveMembership.setVisible(true);
                 } else if (user.getAffiliation() == Affiliation.MEMBER
-                        && (!isGroupChat || self.ranks(Affiliation.OWNER))) {
-                    // In secret post-quantum groups the owner removes a member
-                    // here; this revokes the affiliation and publishes a
+                        && (!isGroupChat || self.ranks(Affiliation.OWNER) || pqAdmin)) {
+                    // In secret post-quantum groups an owner OR admin removes a
+                    // member here; this revokes the affiliation and publishes a
                     // RemoveMember entry to the x3dhpq membership journal.
                     removeMembership.setVisible(true);
                 }
@@ -106,6 +122,11 @@ public final class MucDetailsContextMenuHelper {
                 } else if (user.getAffiliation() == Affiliation.OWNER) {
                     removeOwnerPrivileges.setVisible(true);
                 }
+            }
+            // Promote/demote admin: owner OR (in a PQ group) an existing admin.
+            // The action signs a v2 AddAdmin/RemoveAdmin journal entry in addition
+            // to mirroring the MUC affiliation.
+            if (self.ranks(Affiliation.OWNER) || pqAdmin) {
                 if (!user.ranks(Affiliation.ADMIN)) {
                     giveAdminPrivileges.setVisible(true);
                 } else if (user.getAffiliation() == Affiliation.ADMIN) {
@@ -122,7 +143,8 @@ public final class MucDetailsContextMenuHelper {
                             removeOwnerPrivileges));
         } else {
             if ((self.ranks(Affiliation.ADMIN) && self.outranks(user.getAffiliation()))
-                    || self.getAffiliation() == Affiliation.OWNER) {
+                    || self.getAffiliation() == Affiliation.OWNER
+                    || pqAdmin) {
                 removeFromRoom.setVisible(true);
             }
             managePermissions.setVisible(false);
@@ -169,9 +191,16 @@ public final class MucDetailsContextMenuHelper {
                 return true;
             case R.id.give_admin_privileges:
                 changeAffiliationInConference(activity, conversation, jid, Affiliation.ADMIN);
+                // Sign a v2 AddAdmin journal entry (crypto authority) in addition
+                // to the MUC affiliation mirror.
+                publishGroupPromote(activity, conversation, jid);
+                return true;
+            case R.id.remove_admin_privileges:
+                changeAffiliationInConference(activity, conversation, jid, Affiliation.MEMBER);
+                // Sign a v2 RemoveAdmin journal entry (demote, keeps membership).
+                publishGroupDemote(activity, conversation, jid);
                 return true;
             case R.id.give_membership:
-            case R.id.remove_admin_privileges:
             case R.id.revoke_owner_privileges:
                 changeAffiliationInConference(activity, conversation, jid, Affiliation.MEMBER);
                 return true;
@@ -272,11 +301,50 @@ public final class MucDetailsContextMenuHelper {
             return;
         }
         try {
-            groupCryptoService.publishRemoveMember(
-                    conversation.getAddress().asBareJid(), member.asBareJid());
+            // Kick (no ban flag). Routed through the unified path so it uses the
+            // v2 engine once the room has migrated, else the legacy v1 path.
+            groupCryptoService.removeMemberUnified(
+                    conversation.getAddress().asBareJid(), member.asBareJid(), false);
         } catch (final Exception e) {
             Log.d(Config.LOGTAG, "x3dhpq: failed to publish group member removal", e);
         }
+    }
+
+    /**
+     * Promote a member to admin in the room's x3dhpq membership journal (signs a
+     * v2 AddAdmin entry). A no-op for rooms that are not x3dhpq-enabled.
+     */
+    private static void publishGroupPromote(
+            final XmppActivity activity, final Conversation conversation, final Jid member) {
+        final var gcs = groupCryptoServiceOf(activity, conversation);
+        if (gcs == null || member == null) return;
+        try {
+            gcs.promoteToAdmin(conversation.getAddress().asBareJid(), member.asBareJid());
+        } catch (final Exception e) {
+            Log.d(Config.LOGTAG, "x3dhpq: failed to promote member to admin", e);
+        }
+    }
+
+    /**
+     * Demote an admin back to a plain member (signs a v2 RemoveAdmin entry).
+     */
+    private static void publishGroupDemote(
+            final XmppActivity activity, final Conversation conversation, final Jid member) {
+        final var gcs = groupCryptoServiceOf(activity, conversation);
+        if (gcs == null || member == null) return;
+        try {
+            gcs.demoteAdmin(conversation.getAddress().asBareJid(), member.asBareJid());
+        } catch (final Exception e) {
+            Log.d(Config.LOGTAG, "x3dhpq: failed to demote admin", e);
+        }
+    }
+
+    private static eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService groupCryptoServiceOf(
+            final XmppActivity activity, final Conversation conversation) {
+        if (activity == null || activity.xmppConnectionService == null || conversation == null) {
+            return null;
+        }
+        return activity.xmppConnectionService.getGroupCryptoService(conversation.getAccount());
     }
 
     private static void removeFromRoom(final User user, final XmppActivity activity) {
@@ -340,16 +408,22 @@ public final class MucDetailsContextMenuHelper {
                         // a MUC outcast that stays in the crypto member set can no
                         // longer receive future group keys. Only meaningful for
                         // secret (private, non-anonymous) x3dhpq groups.
-                        if (conversation.isPrivateAndNonAnonymous()
+                        // Secret PQ rooms are OPEN transports (not members-only),
+                        // so gate on the durable x3dhpq latch rather than
+                        // isPrivateAndNonAnonymous(), which is now false for them.
+                        if (conversation.isX3dhpqSecretGroup()
                                 && user.getRealJid() != null
                                 && activity.xmppConnectionService != null) {
                             final var gcs =
                                     activity.xmppConnectionService.getGroupCryptoService(account);
                             if (gcs != null) {
                                 try {
-                                    gcs.publishRemoveMember(
+                                    // Ban: set the v2 ban flag so the AIK cannot be
+                                    // re-admitted without an explicit causal path.
+                                    gcs.removeMemberUnified(
                                             conversation.getAddress().asBareJid(),
-                                            user.getRealJid().asBareJid());
+                                            user.getRealJid().asBareJid(),
+                                            true);
                                 } catch (final Exception e) {
                                     Log.d(Config.LOGTAG,
                                             "x3dhpq: failed to revoke banned member from journal",

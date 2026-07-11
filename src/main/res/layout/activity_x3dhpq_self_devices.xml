@@ -5,6 +5,58 @@
     android:orientation="vertical"
     android:padding="16dp">
 
+    <!-- §10.6.1/§10.6.4 pending-enrollment banner: shown only while this device has
+         no AIK yet and is waiting for confirmation by an existing device. -->
+    <LinearLayout
+        android:id="@+id/pending_enrollment_banner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_pending_enrollment_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_pending_enrollment_text"
+            android:paddingBottom="8dp" />
+
+        <Button
+            android:id="@+id/generate_new_identity_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_generate_new_identity_button" />
+
+    </LinearLayout>
+
+    <!-- §10.6.5 identity-reconstruction re-trust list. -->
+    <LinearLayout
+        android:id="@+id/blocked_identities_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_blocked_identities_title"
+            android:textStyle="bold" />
+
+        <ListView
+            android:id="@+id/blocked_identities_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
+
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

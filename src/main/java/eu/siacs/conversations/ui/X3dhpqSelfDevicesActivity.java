@@ -32,12 +32,18 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     private TextView mLocalDeviceIdView;
     private ListView mDeviceListView;
     private Button mAddDeviceButton;
+    private View mPendingEnrollmentBanner;
+    private Button mGenerateNewIdentityButton;
+    private View mBlockedIdentitiesContainer;
+    private ListView mBlockedIdentitiesList;
 
     private String mAccountUuid;
     private Account mAccount;
 
     private DeviceAdapter mAdapter;
     private final List<DatabaseBackend.X3dhpqLocalDeviceRow> mDevices = new ArrayList<>();
+    private ArrayAdapter<String> mBlockedAdapter;
+    private final List<String> mBlockedPeers = new ArrayList<>();
 
     public static Intent makeIntent(final Context ctx, final String accountUuid) {
         final Intent intent = new Intent(ctx, X3dhpqSelfDevicesActivity.class);
@@ -61,12 +67,66 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mLocalDeviceIdView = findViewById(R.id.local_device_id);
         mDeviceListView = findViewById(R.id.device_list);
         mAddDeviceButton = findViewById(R.id.add_device_button);
+        mPendingEnrollmentBanner = findViewById(R.id.pending_enrollment_banner);
+        mGenerateNewIdentityButton = findViewById(R.id.generate_new_identity_button);
+        mBlockedIdentitiesContainer = findViewById(R.id.blocked_identities_container);
+        mBlockedIdentitiesList = findViewById(R.id.blocked_identities_list);
 
         mAdapter = new DeviceAdapter();
         mDeviceListView.setAdapter(mAdapter);
 
+        mBlockedAdapter =
+                new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, mBlockedPeers);
+        mBlockedIdentitiesList.setAdapter(mBlockedAdapter);
+        mBlockedIdentitiesList.setOnItemClickListener(
+                (parent, view, position, id) -> showRetrustDialog(mBlockedPeers.get(position)));
+
         mAddDeviceButton.setOnClickListener(
                 v -> startActivity(PairNewDeviceActivity.makeIntent(this, mAccountUuid)));
+        mGenerateNewIdentityButton.setOnClickListener(v -> showGenerateNewIdentityDialog());
+    }
+
+    /** §10.6.4b: destructive confirmation dialog before minting a brand-new identity. */
+    private void showGenerateNewIdentityDialog() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.x3dhpq_generate_new_identity_button)
+                .setMessage(R.string.x3dhpq_generate_new_identity_confirm)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(
+                        R.string.x3dhpq_generate_new_identity_button,
+                        (dialog, which) -> {
+                            if (mAccount != null && xmppConnectionServiceBound) {
+                                mAccount.getX3dhpqService().generateNewIdentity();
+                                Toast.makeText(this, R.string.x3dhpq_pair_status_done, Toast.LENGTH_LONG)
+                                        .show();
+                                refresh();
+                            }
+                        })
+                .create()
+                .show();
+    }
+
+    /** §10.6.5: explicit re-trust confirmation for a peer whose identity was reconstructed. */
+    private void showRetrustDialog(final String peerBareJid) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.x3dhpq_retrust_button)
+                .setMessage(peerBareJid)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(
+                        R.string.x3dhpq_retrust_button,
+                        (dialog, which) -> {
+                            if (mAccount != null && xmppConnectionServiceBound) {
+                                try {
+                                    mAccount.getX3dhpqService()
+                                            .reTrustIdentity(eu.siacs.conversations.xmpp.Jid.of(peerBareJid));
+                                } catch (final IllegalArgumentException ignored) {
+                                    // malformed JID string; nothing to do
+                                }
+                                refresh();
+                            }
+                        })
+                .create()
+                .show();
     }
 
     @Override
@@ -114,6 +174,22 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mDevices.clear();
         mDevices.addAll(rows);
         mAdapter.notifyDataSetChanged();
+
+        // --- §10.6.1/§10.6.4 pending-enrollment banner ---
+        final boolean pending = mAccount.getX3dhpqService().isPendingEnrollment();
+        mPendingEnrollmentBanner.setVisibility(pending ? View.VISIBLE : View.GONE);
+
+        // --- §10.6.5 blocked/unconfirmed identities awaiting explicit re-trust ---
+        mBlockedPeers.clear();
+        for (final eu.siacs.conversations.entities.Conversation c :
+                xmppConnectionService.getConversations()) {
+            if (c.getAccount() == mAccount
+                    && mAccount.getX3dhpqService().isIdentityBlocked(c)) {
+                mBlockedPeers.add(c.getAddress().asBareJid().toString());
+            }
+        }
+        mBlockedIdentitiesContainer.setVisibility(mBlockedPeers.isEmpty() ? View.GONE : View.VISIBLE);
+        mBlockedAdapter.notifyDataSetChanged();
     }
 
     @Override

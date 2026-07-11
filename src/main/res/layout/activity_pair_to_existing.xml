@@ -57,4 +57,46 @@
         android:paddingTop="16dp"
         android:textAlignment="center" />
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?android:attr/listDivider"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="16dp" />
+
+    <!-- §10.6.2 "new-device-presents" direction: this pending device shows its own
+         code/QR instead, for a human to confirm on an existing primary device. -->
+    <Button
+        android:id="@+id/show_my_code_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/x3dhpq_pair_show_my_code_button"
+        android:enabled="false" />
+
+    <LinearLayout
+        android:id="@+id/show_my_code_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:visibility="gone"
+        android:paddingTop="8dp">
+
+        <TextView
+            android:id="@+id/my_pairing_code"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="24sp"
+            android:fontFamily="monospace"
+            android:textIsSelectable="true"
+            android:paddingBottom="16dp" />
+
+        <ImageView
+            android:id="@+id/my_pairing_qr"
+            android:layout_width="240dp"
+            android:layout_height="240dp"
+            android:contentDescription="@string/x3dhpq_pair_show_my_code_button" />
+
+    </LinearLayout>
+
 </LinearLayout>

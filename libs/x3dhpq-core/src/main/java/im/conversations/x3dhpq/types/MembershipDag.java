@@ -42,6 +42,14 @@ public final class MembershipDag {
 
     public int size() { return store.size(); }
 
+    /** Marshalled bytes of every stored entry — used to bundle the DAG into a
+     *  group-sync sender-chain announcement alongside v1 entries. */
+    public List<byte[]> getMarshalledEntries() {
+        final List<byte[]> out = new ArrayList<>(store.size());
+        for (final JournalEntryV2 e : store.values()) out.add(e.marshal());
+        return out;
+    }
+
     /** Parse + store; returns true if newly stored (not a duplicate). */
     public boolean ingest(byte[] bytes) {
         final JournalEntryV2 e = JournalEntryV2.unmarshal(bytes);
@@ -125,6 +133,10 @@ public final class MembershipDag {
                 st.admins.add(signerHex);
                 st.members.add(signerHex);
                 st.epoch = 0;
+                // A genesis Snapshot (v1->v2 bridge / historyless-joiner virtual
+                // genesis) imports its asserted member/admin/banned set. Applied
+                // only at index 0; a mid-DAG Snapshot is a passive checkpoint.
+                if (e.getAction() == JournalEntryV2.ACTION_SNAPSHOT) applyGenesisSnapshot(st, e);
                 continue;
             }
             st.epoch = i;
@@ -166,6 +178,25 @@ public final class MembershipDag {
             }
         }
         return st;
+    }
+
+    /** Import a genesis Snapshot's asserted state. Owner already established by
+     *  the index-0 fold; members/admins/banned come from the payload. */
+    private void applyGenesisSnapshot(State st, JournalEntryV2 e) {
+        final JournalEntryV2.Snapshot snap = JournalEntryV2.parseSnapshot(e.getPayload());
+        if (snap == null) return;
+        for (final JournalEntryV2.SnapshotMember m : snap.members) {
+            final String fpHex = JournalEntryV2.hex(m.fp);
+            st.members.add(fpHex);
+            if (m.admin) st.admins.add(fpHex);
+        }
+        for (final JournalEntryV2.SnapshotBanned b : snap.banned) {
+            final String fpHex = JournalEntryV2.hex(b.fp);
+            st.members.remove(fpHex);
+            st.admins.remove(fpHex);
+            st.removed.put(fpHex, b.removalEpoch);
+            st.banned.add(fpHex);
+        }
     }
 
     private boolean canReadd(State st, Map<String, String> removalNode, String fpHex, JournalEntryV2 add) {

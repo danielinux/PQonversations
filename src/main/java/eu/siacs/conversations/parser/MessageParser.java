@@ -5,6 +5,11 @@ import android.util.Pair;
 import com.google.common.base.Strings;
 import eu.siacs.conversations.AppSettings;
 import eu.siacs.conversations.Config;
+import eu.siacs.conversations.crypto.axolotl.AxolotlService;
+import eu.siacs.conversations.crypto.axolotl.BrokenSessionException;
+import eu.siacs.conversations.crypto.axolotl.NotEncryptedForThisDeviceException;
+import eu.siacs.conversations.crypto.axolotl.OutdatedSenderException;
+import eu.siacs.conversations.crypto.axolotl.XmppAxolotlMessage;
 import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
 import eu.siacs.conversations.crypto.x3dhpq.XmppX3dhpqMessage;
 import eu.siacs.conversations.entities.Account;
@@ -36,6 +41,8 @@ import eu.siacs.conversations.xmpp.manager.RosterManager;
 import eu.siacs.conversations.xmpp.manager.StanzaIdManager;
 import eu.siacs.conversations.xmpp.manager.VerifyDeviceManager;
 import im.conversations.android.xmpp.model.Extension;
+import im.conversations.android.xmpp.model.axolotl.Encrypted;
+import im.conversations.android.xmpp.model.axolotl.Payload;
 import im.conversations.android.xmpp.model.x3dhpq.envelope.Envelope;
 import im.conversations.x3dhpq.protocol.PrekeyEnvelope;
 import im.conversations.x3dhpq.protocol.Session;
@@ -91,6 +98,88 @@ public class MessageParser extends AbstractParser
             }
         }
         return false;
+    }
+
+    /**
+     * Workstream 5: OMEMO (XEP-0384) fallback inbound decryption, restored
+     * verbatim from before the axolotl package was deleted (commit
+     * {@code baa22268c}). Kept side-by-side with the x3dhpq envelope dispatch
+     * below; the two namespaces ({@code eu.siacs.conversations.axolotl} vs.
+     * {@code urn:xmppqr:x3dhpq:envelope:0}) never collide on the wire.
+     */
+    private Message parseAxolotlChat(
+            final Encrypted axolotlMessage,
+            final Jid from,
+            final Conversation conversation,
+            final int status,
+            final boolean checkedForDuplicates,
+            final boolean postpone) {
+        final AxolotlService service = conversation.getAccount().getAxolotlService();
+        final XmppAxolotlMessage xmppAxolotlMessage;
+        try {
+            xmppAxolotlMessage = XmppAxolotlMessage.fromElement(axolotlMessage, from.asBareJid());
+        } catch (final Exception e) {
+            Log.d(
+                    Config.LOGTAG,
+                    conversation.getAccount().getJid().asBareJid()
+                            + ": invalid omemo message received "
+                            + e.getMessage());
+            return null;
+        }
+        if (xmppAxolotlMessage.hasPayload()) {
+            final XmppAxolotlMessage.XmppAxolotlPlaintextMessage plaintextMessage;
+            try {
+                plaintextMessage =
+                        service.processReceivingPayloadMessage(xmppAxolotlMessage, postpone);
+            } catch (BrokenSessionException e) {
+                if (checkedForDuplicates) {
+                    if (service.trustedOrPreviouslyResponded(from.asBareJid())) {
+                        service.reportBrokenSessionException(e, postpone);
+                        return new Message(
+                                conversation, "", Message.ENCRYPTION_AXOLOTL_FAILED, status);
+                    } else {
+                        Log.d(
+                                Config.LOGTAG,
+                                "ignoring broken session exception because contact was not"
+                                        + " trusted");
+                        return new Message(
+                                conversation, "", Message.ENCRYPTION_AXOLOTL_FAILED, status);
+                    }
+                } else {
+                    Log.d(
+                            Config.LOGTAG,
+                            "ignoring broken session exception because checkForDuplicates failed");
+                    return null;
+                }
+            } catch (NotEncryptedForThisDeviceException e) {
+                return new Message(
+                        conversation, "", Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE, status);
+            } catch (OutdatedSenderException e) {
+                return new Message(conversation, "", Message.ENCRYPTION_AXOLOTL_FAILED, status);
+            }
+            if (plaintextMessage != null) {
+                Message finishedMessage =
+                        new Message(
+                                conversation,
+                                plaintextMessage.getPlaintext(),
+                                Message.ENCRYPTION_AXOLOTL,
+                                status);
+                finishedMessage.setFingerprint(plaintextMessage.getFingerprint());
+                Log.d(
+                        Config.LOGTAG,
+                        AxolotlService.getLogprefix(finishedMessage.getConversation().getAccount())
+                                + " Received Message with session fingerprint: "
+                                + plaintextMessage.getFingerprint());
+                return finishedMessage;
+            }
+        } else {
+            Log.d(
+                    Config.LOGTAG,
+                    conversation.getAccount().getJid().asBareJid()
+                            + ": received OMEMO key transport message");
+            service.processReceivingKeyTransportMessage(xmppAxolotlMessage, postpone);
+        }
+        return null;
     }
 
     private Message parseX3dhpqChat(
@@ -185,6 +274,11 @@ public class MessageParser extends AbstractParser
             Log.w(Config.LOGTAG, "x3dhpq: persistSession failed: " + e.getMessage());
             // not fatal — message decryption succeeded
         }
+
+        // Workstream 5: any successfully decrypted inbound x3dhpq envelope is
+        // proof the peer is pqc-capable — latch this conversation to x3dhpq for
+        // good (hard one-way upgrade, §15.4).
+        conversation.markPqUpgraded();
 
         return new Message(
                 conversation,
@@ -451,6 +545,9 @@ public class MessageParser extends AbstractParser
         final String oobUrl = oob != null ? oob.getURL() : null;
         final var replace = packet.getExtension(Replace.class);
         final var replacementId = replace == null ? null : replace.getId();
+        // Workstream 5: OMEMO (XEP-0384) fallback envelope, distinct namespace
+        // from the x3dhpq envelope below — never collides.
+        final var axolotlEncrypted = packet.getOnlyExtension(Encrypted.class);
         final var x3dhpqEnvelope = packet.getOnlyExtension(Envelope.class);
         final var x3dhpqGroupEnvelope = packet.getOnlyExtension(
                 im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup.class);
@@ -554,6 +651,7 @@ public class MessageParser extends AbstractParser
 
         if ((body != null && !bodyIsFallback)
                 || pgpEncrypted != null
+                || (axolotlEncrypted != null && axolotlEncrypted.hasExtension(Payload.class))
                 || x3dhpqEnvelope != null
                 || x3dhpqGroupEnvelope != null
                 || oobUrl != null) {
@@ -671,6 +769,64 @@ public class MessageParser extends AbstractParser
             final Message message;
             if (pgpEncrypted != null) {
                 message = new Message(conversation, pgpEncrypted, Message.ENCRYPTION_PGP, status);
+            } else if (axolotlEncrypted != null) {
+                // Workstream 5: OMEMO (XEP-0384) fallback, only reached when the
+                // stanza carries no x3dhpq envelope (peer not yet pqc-capable).
+                final Jid origin;
+                if (conversationMultiMode) {
+                    final var user =
+                            getManager(MultiUserChatManager.class).getMucUser(packet, query);
+                    origin = user == null ? null : user.getRealJid();
+                    if (origin == null) {
+                        Log.d(Config.LOGTAG, "received omemo message in anonymous conference");
+                        return;
+                    }
+
+                } else {
+                    origin = from;
+                }
+
+                final boolean liveMessage =
+                        query == null && !isTypeGroupChat && mucUserElement == null;
+                final boolean checkedForDuplicates =
+                        liveMessage
+                                || (serverMsgId != null
+                                        && remoteMsgId != null
+                                        && !conversation.possibleDuplicate(
+                                                serverMsgId, remoteMsgId));
+
+                message =
+                        parseAxolotlChat(
+                                axolotlEncrypted,
+                                origin,
+                                conversation,
+                                status,
+                                checkedForDuplicates,
+                                query != null);
+                if (message == null) {
+                    if (query != null) {
+                        getManager(ChatStateManager.class).process(packet);
+                    }
+                    if (query != null && status == Message.STATUS_SEND && remoteMsgId != null) {
+                        Message previouslySent = conversation.findSentMessageWithUuid(remoteMsgId);
+                        if (previouslySent != null
+                                && previouslySent.getServerMsgId() == null
+                                && serverMsgId != null) {
+                            previouslySent.setServerMsgId(serverMsgId);
+                            mXmppConnectionService.databaseBackend.updateMessage(
+                                    previouslySent, false);
+                            Log.d(
+                                    Config.LOGTAG,
+                                    account.getJid().asBareJid()
+                                            + ": encountered previously sent OMEMO message without"
+                                            + " serverId. updating...");
+                        }
+                    }
+                    return;
+                }
+                if (conversationMultiMode) {
+                    message.setTrueCounterpart(origin);
+                }
             } else if (x3dhpqGroupEnvelope != null && isTypeGroupChat) {
                 // §13 group-encrypted message: decrypt via GroupCryptoService.
                 try {
@@ -910,6 +1066,9 @@ public class MessageParser extends AbstractParser
                                 .getAccount()
                                 .getPgpDecryptionService()
                                 .decrypt(message, notify);
+            } else if (message.getEncryption() == Message.ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE
+                    || message.getEncryption() == Message.ENCRYPTION_AXOLOTL_FAILED) {
+                notify = false;
             }
 
             if (query == null) {
@@ -944,6 +1103,42 @@ public class MessageParser extends AbstractParser
         } else { // no body
 
             final var conversation = mXmppConnectionService.find(account, counterpart.asBareJid());
+            if (axolotlEncrypted != null) {
+                final Jid origin;
+                if (conversation != null && conversation.getMode() == Conversation.MODE_MULTI) {
+                    final var user =
+                            getManager(MultiUserChatManager.class).getMucUser(packet, query);
+                    origin = user == null ? null : user.getRealJid();
+                    if (origin == null) {
+                        Log.d(
+                                Config.LOGTAG,
+                                "omemo key transport message in anonymous conference received");
+                        return;
+                    }
+                } else if (isTypeGroupChat) {
+                    return;
+                } else {
+                    origin = from;
+                }
+                try {
+                    final XmppAxolotlMessage xmppAxolotlMessage =
+                            XmppAxolotlMessage.fromElement(axolotlEncrypted, origin.asBareJid());
+                    account.getAxolotlService()
+                            .processReceivingKeyTransportMessage(xmppAxolotlMessage, query != null);
+                    Log.d(
+                            Config.LOGTAG,
+                            account.getJid().asBareJid()
+                                    + ": omemo key transport message received from "
+                                    + origin);
+                } catch (Exception e) {
+                    Log.d(
+                            Config.LOGTAG,
+                            account.getJid().asBareJid()
+                                    + ": invalid omemo key transport message received "
+                                    + e.getMessage());
+                    return;
+                }
+            }
 
             if (query == null) {
                 getManager(ChatStateManager.class).process(packet);

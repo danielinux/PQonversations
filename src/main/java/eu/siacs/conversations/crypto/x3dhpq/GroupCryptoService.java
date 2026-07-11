@@ -20,6 +20,8 @@ import im.conversations.x3dhpq.types.AccountIdentityPub;
 import im.conversations.x3dhpq.types.GroupMember;
 import im.conversations.x3dhpq.types.GroupMessageHeader;
 import im.conversations.x3dhpq.types.GroupSession;
+import im.conversations.x3dhpq.types.JournalEntryV2;
+import im.conversations.x3dhpq.types.MembershipDag;
 import im.conversations.x3dhpq.types.SenderChainAnnouncement;
 
 import java.nio.charset.StandardCharsets;
@@ -66,6 +68,16 @@ public class GroupCryptoService {
 
     private static final class RoomState {
         final MembershipJournal journal = new MembershipJournal();
+        // WS2: multi-admin membership DAG (v2). Runs in parallel with the v1
+        // journal above. Once a v2 genesis/Snapshot has been ingested for this
+        // room, {@link #v2Active} latches true and the DAG becomes the sole
+        // authority for the member/admin set; new v1 entries are then parsed for
+        // history but no longer drive membership.
+        final MembershipDag dag = new MembershipDag();
+        boolean v2Active = false;
+        // Last folded DAG state (members/admins/removed/banned/owner), cached for
+        // cheap GUI queries between recomputes.
+        MembershipDag.State dagState;
         GroupSession session;
         // Membership item ids we've already applied to this in-memory room
         // state. Catch-up fetches may run multiple times for the same room;
@@ -153,7 +165,15 @@ public class GroupCryptoService {
     // Byte-identical to the Dino (Vala) build_group_sync_bytes.
 
     private byte[] buildGroupSyncBytes(final byte[] annBytes, final RoomState state) {
-        final java.util.List<byte[]> entries = state.journal.getMarshalledEntries();
+        // Flat, self-describing entry list: v1 entries (AuditEntry, prefix
+        // "X3DHPQ-Audit-v1\0") followed by v2 DAG entries (JournalEntryV2, prefix
+        // "X3DHPQ-Audit-v2\0"). The receiver dispatches each by its leading domain
+        // separator, so a single list carries both without a format flag. The
+        // outer framing (version|annLen|ann|n|{len|entry}*) is unchanged and stays
+        // byte-identical to Dino's build_group_sync_bytes.
+        final java.util.List<byte[]> entries =
+                new java.util.ArrayList<>(state.journal.getMarshalledEntries());
+        entries.addAll(state.dag.getMarshalledEntries());
         int total = 2 + 4 + annBytes.length + 4;
         for (final byte[] e : entries) total += 4 + e.length;
         final java.nio.ByteBuffer buf =
@@ -228,19 +248,39 @@ public class GroupCryptoService {
                 return;
             }
             try {
-                // For TOFU / AIK lookup, we pass the best AIK map we can build
-                // from persisted account + bundle state so restart recovery can
-                // bootstrap from seq=0 without relying on prior RAM state.
-                state.journal.append(entryBytes, buildAikLookupMap(state));
-                if (itemId != null) {
-                    state.appliedMembershipItemIds.add(itemId);
+                if (JournalEntryV2.isV2(entryBytes)) {
+                    // v2 multi-admin DAG entry (genesis/Snapshot/Add/Remove/
+                    // AddAdmin/RemoveAdmin). Route to the DAG; the room latches to
+                    // the v2 engine on first sight of any v2 entry.
+                    final boolean fresh = state.dag.ingest(entryBytes);
+                    state.v2Active = true;
+                    if (itemId != null) state.appliedMembershipItemIds.add(itemId);
+                    if (fresh) {
+                        recomputeDagAndRebuild(roomStr, state);
+                    }
+                    markConversationAsX3dhpqGroup(roomJidBare);
+                } else {
+                    // v1 linear owner-signed entry. Once the room has migrated to
+                    // v2, legacy entries are still parsed for history integrity but
+                    // no longer drive the live member/admin set.
+                    if (state.v2Active) {
+                        if (itemId != null) state.appliedMembershipItemIds.add(itemId);
+                        return;
+                    }
+                    // For TOFU / AIK lookup, we pass the best AIK map we can build
+                    // from persisted account + bundle state so restart recovery can
+                    // bootstrap from seq=0 without relying on prior RAM state.
+                    state.journal.append(entryBytes, buildAikLookupMap(state));
+                    if (itemId != null) {
+                        state.appliedMembershipItemIds.add(itemId);
+                    }
+                    rebuildGroupSession(roomStr, state);
+                    // The room now has a verified membership journal → durably mark
+                    // the conversation as an x3dhpq secret group so encryption
+                    // detection no longer depends on the MUC being members-only
+                    // (rooms are OPEN transports now).
+                    markConversationAsX3dhpqGroup(roomJidBare);
                 }
-                rebuildGroupSession(roomStr, state);
-                // The room now has a verified membership journal → durably mark
-                // the conversation as an x3dhpq secret group so encryption
-                // detection no longer depends on the MUC being members-only
-                // (rooms are OPEN transports now).
-                markConversationAsX3dhpqGroup(roomJidBare);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, TAG + ": failed to append journal entry "
                         + itemId + " for " + roomStr + ": " + e.getMessage());
@@ -374,6 +414,106 @@ public class GroupCryptoService {
                         state.session.removeMember(m.aik.fingerprint(X3dhpqCrypto.BLAKE2B_160));
                         break;
                     }
+                }
+            }
+        }
+
+        persistGroupSession(roomStr, state);
+    }
+
+    // -------------------------------------------------------------------------
+    // WS2: v2 multi-admin DAG → live session driver
+    // -------------------------------------------------------------------------
+
+    /**
+     * Build an {@link MembershipDag.AikResolver} over the same sources as
+     * {@link #buildAikLookupMap} (session members + journal known members + own
+     * AIK + every cached remote bundle). The DAG keys fingerprints as lowercase
+     * hex ({@link JournalEntryV2#hex}), whereas {@code buildAikLookupMap} uses the
+     * uppercase {@link MembershipJournal#fingerprintHex}; we re-key to lowercase
+     * and resolve case-insensitively.
+     */
+    private MembershipDag.AikResolver dagResolver(final RoomState state) {
+        final Map<String, AccountIdentityPub> upper = buildAikLookupMap(state);
+        final Map<String, AccountIdentityPub> lower = new HashMap<>();
+        for (final Map.Entry<String, AccountIdentityPub> e : upper.entrySet()) {
+            if (e.getValue() != null) {
+                lower.put(e.getKey().toLowerCase(java.util.Locale.ROOT), e.getValue());
+            }
+        }
+        return fpHex -> fpHex == null ? null
+                : lower.get(fpHex.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /** Recompute the folded DAG state and (re)build the live group session from it. */
+    private void recomputeDagAndRebuild(final String roomStr, final RoomState state) {
+        final MembershipDag.State ds = state.dag.recompute(dagResolver(state));
+        state.dagState = ds;
+        // The fold only includes the causally-stable prefix (entries whose
+        // ancestors are all present); entries with missing parents stay excluded
+        // until they resolve. So driving the session — and therefore epoch/
+        // sender-chain rotation — off ds inherently respects the plan's
+        // "causally-stable prefix" epoch caveat: rotation never binds to an entry
+        // whose parents are still outstanding.
+        rebuildGroupSessionFromDag(roomStr, state, ds);
+    }
+
+    /**
+     * Mirror of {@link #rebuildGroupSession} but sourced from the folded v2 DAG
+     * state instead of the v1 journal. Members are resolved to AIK pubs via the
+     * same AIK sources; members whose pub is unknown are omitted (as v1 does).
+     */
+    private void rebuildGroupSessionFromDag(
+            final String roomStr, final RoomState state, final MembershipDag.State ds) {
+        final String accountUuid = account.getUuid();
+
+        // fpHex(lower) -> AIK pub, restricted to current DAG members with a known pub.
+        final Map<String, AccountIdentityPub> upper = buildAikLookupMap(state);
+        final Map<String, AccountIdentityPub> memberMap = new HashMap<>();
+        for (final Map.Entry<String, AccountIdentityPub> e : upper.entrySet()) {
+            if (e.getValue() == null) continue;
+            final String low = e.getKey().toLowerCase(java.util.Locale.ROOT);
+            if (ds.members.contains(low)) memberMap.put(low, e.getValue());
+        }
+
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null) return;
+        final AccountIdentityPub myAik = AccountIdentityPub.unmarshal(aikRow.aikPub());
+        final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
+                db.listX3dhpqLocalDevices(accountUuid);
+        if (localRows.isEmpty()) return;
+        final int myDeviceId = localRows.get(0).deviceId();
+
+        if (state.session == null) {
+            final List<GroupMember> members = new ArrayList<>();
+            for (final AccountIdentityPub aik : memberMap.values()) {
+                members.add(new GroupMember(aik, new ArrayList<>()));
+            }
+            state.session = GroupSession.create(
+                    roomStr, myAik, myDeviceId, members,
+                    X3dhpqCrypto.BLAKE2B_160, X3dhpqCrypto.HMAC_SHA256);
+        } else {
+            // Add DAG members not yet in the session.
+            for (final Map.Entry<String, AccountIdentityPub> e : memberMap.entrySet()) {
+                final String fp = e.getKey();
+                boolean already = false;
+                for (final GroupMember m : state.session.members) {
+                    final String mFp = MembershipJournal.fingerprintHex(
+                            X3dhpqCrypto.BLAKE2B_160.hash(m.aik.marshal()));
+                    if (fp.equalsIgnoreCase(mFp)) { already = true; break; }
+                }
+                if (!already) {
+                    state.session.addMember(new GroupMember(e.getValue(), new ArrayList<>()));
+                }
+            }
+            // Remove session members no longer in the DAG member set. Rotates the
+            // epoch exactly once per removal (GroupSession.removeMember).
+            for (final GroupMember m : new ArrayList<>(state.session.members)) {
+                final String mFp = MembershipJournal.fingerprintHex(
+                        X3dhpqCrypto.BLAKE2B_160.hash(m.aik.marshal()));
+                if (!ds.members.contains(mFp.toLowerCase(java.util.Locale.ROOT))) {
+                    state.session.removeMember(m.aik.fingerprint(X3dhpqCrypto.BLAKE2B_160));
                 }
             }
         }
@@ -663,11 +803,11 @@ public class GroupCryptoService {
             // Verify sender is in journal
             final String senderAikFp = ann.senderAIKPub.fingerprint(X3dhpqCrypto.BLAKE2B_160);
             final String senderFpHex = MembershipJournal.fingerprintHex(blakeFpBytes(ann.senderAIKPub));
-            if (!state.journal.isMember(senderFpHex)) {
+            if (!roomHasMember(state, senderFpHex)) {
                 Log.w(Config.LOGTAG, TAG + ": announcement from non-member " + senderAikFp);
                 return;
             }
-            if (state.journal.isRemoved(senderFpHex)) {
+            if (roomHasRemoved(state, senderFpHex)) {
                 Log.w(Config.LOGTAG, TAG + ": announcement from removed member " + senderAikFp);
                 return;
             }
@@ -865,6 +1005,269 @@ public class GroupCryptoService {
         // so they install the fresh recv chain for the new epoch. The removed
         // member is no longer in session.members and receives nothing.
         announceSenderChain(roomBare);
+    }
+
+    // -------------------------------------------------------------------------
+    // WS2: v2 multi-admin authoring (genesis/snapshot bridge + add/remove/promote/demote)
+    // -------------------------------------------------------------------------
+
+    /** Promote an existing occupant to admin (v2 AddAdmin). Migrates the room to
+     *  v2 first if needed (owner-only). Signed by our own AIK. */
+    public void promoteToAdmin(final Jid roomJid, final Jid memberJid) {
+        authorV2(roomJid, memberJid, JournalEntryV2.ACTION_ADD_ADMIN, false);
+    }
+
+    /** Demote an admin back to plain member (v2 RemoveAdmin). Signed by our AIK. */
+    public void demoteAdmin(final Jid roomJid, final Jid memberJid) {
+        authorV2(roomJid, memberJid, JournalEntryV2.ACTION_REMOVE_ADMIN, false);
+    }
+
+    /** Add a member via the v2 engine (admin-authored). */
+    public void addMemberV2(final Jid roomJid, final Jid memberJid) {
+        authorV2(roomJid, memberJid, JournalEntryV2.ACTION_ADD_MEMBER, false);
+    }
+
+    /** Remove (kick, ban=false) or ban (ban=true) a member via the v2 engine. */
+    public void publishRemoveMemberV2(final Jid roomJid, final Jid memberJid, final boolean ban) {
+        authorV2(roomJid, memberJid, JournalEntryV2.ACTION_REMOVE_MEMBER, ban);
+    }
+
+    /**
+     * Route a member removal through whichever engine is live for the room: the
+     * v2 DAG (with an explicit ban flag) once migrated, otherwise the legacy v1
+     * owner-signed path (kick only; v1 has no ban concept). Called by the admin
+     * GUI so it doesn't have to know which engine a room is on.
+     */
+    public void removeMemberUnified(final Jid roomJid, final Jid memberJid, final boolean ban) {
+        final RoomState st = rooms.get(roomJid.asBareJid().toString());
+        if (st != null && st.v2Active) {
+            publishRemoveMemberV2(roomJid, memberJid, ban);
+        } else {
+            publishRemoveMember(roomJid, memberJid);
+        }
+    }
+
+    /** Common authoring path for all v2 membership/role mutations. */
+    private void authorV2(final Jid roomJid, final Jid subjectJid, final int action, final boolean ban) {
+        if (account == null || db == null || roomJid == null || subjectJid == null) return;
+        final Jid roomBare = roomJid.asBareJid();
+        final String roomStr = roomBare.toString();
+        final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
+
+        final im.conversations.x3dhpq.types.AccountIdentityKey ownerKey = loadOwnAikKey();
+        if (ownerKey == null) {
+            Log.w(Config.LOGTAG, TAG + ": authorV2 skipped — no local AIK");
+            return;
+        }
+        final AccountIdentityPub subjectAik = resolvePeerAikCached(subjectJid);
+        if (subjectAik == null) {
+            Log.w(Config.LOGTAG, TAG + ": authorV2 skipped — no cached AIK for " + subjectJid);
+            return;
+        }
+        final byte[] subjectFpRaw = blakeFpBytes(subjectAik);
+        final long ts = System.currentTimeMillis() / 1000L;
+
+        synchronized (state) {
+            if (!state.v2Active) {
+                // First v2 mutation: bridge the room from v1 to v2. Only the v1
+                // owner is authorised to do this (v1 has no admins); a non-owner's
+                // attempt to promote would produce entries the fold rejects.
+                if (!ensureV2Bridge(roomBare, state, ownerKey)) {
+                    Log.w(Config.LOGTAG, TAG + ": authorV2 aborted — only the owner can"
+                            + " migrate " + roomStr + " to the multi-admin (v2) journal");
+                    return;
+                }
+            }
+            final long lamport = state.dag.nextLamport();
+            final List<byte[]> parents = state.dag.currentHeads();
+            final byte[] payload = (action == JournalEntryV2.ACTION_REMOVE_MEMBER)
+                    ? JournalEntryV2.buildRemovePayload(subjectFpRaw, 0, ban)
+                    : JournalEntryV2.buildMemberPayload(subjectFpRaw, 0);
+            final JournalEntryV2 entry =
+                    JournalEntryV2.signNew(ownerKey, lamport, parents, action, payload, ts);
+            Log.d(Config.LOGTAG, TAG + ": authoring v2 entry action=" + action
+                    + " subject=" + subjectJid + " lamport=" + lamport
+                    + " parents=" + parents.size() + " for " + roomBare);
+            emitAndBroadcastV2(roomBare, state, entry);
+            recomputeDagAndRebuild(roomStr, state);
+        }
+        // Push the new epoch/entries (and the bundled journal) to remaining members.
+        announceSenderChain(roomBare);
+    }
+
+    /**
+     * Migrate a room from the v1 linear journal to the v2 multi-admin DAG by
+     * emitting a genesis {@code Snapshot} (action=10) that imports the v1 final
+     * member set (owner as sole admin), followed by redundant {@code AddMember}
+     * deltas for each non-owner member. The Snapshot both marks the v2 takeover
+     * and pins the owner; the deltas guarantee the member set reconstructs via the
+     * already-cross-client-tested Add fold even if a peer engine does not yet
+     * import Snapshot payloads. Idempotent once {@code v2Active}.
+     *
+     * @return true if the room is (now) on v2 and we were allowed to migrate it.
+     */
+    private boolean ensureV2Bridge(
+            final Jid roomBare, final RoomState state,
+            final im.conversations.x3dhpq.types.AccountIdentityKey ownerKey) {
+        if (state.v2Active) return true;
+        final AccountIdentityPub myAik = ownerKey.getPublic();
+        final AccountIdentityPub v1Owner = state.journal.getOwnerAik();
+        if (v1Owner != null && !v1Owner.equals(myAik)) {
+            return false; // not the room owner — cannot create the v2 genesis
+        }
+        final byte[] ownerFpRaw = blakeFpBytes(myAik);
+        final String ownerFpKeyUpper = MembershipJournal.fingerprintHex(ownerFpRaw);
+        final long ts = System.currentTimeMillis() / 1000L;
+
+        // Assemble the asserted member/admin set from the v1 journal.
+        final List<JournalEntryV2.SnapshotMember> snapMembers = new ArrayList<>();
+        final List<byte[]> nonOwnerFps = new ArrayList<>();
+        boolean ownerSeen = false;
+        for (final String keyUpper : state.journal.getMembers().keySet()) {
+            final byte[] fpRaw = hexToBytes(keyUpper);
+            final boolean isOwner = keyUpper.equalsIgnoreCase(ownerFpKeyUpper);
+            if (isOwner) ownerSeen = true;
+            snapMembers.add(new JournalEntryV2.SnapshotMember(fpRaw, isOwner));
+            if (!isOwner) nonOwnerFps.add(fpRaw);
+        }
+        if (!ownerSeen) {
+            snapMembers.add(new JournalEntryV2.SnapshotMember(ownerFpRaw, true));
+        }
+        final List<JournalEntryV2.SnapshotBanned> snapBanned = new ArrayList<>();
+        for (final Map.Entry<String, Long> e : state.journal.getRemovedAiks().entrySet()) {
+            snapBanned.add(new JournalEntryV2.SnapshotBanned(
+                    hexToBytes(e.getKey()), e.getValue() == null ? 0L : e.getValue()));
+        }
+        final long epoch = state.session != null ? (state.session.epoch & 0xFFFFFFFFL) : 0L;
+        final byte[] snapPayload =
+                JournalEntryV2.buildSnapshotPayload(ownerFpRaw, epoch, snapMembers, snapBanned);
+
+        final JournalEntryV2 snap = JournalEntryV2.signNew(
+                ownerKey, state.dag.nextLamport(), new ArrayList<>(),
+                JournalEntryV2.ACTION_SNAPSHOT, snapPayload, ts);
+        Log.d(Config.LOGTAG, TAG + ": v1->v2 bridge: emitting genesis Snapshot for "
+                + roomBare + " (" + snapMembers.size() + " member(s), "
+                + snapBanned.size() + " banned)");
+        emitAndBroadcastV2(roomBare, state, snap);
+
+        // Redundant Add deltas so the member set reconstructs through the tested
+        // Add fold regardless of the peer engine's Snapshot-payload support.
+        for (final byte[] fpRaw : nonOwnerFps) {
+            final byte[] addPayload = JournalEntryV2.buildMemberPayload(fpRaw, 0);
+            final JournalEntryV2 add = JournalEntryV2.signNew(
+                    ownerKey, state.dag.nextLamport(), state.dag.currentHeads(),
+                    JournalEntryV2.ACTION_ADD_MEMBER, addPayload, ts);
+            emitAndBroadcastV2(roomBare, state, add);
+        }
+        state.v2Active = true;
+        return true;
+    }
+
+    /** Ingest a locally-authored v2 entry into the DAG and broadcast it. */
+    private void emitAndBroadcastV2(final Jid roomBare, final RoomState state, final JournalEntryV2 entry) {
+        final byte[] bytes = entry.marshal();
+        state.dag.ingest(bytes);
+        state.v2Active = true;
+        state.appliedMembershipItemIds.add(journalEntryDedupId(bytes));
+        broadcastJournalEntry(roomBare, bytes);
+    }
+
+    /** Load our own AIK private key material for signing, or null on failure. */
+    private im.conversations.x3dhpq.types.AccountIdentityKey loadOwnAikKey() {
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(account.getUuid());
+        if (aikRow == null) return null;
+        try {
+            return im.conversations.x3dhpq.types.AccountIdentityKey.unmarshal(aikRow.aikPriv());
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, TAG + ": loadOwnAikKey failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Resolve a peer's AIK pub from any of their cached bundles, or null. */
+    private AccountIdentityPub resolvePeerAikCached(final Jid peerJid) {
+        final List<DatabaseBackend.X3dhpqRemoteDeviceRow> peerDevices =
+                db.listX3dhpqRemoteDevices(account.getUuid(), peerJid.asBareJid().toString());
+        for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd : peerDevices) {
+            final DatabaseBackend.X3dhpqRemoteBundleRow b =
+                    db.loadX3dhpqRemoteBundle(account.getUuid(), rd.peerJid(), rd.deviceId());
+            if (b != null && b.aikPubMarshal() != null) {
+                try {
+                    return AccountIdentityPub.unmarshal(b.aikPubMarshal());
+                } catch (final Exception ignored) {}
+            }
+        }
+        // Fall back to our own AIK if the subject is us.
+        if (account.getJid().asBareJid().equals(peerJid.asBareJid())) {
+            final DatabaseBackend.X3dhpqAccountIdentityRow row =
+                    db.loadX3dhpqAccountIdentity(account.getUuid());
+            if (row != null && row.aikPub() != null) {
+                try { return AccountIdentityPub.unmarshal(row.aikPub()); }
+                catch (final Exception ignored) {}
+            }
+        }
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // WS3: admin-set queries consumed by the group-admin GUI gating
+    // -------------------------------------------------------------------------
+
+    /** True if our own account is an owner or admin of the room (v2 admin-set, or
+     *  the v1 owner). Read-only; safe from the UI thread. */
+    public boolean isLocalAdminOrOwner(final Conversation conversation) {
+        if (conversation == null || conversation.getMode() != Conversation.MODE_MULTI) return false;
+        final RoomState st = rooms.get(conversation.getAddress().asBareJid().toString());
+        if (st == null) return false;
+        final DatabaseBackend.X3dhpqAccountIdentityRow row =
+                db.loadX3dhpqAccountIdentity(account.getUuid());
+        if (row == null || row.aikPub() == null) return false;
+        try {
+            final AccountIdentityPub myAik = AccountIdentityPub.unmarshal(row.aikPub());
+            return aikIsAdminOrOwner(st, myAik);
+        } catch (final Exception e) {
+            return false;
+        }
+    }
+
+    /** True if the given occupant is an owner or admin of the room. */
+    public boolean isOccupantAdminOrOwner(final Conversation conversation, final Jid memberBareJid) {
+        if (conversation == null || conversation.getMode() != Conversation.MODE_MULTI
+                || memberBareJid == null) {
+            return false;
+        }
+        final RoomState st = rooms.get(conversation.getAddress().asBareJid().toString());
+        if (st == null) return false;
+        final AccountIdentityPub aik = loadKnownAik(memberBareJid.asBareJid());
+        return aik != null && aikIsAdminOrOwner(st, aik);
+    }
+
+    private boolean aikIsAdminOrOwner(final RoomState st, final AccountIdentityPub aik) {
+        if (st.v2Active && st.dagState != null) {
+            final String low = JournalEntryV2.hex(blakeFpBytes(aik));
+            return st.dagState.admins.contains(low);
+        }
+        // v1 single-owner rooms: only the journal owner has authoring rights.
+        final AccountIdentityPub owner = st.journal.getOwnerAik();
+        return owner != null && owner.equals(aik);
+    }
+
+    // Membership/removed checks that consult whichever engine is live for the room.
+    private static boolean roomHasMember(final RoomState st, final String fpHexAnyCase) {
+        if (st.journal.isMember(fpHexAnyCase)) return true;
+        if (st.dagState != null) {
+            return st.dagState.members.contains(fpHexAnyCase.toLowerCase(java.util.Locale.ROOT));
+        }
+        return false;
+    }
+
+    private static boolean roomHasRemoved(final RoomState st, final String fpHexAnyCase) {
+        if (st.journal.isRemoved(fpHexAnyCase)) return true;
+        if (st.dagState != null) {
+            return st.dagState.removed.containsKey(fpHexAnyCase.toLowerCase(java.util.Locale.ROOT));
+        }
+        return false;
     }
 
     private static byte[] blakeFpBytes(final AccountIdentityPub aik) {
@@ -1082,7 +1485,7 @@ public class GroupCryptoService {
         if (aikRow == null) return false;
         final AccountIdentityPub myAik = AccountIdentityPub.unmarshal(aikRow.aikPub());
         final String myFpHex = MembershipJournal.fingerprintHex(blakeFpBytes(myAik));
-        return state.journal.isMember(myFpHex);
+        return roomHasMember(state, myFpHex);
     }
 
     // -------------------------------------------------------------------------
@@ -1263,7 +1666,7 @@ public class GroupCryptoService {
             return MemberTrust.UNVERIFIED;
         }
         final String fpHex = MembershipJournal.fingerprintHex(blakeFpBytes(aik));
-        return state.journal.isMember(fpHex) ? MemberTrust.VERIFIED : MemberTrust.UNVERIFIED;
+        return roomHasMember(state, fpHex) ? MemberTrust.VERIFIED : MemberTrust.UNVERIFIED;
     }
 
     /**

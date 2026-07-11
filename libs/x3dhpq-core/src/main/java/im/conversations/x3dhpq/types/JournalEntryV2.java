@@ -185,4 +185,117 @@ public final class JournalEntryV2 {
         for (final byte x : b) sb.append(String.format("%02x", x));
         return sb.toString();
     }
+
+    // -------------------------------------------------------------------------
+    // WS2 live-path helpers: signing builder + Snapshot payload codec.
+    // These add functionality only; they do NOT alter the wire layout of an
+    // entry (signedPart/marshal/unmarshal above), so the shared cross-client
+    // byte-vector remains locked.
+    // -------------------------------------------------------------------------
+
+    /** Raw 20-byte BLAKE2b-160 signer fingerprint of an AIK (== the on-wire signer_fp). */
+    public static byte[] signerFp(AccountIdentityPub aik) {
+        return X3dhpqCrypto.BLAKE2B_160.hash(aik.marshal());
+    }
+
+    /**
+     * Build a fully signed v2 entry authored by {@code signer}. Mirrors the
+     * test harness' sign() helper so live-emitted entries are byte-identical to
+     * the unit-tested vectors.
+     */
+    public static JournalEntryV2 signNew(
+            AccountIdentityKey signer, long lamport, List<byte[]> parents,
+            int action, byte[] payload, long timestamp) {
+        final byte[] fp = signerFp(signer.getPublic());
+        final JournalEntryV2 unsigned =
+                new JournalEntryV2(lamport, fp, parents, action, payload, timestamp,
+                        new byte[0], new byte[0]);
+        final byte[] sp = unsigned.signedPart();
+        final byte[] sigEd = X3dhpqCrypto.ed25519Sign(signer.getPrivEd25519(), sp);
+        final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(signer.getPrivMLDSA(), sp);
+        return new JournalEntryV2(lamport, fp, parents, action, payload, timestamp, sigEd, sigMl);
+    }
+
+    // ---- Snapshot (action=10) payload codec (§13.1a) ----
+    // Layout (big-endian):
+    //   owner_fp(20) | epoch(uint64) | member_count(uint32)
+    //   | { fp(20) | is_admin(uint8) }*
+    //   | banned_count(uint32) | { fp(20) | removal_epoch(uint32) }*
+
+    public static final class SnapshotMember {
+        public final byte[] fp;      // 20 bytes
+        public final boolean admin;
+        public SnapshotMember(byte[] fp, boolean admin) { this.fp = fp; this.admin = admin; }
+    }
+
+    public static final class SnapshotBanned {
+        public final byte[] fp;      // 20 bytes
+        public final long removalEpoch;
+        public SnapshotBanned(byte[] fp, long removalEpoch) { this.fp = fp; this.removalEpoch = removalEpoch; }
+    }
+
+    public static final class Snapshot {
+        public final byte[] ownerFp; // 20 bytes
+        public final long epoch;
+        public final List<SnapshotMember> members;
+        public final List<SnapshotBanned> banned;
+        public Snapshot(byte[] ownerFp, long epoch, List<SnapshotMember> members, List<SnapshotBanned> banned) {
+            this.ownerFp = ownerFp;
+            this.epoch = epoch;
+            this.members = members;
+            this.banned = banned;
+        }
+    }
+
+    public static byte[] buildSnapshotPayload(
+            byte[] ownerFp20, long epoch,
+            List<SnapshotMember> members, List<SnapshotBanned> banned) {
+        final int size = 20 + 8 + 4 + members.size() * 21 + 4 + banned.size() * 24;
+        final ByteBuffer buf = ByteBuffer.allocate(size).order(ByteOrder.BIG_ENDIAN);
+        buf.put(ownerFp20, 0, 20);
+        buf.putLong(epoch);
+        buf.putInt(members.size());
+        for (final SnapshotMember m : members) {
+            buf.put(m.fp, 0, 20);
+            buf.put((byte) (m.admin ? 0x01 : 0x00));
+        }
+        buf.putInt(banned.size());
+        for (final SnapshotBanned b : banned) {
+            buf.put(b.fp, 0, 20);
+            buf.putInt((int) (b.removalEpoch & 0xFFFFFFFFL));
+        }
+        return buf.array();
+    }
+
+    /** Parse a Snapshot payload; returns null on malformed input. */
+    public static Snapshot parseSnapshot(byte[] payload) {
+        if (payload == null || payload.length < 20 + 8 + 4) return null;
+        try {
+            final ByteBuffer buf = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN);
+            final byte[] ownerFp = new byte[20];
+            buf.get(ownerFp);
+            final long epoch = buf.getLong();
+            final int mc = buf.getInt();
+            if (mc < 0 || (long) buf.position() + (long) mc * 21 + 4 > payload.length) return null;
+            final List<SnapshotMember> members = new ArrayList<>(mc);
+            for (int i = 0; i < mc; i++) {
+                final byte[] fp = new byte[20];
+                buf.get(fp);
+                final boolean admin = (buf.get() & 0x01) != 0;
+                members.add(new SnapshotMember(fp, admin));
+            }
+            final int bc = buf.getInt();
+            if (bc < 0 || (long) buf.position() + (long) bc * 24 > payload.length) return null;
+            final List<SnapshotBanned> banned = new ArrayList<>(bc);
+            for (int i = 0; i < bc; i++) {
+                final byte[] fp = new byte[20];
+                buf.get(fp);
+                final long re = buf.getInt() & 0xFFFFFFFFL;
+                banned.add(new SnapshotBanned(fp, re));
+            }
+            return new Snapshot(ownerFp, epoch, members, banned);
+        } catch (final RuntimeException e) {
+            return null;
+        }
+    }
 }

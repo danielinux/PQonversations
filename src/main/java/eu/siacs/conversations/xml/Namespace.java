@@ -2,9 +2,15 @@ package eu.siacs.conversations.xml;
 
 public final class Namespace {
     public static final String ADDRESSING = "http://jabber.org/protocol/address";
+    // Workstream 5: OMEMO (XEP-0384) fallback namespace, restored alongside
+    // crypto/axolotl + model/axolotl so those packages (which reference these
+    // constants from their package-info.java @XmlPackage annotations) compile.
+    public static final String AXOLOTL = "eu.siacs.conversations.axolotl";
     public static final String BOB = "urn:xmpp:bob";
     public static final String PGP_SIGNED = "jabber:x:signed";
     public static final String PGP_ENCRYPTED = "jabber:x:encrypted";
+    public static final String AXOLOTL_BUNDLES = AXOLOTL + ".bundles";
+    public static final String AXOLOTL_DEVICE_LIST = AXOLOTL + ".devicelist";
     public static final String HINTS = "urn:xmpp:hints";
     public static final String MESSAGE_ARCHIVE_MANAGEMENT = "urn:xmpp:mam:2";
     public static final String VERSION = "jabber:iq:version";

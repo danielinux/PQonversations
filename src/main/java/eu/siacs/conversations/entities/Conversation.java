@@ -66,6 +66,12 @@ public class Conversation extends AbstractEntity
     // membership is governed solely by the signed journal, so membersOnly() is no
     // longer a reliable signal. Mirrors Dino's db.has_membership_journal().
     public static final String ATTRIBUTE_X3DHPQ_GROUP = "x3dhpq_group";
+    // Workstream 5: hard one-way "this peer has been seen x3dhpq-capable" latch.
+    // Set the first time X3dhpqService.isCapable() is true for this conversation,
+    // or the first time an inbound x3dhpq envelope is parsed for it (see
+    // MessageParser.parseX3dhpqChat). Once true, getNextEncryption() must never
+    // fall back to OMEMO/AXOLOTL again for this conversation (§15.4).
+    public static final String ATTRIBUTE_PQ_UPGRADED = "pq_upgraded";
     public static final String ATTRIBUTE_PINNED_ON_TOP = "pinned_on_top";
     static final String ATTRIBUTE_MUC_PASSWORD = "muc_password";
     static final String ATTRIBUTE_CAPS2_HASH = "muc_caps2_hash";
@@ -816,22 +822,93 @@ public class Conversation extends AbstractEntity
             return Message.ENCRYPTION_X3DHPQ;
         }
         if (OmemoSetting.isAlways()) {
-            return suitableForOmemoByDefault(this)
-                    ? Message.ENCRYPTION_X3DHPQ
-                    : Message.ENCRYPTION_NONE;
+            return computeDefaultEncryption();
         }
-        final int defaultEncryption;
-        if (suitableForOmemoByDefault(this)) {
-            defaultEncryption = OmemoSetting.getEncryption();
-        } else {
-            defaultEncryption = Message.ENCRYPTION_NONE;
-        }
+        final int defaultEncryption = computeDefaultEncryption();
         int encryption = this.getIntAttribute(ATTRIBUTE_NEXT_ENCRYPTION, defaultEncryption);
         if (encryption == Message.ENCRYPTION_OTR || encryption < 0) {
             return defaultEncryption;
         } else {
             return encryption;
         }
+    }
+
+    /**
+     * Workstream 5 — single outbound fork point for automatic encryption
+     * selection (i.e. absent an explicit per-conversation override stored in
+     * {@link #ATTRIBUTE_NEXT_ENCRYPTION}, and for the legacy "OMEMO always"
+     * preference).
+     *
+     * <p>Order: secret PQ groups are handled by the caller before this is
+     * reached. Otherwise: once the peer has ever been seen x3dhpq-capable
+     * (the {@link #ATTRIBUTE_PQ_UPGRADED} latch, or a fresh {@link
+     * eu.siacs.conversations.crypto.x3dhpq.X3dhpqService#isCapable(Conversation)}
+     * check) this conversation is latched to x3dhpq permanently — the latch
+     * is a hard one-way upgrade and this method must never return {@link
+     * Message#ENCRYPTION_AXOLOTL} again afterwards (§15.4 downgrade
+     * resistance). Absent that, OMEMO (axolotl) is used as the fallback when
+     * the peer advertises OMEMO devices; otherwise plaintext.
+     */
+    private int computeDefaultEncryption() {
+        if (!suitableForOmemoByDefault(this)) {
+            return Message.ENCRYPTION_NONE;
+        }
+        // WS4: device-enrollment re-trust gate. If the peer's identity looks like it
+        // silently reconstructed (§10.6.5) and the user has not yet explicitly
+        // re-trusted it, halt sending entirely rather than falling through to
+        // X3DHPQ/AXOLOTL.
+        if (getAccount().getX3dhpqService() != null
+                && getAccount().getX3dhpqService().isIdentityBlocked(this)) {
+            return Message.ENCRYPTION_NONE;
+        }
+        if (getBooleanAttribute(ATTRIBUTE_PQ_UPGRADED, false)
+                || getAccount().getX3dhpqService().isCapable(this)) {
+            markPqUpgraded();
+            return Message.ENCRYPTION_X3DHPQ;
+        }
+        if (mode == MODE_SINGLE) {
+            final eu.siacs.conversations.crypto.axolotl.AxolotlService axolotlService =
+                    getAccount().getAxolotlService();
+            if (axolotlService != null && !axolotlService.hasEmptyDeviceList(getAddress())) {
+                return Message.ENCRYPTION_AXOLOTL;
+            }
+        }
+        return Message.ENCRYPTION_NONE;
+    }
+
+    /**
+     * Sets the hard one-way x3dhpq upgrade latch ({@link #ATTRIBUTE_PQ_UPGRADED}) if
+     * not already set. Idempotent. Called both from {@link #computeDefaultEncryption()}
+     * (first time {@code isCapable()} is observed true) and from {@code
+     * MessageParser#parseX3dhpqChat} on any inbound x3dhpq envelope (proof of
+     * capability even before an outbound send is attempted).
+     */
+    public boolean markPqUpgraded() {
+        if (getBooleanAttribute(ATTRIBUTE_PQ_UPGRADED, false)) {
+            return false;
+        }
+        return setAttribute(ATTRIBUTE_PQ_UPGRADED, true);
+    }
+
+    /**
+     * True once this conversation has latched to x3dhpq (§15.4). Once true,
+     * {@link #getNextEncryption()} will never again resolve to OMEMO/AXOLOTL.
+     */
+    public boolean isPqUpgraded() {
+        return getBooleanAttribute(ATTRIBUTE_PQ_UPGRADED, false);
+    }
+
+    /**
+     * True if this conversation is latched to x3dhpq but the peer's current
+     * capability has regressed (e.g. their devicelist/bundle vanished) so that
+     * an outbound send could no longer use x3dhpq. Callers (UI / send path)
+     * should surface the §15.4 downgrade warning in this case instead of
+     * silently falling back to OMEMO/plaintext.
+     */
+    public boolean isPqDowngradeRisk() {
+        return mode == MODE_SINGLE
+                && isPqUpgraded()
+                && !getAccount().getX3dhpqService().isCapable(this);
     }
 
     public boolean setNextEncryption(int encryption) {

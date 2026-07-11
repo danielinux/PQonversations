@@ -14,6 +14,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.primitives.Longs;
 import de.gultsch.common.Patterns;
 import eu.siacs.conversations.Config;
+import eu.siacs.conversations.crypto.axolotl.AxolotlService;
+import eu.siacs.conversations.crypto.axolotl.FingerprintStatus;
 import eu.siacs.conversations.http.URL;
 import eu.siacs.conversations.persistance.FileBackend;
 import eu.siacs.conversations.services.AvatarService;
@@ -52,6 +54,9 @@ public class Message extends AbstractEntity
     public static final int ENCRYPTION_OTR = 2;
     public static final int ENCRYPTION_DECRYPTED = 3;
     public static final int ENCRYPTION_DECRYPTION_FAILED = 4;
+    public static final int ENCRYPTION_AXOLOTL = 5;
+    public static final int ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE = 6;
+    public static final int ENCRYPTION_AXOLOTL_FAILED = 7;
     // x3dhpq hybrid post-quantum encryption (Wave D6)
     public static final int ENCRYPTION_X3DHPQ = 8;
     public static final int ENCRYPTION_X3DHPQ_NOT_FOR_THIS_DEVICE = 9;
@@ -980,6 +985,15 @@ public class Message extends AbstractEntity
         return axolotlFingerprint;
     }
 
+    public boolean isTrusted() {
+        final AxolotlService axolotlService = conversation.getAccount().getAxolotlService();
+        final FingerprintStatus s =
+                axolotlService != null
+                        ? axolotlService.getFingerprintTrust(axolotlFingerprint)
+                        : null;
+        return s != null && s.isTrusted();
+    }
+
     private int getPreviousEncryption() {
         for (Message iterator = this.prev(); iterator != null; iterator = iterator.prev()) {
             if (iterator.isCarbon() || iterator.getStatus() == STATUS_RECEIVED) {
@@ -1021,6 +1035,10 @@ public class Message extends AbstractEntity
     private static int getCleanedEncryption(int encryption) {
         if (encryption == ENCRYPTION_DECRYPTED || encryption == ENCRYPTION_DECRYPTION_FAILED) {
             return ENCRYPTION_PGP;
+        }
+        if (encryption == ENCRYPTION_AXOLOTL_NOT_FOR_THIS_DEVICE
+                || encryption == ENCRYPTION_AXOLOTL_FAILED) {
+            return ENCRYPTION_AXOLOTL;
         }
         return encryption;
     }

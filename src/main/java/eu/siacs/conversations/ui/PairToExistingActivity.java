@@ -3,6 +3,7 @@ package eu.siacs.conversations.ui;
 
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,13 +12,16 @@ import android.text.TextWatcher;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.google.zxing.WriterException;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.R;
 import eu.siacs.conversations.crypto.x3dhpq.PairingSessionService;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.persistance.DatabaseBackend;
+import eu.siacs.conversations.services.BarcodeProvider;
 import eu.siacs.conversations.xmpp.Jid;
 import im.conversations.x3dhpq.protocol.PairingFsm;
 import im.conversations.x3dhpq.types.DeviceCertificate;
@@ -45,6 +49,10 @@ public class PairToExistingActivity extends XmppActivity {
     private EditText mCodeInput;
     private Button mPairButton;
     private TextView mStatusView;
+    private Button mShowMyCodeButton;
+    private android.view.View mShowMyCodeContainer;
+    private TextView mMyCodeView;
+    private ImageView mMyQrView;
 
     // ---- State ----
     private String mAccountUuid;
@@ -115,13 +123,19 @@ public class PairToExistingActivity extends XmppActivity {
         mCodeInput = findViewById(R.id.pairing_code_input);
         mPairButton = findViewById(R.id.pair_button);
         mStatusView = findViewById(R.id.pair_status);
+        mShowMyCodeButton = findViewById(R.id.show_my_code_button);
+        mShowMyCodeContainer = findViewById(R.id.show_my_code_container);
+        mMyCodeView = findViewById(R.id.my_pairing_code);
+        mMyQrView = findViewById(R.id.my_pairing_qr);
 
         // Buttons disabled until backend is connected.
         mScanQrButton.setEnabled(false);
         mPairButton.setEnabled(false);
+        mShowMyCodeButton.setEnabled(false);
 
         mScanQrButton.setOnClickListener(v -> launchQrScanner());
         mPairButton.setOnClickListener(v -> onPairButtonClicked());
+        mShowMyCodeButton.setOnClickListener(v -> onShowMyCodeClicked());
 
         // Auto-format the manual code input as the user types.
         mCodeInput.addTextChangedListener(new PairingCodeWatcher());
@@ -156,6 +170,7 @@ public class PairToExistingActivity extends XmppActivity {
 
         mScanQrButton.setEnabled(true);
         mPairButton.setEnabled(true);
+        mShowMyCodeButton.setEnabled(true);
     }
 
     @Override
@@ -326,6 +341,85 @@ public class PairToExistingActivity extends XmppActivity {
                 Log.w(Config.LOGTAG, LOGTAG + ": X3dhpqService unavailable; cannot publish pair-hello");
             }
         }
+    }
+
+    // ---- §10.6.2 "new-device-presents" direction ----
+
+    /**
+     * This pending device generates its OWN code/QR and displays it, instead of
+     * consuming one shown by an existing device. The FSM convention (§10.1a) is
+     * unchanged — the EXISTING device always sends {@code PairingMsgPAKE1} first — so
+     * this device just registers the New-side FSM immediately (mirroring {@link
+     * #startPairingAsNew}) and waits. A human reads the code (or scans the QR) off
+     * this screen and enters/scans it on the existing/primary device's "Confirm a new
+     * device" screen, which drives {@code startAsExisting} straight at our full JID —
+     * no separate rendezvous round-trip is required for the QR path since the QR
+     * already carries our full JID + code + sid. We ALSO publish a {@code
+     * <pair-hello>} (method B) so a primary that is only passively listening (not
+     * actively scanning) still gets a prompt with our JID + sid ready for the user to
+     * type our code into.
+     */
+    private void onShowMyCodeClicked() {
+        if (mAccount == null || mPairingService == null) {
+            return;
+        }
+        mShowMyCodeButton.setEnabled(false);
+        mScanQrButton.setEnabled(false);
+        mPairButton.setEnabled(false);
+
+        final SecureRandom rng = new SecureRandom();
+        final StringBuilder nineSb = new StringBuilder(9);
+        for (int i = 0; i < 9; i++) {
+            nineSb.append((char) ('0' + rng.nextInt(10)));
+        }
+        final String nineDigits = nineSb.toString();
+        final String rawCode = nineDigits + PairingCode.luhnCheckChar(nineDigits);
+        mMyCodeView.setText(PairingCode.format(rawCode));
+
+        final byte[] sid = new byte[32];
+        rng.nextBytes(sid);
+
+        final Jid ownFullJid = mAccount.getJid();
+        try {
+            // Register the New-side FSM now; the existing/primary device's PAKE1 will
+            // arrive addressed to our full JID and be routed to this FSM by sid —
+            // exactly the same inbound path prepareAsNew always relied on.
+            mPairingService.prepareAsNew(sid, rawCode, ownFullJid.asBareJid());
+        } catch (final Exception e) {
+            Log.e(Config.LOGTAG, LOGTAG + ": prepareAsNew (show-my-code) failed", e);
+            mStatusView.setText(
+                    getString(
+                            R.string.x3dhpq_pair_status_failed,
+                            e.getMessage() != null ? e.getMessage() : "setup failed"));
+            mShowMyCodeButton.setEnabled(true);
+            mScanQrButton.setEnabled(true);
+            mPairButton.setEnabled(true);
+            return;
+        }
+
+        // Render our own QR: xmppqr-pair:<our_full_jid>?code=<code>&sid=<sid> — an
+        // existing device that scans this learns our full JID + code + sid in one
+        // step and can call startAsExisting immediately.
+        final String sidB64 = Base64.getUrlEncoder().withoutPadding().encodeToString(sid);
+        final String qrUri = "xmppqr-pair:" + ownFullJid + "?code=" + rawCode + "&sid=" + sidB64;
+        try {
+            final Bitmap bm = BarcodeProvider.create2dBarcodeBitmap(qrUri, 512);
+            mMyQrView.setImageBitmap(bm);
+        } catch (final WriterException e) {
+            Log.e(Config.LOGTAG, LOGTAG + ": could not render QR code", e);
+            mMyQrView.setVisibility(android.view.View.GONE);
+        }
+        mShowMyCodeContainer.setVisibility(android.view.View.VISIBLE);
+
+        // Method B fallback (no camera on the primary side): a self-PEP pair-hello
+        // lets a passively-listening primary prompt the user to type the code shown
+        // here, without requiring a scan.
+        final var x3dhpqService = mAccount.getX3dhpqService();
+        if (x3dhpqService != null) {
+            x3dhpqService.publishPairHello(sid);
+        }
+
+        mStatusView.setText(R.string.x3dhpq_pair_status_waiting);
     }
 
     // ---- Core initiation ----

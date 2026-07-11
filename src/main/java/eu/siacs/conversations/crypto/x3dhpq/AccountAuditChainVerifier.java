@@ -256,6 +256,42 @@ public final class AccountAuditChainVerifier {
         }
     }
 
+    /**
+     * Posts a free-form security-event notification (§10.6.3 unconfirmed sibling,
+     * §10.6.5 identity reconstruction). Unlike {@link #notifyNewEntries}, this is not
+     * tied to a specific verified audit entry — callers use it for events that are
+     * detected OUTSIDE the chain itself (e.g. a devicelist entry with no covering
+     * {@code AddDevice}, or an AIK-signature mismatch against a pinned peer AIK).
+     *
+     * @param subjectAddress bare JID used as both the notification title and the seed
+     *                       for a stable-per-subject notification id (so a repeat event
+     *                       for the same subject updates rather than stacks).
+     * @param text           human-readable body describing the event.
+     */
+    public void notifySecurityEvent(final String subjectAddress, final String text) {
+        if (subjectAddress == null || text == null) {
+            return;
+        }
+        ensureNotificationChannel();
+        final NotificationManagerCompat nm = NotificationManagerCompat.from(ctx);
+        final int notifId = subjectAddress.hashCode() ^ 0x53455343; // 'SESC' salt, distinct from per-entry ids
+        final NotificationCompat.Builder builder =
+                new NotificationCompat.Builder(ctx, X3DHPQ_AUDIT_CHANNEL)
+                        .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                        .setContentTitle(subjectAddress)
+                        .setContentText(text)
+                        .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setAutoCancel(true);
+        try {
+            nm.notify(notifId, builder.build());
+            Log.d(TAG, LOGPREFIX + ": notifySecurityEvent posted for " + subjectAddress);
+        } catch (SecurityException e) {
+            Log.d(TAG, LOGPREFIX + ": notifySecurityEvent SecurityException (no permission): "
+                    + e.getMessage());
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
