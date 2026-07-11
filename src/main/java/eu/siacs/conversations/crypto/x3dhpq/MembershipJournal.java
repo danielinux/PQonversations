@@ -118,6 +118,11 @@ public final class MembershipJournal {
             }
         } else {
             if (lastHash == null || !Arrays.equals(prevHash, lastHash)) {
+                final StringBuilder p = new StringBuilder(), l = new StringBuilder();
+                for (byte b : prevHash) p.append(String.format("%02x", b));
+                if (lastHash != null) for (byte b : lastHash) l.append(String.format("%02x", b));
+                android.util.Log.w(Config.LOGTAG, "MJ-CHAIN seq=" + entry.getSeq()
+                        + " entry.prevHash=" + p + " ourLastHash=" + l);
                 throw new IllegalArgumentException("MembershipJournal: chain link broken at seq " + entry.getSeq());
             }
         }
