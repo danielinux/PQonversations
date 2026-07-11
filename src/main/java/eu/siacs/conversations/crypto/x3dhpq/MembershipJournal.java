@@ -145,6 +145,15 @@ public final class MembershipJournal {
                 ownerAik.getPubEd25519(), signedPart, entry.getSigEd25519());
         boolean mlOk = X3dhpqCrypto.mldsa65Verify(
                 ownerAik.getPubMLDSA(), signedPart, entry.getSigMLDSA());
+        {
+            final StringBuilder sp = new StringBuilder();
+            for (int i = 0; i < Math.min(signedPart.length, 60); i++) sp.append(String.format("%02x", signedPart[i]));
+            android.util.Log.w(Config.LOGTAG, "MJ-DIAG seq=" + entry.getSeq()
+                    + " ownerFp=" + ownerAik.fingerprint(X3dhpqCrypto.BLAKE2B_160).replace(" ", "")
+                    + " spLen=" + signedPart.length + " edSig=" + entry.getSigEd25519().length
+                    + " mlSig=" + entry.getSigMLDSA().length
+                    + " edOk=" + edOk + " mlOk=" + mlOk + " spHead=" + sp);
+        }
         if (!edOk || !mlOk) {
             throw new IllegalArgumentException(
                     "MembershipJournal: signature verification failed at seq " + entry.getSeq()
