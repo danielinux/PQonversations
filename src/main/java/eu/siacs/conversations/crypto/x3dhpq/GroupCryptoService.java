@@ -95,54 +95,50 @@ public class GroupCryptoService {
     // -------------------------------------------------------------------------
 
     /**
-     * Subscribe to the room's group:0 PEP node and fetch all journal items.
-     * Call on MUC join.
+     * WS1: ensure per-room state exists and force a MUC MAM catch-up so we replay
+     * every {@code <journal-entry>} the owner/admins broadcast on the room channel
+     * before we joined. The journal no longer lives on a room-JID PubSub node
+     * (stock MUC services don't serve it to members); it rides the shared,
+     * server-archived (MAM) MUC groupchat channel and is ingested via
+     * {@link #ingestJournalEntry} from the message parser (live + MAM). Call on
+     * MUC join.
      */
     public void subscribeAndCatchUp(final Jid roomJid) {
         if (account == null || mXmppConnectionService == null) return;
         final String roomStr = roomJid.asBareJid().toString();
-        rooms.putIfAbsent(roomStr, new RoomState());
-
-        // Send explicit pubsub subscribe IQ
-        account.getX3dhpqService().subscribeToRoomGroupNode(roomJid.asBareJid());
-
-        // Fetch all current items
-        final Iq fetchIq = buildFetchAllItemsIq(roomJid.asBareJid(), Namespace.X3DHPQ_GROUP);
-        mXmppConnectionService.sendIqPacket(account, fetchIq, response -> {
-            if (response.getType() != Iq.Type.RESULT) {
-                Log.d(Config.LOGTAG, TAG + ": group:0 fetch returned non-RESULT for "
-                        + roomJid + ": " + response.getType());
-                return;
-            }
-            final PubSub pubsub = response.getExtension(PubSub.class);
-            if (pubsub == null) return;
-            final Items items = pubsub.getItems();
-            if (items == null) return;
-            for (final var entry : items.getItemMap(MembershipEntry.class).entrySet()) {
-                final String itemId = entry.getKey();
-                final MembershipEntry me = entry.getValue();
-                if (me == null) continue;
-                final byte[] payload = me.asBytes();
-                processMembershipEntryBytes(roomJid.asBareJid(), itemId, payload);
-            }
-            // After catch-up, flush queued announcements
-            flushAnnouncementQueue(roomStr);
-        });
+        final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
+        triggerMamCatchupAfterChain(roomJid.asBareJid(), state);
     }
 
     /**
-     * Process a {@code <membership-entry>} PEP event received via +notify.
+     * WS1: ingest a journal entry delivered as a {@code <journal-entry>} child of
+     * a type='groupchat' message (live or replayed from MUC MAM). Bytes are the
+     * same marshalled AuditEntry the PubSub path used, so verification/replay is
+     * unchanged. A stable content-derived id dedups duplicate MAM/live copies.
      */
-    public void onMembershipEvent(final Jid roomJid, final String itemId, final MembershipEntry entry) {
-        if (entry == null) return;
-        final byte[] payload = entry.asBytes();
-        processMembershipEntryBytes(roomJid.asBareJid(), itemId, payload);
+    public void ingestJournalEntry(final Jid roomJid, final byte[] entryBytes) {
+        if (roomJid == null || entryBytes == null || entryBytes.length == 0) return;
+        final String itemId = journalEntryDedupId(entryBytes);
+        processMembershipEntryBytes(roomJid.asBareJid(), itemId, entryBytes);
         flushAnnouncementQueue(roomJid.asBareJid().toString());
         // Surface the membership change (add/remove) to the UI so the roster and
         // conversation views reflect the new group state without a manual refresh.
         if (mXmppConnectionService != null) {
             mXmppConnectionService.updateConversationUi();
             mXmppConnectionService.updateMucRosterUi();
+        }
+    }
+
+    // Content-derived dedup key so the same entry arriving via live delivery and
+    // via MUC MAM replay is applied at most once.
+    private static String journalEntryDedupId(final byte[] entryBytes) {
+        try {
+            final byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(entryBytes);
+            final StringBuilder sb = new StringBuilder("je-");
+            for (int i = 0; i < 12; i++) sb.append(String.format("%02x", h[i]));
+            return sb.toString();
+        } catch (final java.security.NoSuchAlgorithmException e) {
+            return "je-" + entryBytes.length;
         }
     }
 
@@ -810,21 +806,7 @@ public class GroupCryptoService {
                         payload, ts, sigEd, sigMl);
         final byte[] entryBytes = signed.marshal();
 
-        // Build publish IQ targeted at the room JID.
-        final Iq iq = new Iq(Iq.Type.SET);
-        iq.setTo(roomBare);
-        final im.conversations.android.xmpp.model.pubsub.PubSub ps =
-                iq.addExtension(new im.conversations.android.xmpp.model.pubsub.PubSub());
-        final im.conversations.android.xmpp.model.pubsub.Publish pub =
-                ps.addExtension(new im.conversations.android.xmpp.model.pubsub.Publish());
-        pub.setNode(Namespace.X3DHPQ_GROUP);
-        final im.conversations.android.xmpp.model.pubsub.PubSub.Item item =
-                pub.addExtension(new im.conversations.android.xmpp.model.pubsub.PubSub.Item());
-        item.setId(Long.toString(seq));
-        final MembershipEntry me = item.addExtension(new MembershipEntry());
-        me.setContent(entryBytes);
-
-        Log.d(Config.LOGTAG, TAG + ": publishing membership entry seq=" + seq
+        Log.d(Config.LOGTAG, TAG + ": broadcasting membership entry seq=" + seq
                 + " action=AddMember to " + roomBare);
 
         // Optimistically append to local journal so subsequent calls in the
@@ -843,18 +825,11 @@ public class GroupCryptoService {
                 rebuildGroupSession(roomBare.toString(), st);
             }
         } catch (Exception e) {
-            Log.w(Config.LOGTAG, TAG + ": local append after publish failed (will rely on +notify): "
+            Log.w(Config.LOGTAG, TAG + ": local append after broadcast failed (will rely on MAM): "
                     + e.getMessage());
         }
 
-        mXmppConnectionService.sendIqPacket(account, iq, response -> {
-            if (response.getType() == Iq.Type.ERROR) {
-                Log.w(Config.LOGTAG, TAG + ": membership entry seq=" + seq
-                        + " publish failed: " + response);
-            } else {
-                Log.d(Config.LOGTAG, TAG + ": membership entry seq=" + seq + " published");
-            }
-        });
+        broadcastJournalEntry(roomBare, entryBytes);
     }
 
     /**
@@ -893,26 +868,12 @@ public class GroupCryptoService {
                         payload, ts, sigEd, sigMl);
         final byte[] entryBytes = signed.marshal();
 
-        // Build publish IQ targeted at the room JID.
-        final Iq iq = new Iq(Iq.Type.SET);
-        iq.setTo(roomBare);
-        final im.conversations.android.xmpp.model.pubsub.PubSub ps =
-                iq.addExtension(new im.conversations.android.xmpp.model.pubsub.PubSub());
-        final im.conversations.android.xmpp.model.pubsub.Publish pub =
-                ps.addExtension(new im.conversations.android.xmpp.model.pubsub.Publish());
-        pub.setNode(Namespace.X3DHPQ_GROUP);
-        final im.conversations.android.xmpp.model.pubsub.PubSub.Item item =
-                pub.addExtension(new im.conversations.android.xmpp.model.pubsub.PubSub.Item());
-        item.setId(Long.toString(seq));
-        final MembershipEntry me = item.addExtension(new MembershipEntry());
-        me.setContent(entryBytes);
-
-        Log.d(Config.LOGTAG, TAG + ": publishing membership entry seq=" + seq
+        Log.d(Config.LOGTAG, TAG + ": broadcasting membership entry seq=" + seq
                 + " action=RemoveMember to " + roomBare);
 
         // Optimistically apply to the local journal + session so the removal and
-        // epoch rotation take effect immediately; the +notify echo is later
-        // ignored as a seq gap. The AIK map teaches the journal this member's
+        // epoch rotation take effect immediately; the MAM/live echo is later
+        // ignored as a duplicate. The AIK map teaches the journal this member's
         // pub key (also used for signature bootstrap on the owner's own device).
         final Map<String, AccountIdentityPub> aikLookup = new HashMap<>();
         aikLookup.put(MembershipJournal.fingerprintHex(memberFpRaw), memberAik);
@@ -926,18 +887,37 @@ public class GroupCryptoService {
                 rebuildGroupSession(roomBare.toString(), st);
             }
         } catch (Exception e) {
-            Log.w(Config.LOGTAG, TAG + ": local append after remove publish failed"
-                    + " (will rely on +notify): " + e.getMessage());
+            Log.w(Config.LOGTAG, TAG + ": local append after remove broadcast failed"
+                    + " (will rely on MAM): " + e.getMessage());
         }
 
-        mXmppConnectionService.sendIqPacket(account, iq, response -> {
-            if (response.getType() == Iq.Type.ERROR) {
-                Log.w(Config.LOGTAG, TAG + ": membership entry seq=" + seq
-                        + " publish failed: " + response);
-            } else {
-                Log.d(Config.LOGTAG, TAG + ": membership entry seq=" + seq + " published");
-            }
-        });
+        broadcastJournalEntry(roomBare, entryBytes);
+    }
+
+    /**
+     * WS1: distribute a signed journal entry to a room by sending it as a
+     * {@code <journal-entry>} child of an ordinary {@code type='groupchat'}
+     * message. This replaces the room-JID PubSub node that stock MUC services
+     * (ejabberd mod_muc) do not serve to members. The MUC channel is a single
+     * shared, server-archived (MAM) log every member already reads; late joiners
+     * catch up via MUC MAM (see {@link #triggerMamCatchupAfterChain}). A groupchat
+     * message carries no IQ result, so delivery is fire-and-forget; authenticity
+     * is enforced client-side by the entry's hybrid AIK signature.
+     */
+    private void broadcastJournalEntry(final Jid roomBare, final byte[] entryBytes) {
+        final im.conversations.android.xmpp.model.stanza.Message packet =
+                new im.conversations.android.xmpp.model.stanza.Message();
+        packet.setTo(roomBare);
+        packet.setType(im.conversations.android.xmpp.model.stanza.Message.Type.GROUPCHAT);
+        packet.setFrom(account.getJid());
+        final im.conversations.android.xmpp.model.x3dhpq.envelope.JournalEntry je =
+                packet.addExtension(
+                        new im.conversations.android.xmpp.model.x3dhpq.envelope.JournalEntry());
+        je.setContent(entryBytes);
+        // A <body> is required for stock MUC services to archive the message in
+        // MAM (many only archive messages carrying a body); receivers suppress it.
+        packet.setBody("[x3dhpq group membership update]");
+        mXmppConnectionService.sendMessagePacket(account, packet);
     }
 
     /**

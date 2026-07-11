@@ -449,6 +449,9 @@ public class MessageParser extends AbstractParser
         final var x3dhpqEnvelope = packet.getOnlyExtension(Envelope.class);
         final var x3dhpqGroupEnvelope = packet.getOnlyExtension(
                 im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup.class);
+        // WS1: membership-journal record carried on the MUC groupchat channel.
+        final var x3dhpqJournalEntry = packet.getOnlyExtension(
+                im.conversations.android.xmpp.model.x3dhpq.envelope.JournalEntry.class);
         // TODO this can probably be refactored to be final
         int status;
         final Jid counterpart;
@@ -564,6 +567,21 @@ public class MessageParser extends AbstractParser
                             query,
                             false);
             final boolean conversationMultiMode = conversation.getMode() == Conversation.MODE_MULTI;
+
+            // WS1: a <journal-entry> is a group membership-journal record riding
+            // the MUC groupchat channel. Ingest it into GroupCryptoService and
+            // consume the stanza (it has no user-visible content). Reaches here
+            // for both live delivery and MUC MAM replay.
+            if (x3dhpqJournalEntry != null && isTypeGroupChat) {
+                final byte[] jbytes = x3dhpqJournalEntry.asBytes();
+                if (jbytes != null && jbytes.length > 0) {
+                    final var gcs = mXmppConnectionService.getGroupCryptoService(account);
+                    if (gcs != null) {
+                        gcs.ingestJournalEntry(conversation.getAddress().asBareJid(), jbytes);
+                    }
+                }
+                return;
+            }
 
             if (serverMsgId == null) {
                 serverMsgId =
