@@ -234,7 +234,8 @@ public class MultiUserChatManager extends AbstractManager {
         final MucOptions mucOptions = getOrCreateState(conversation);
         if (mucOptions.nonanonymous()
                 && !mucOptions.membersOnly()
-                && !conversation.getBooleanAttribute("accept_non_anonymous", false)) {
+                && !conversation.getBooleanAttribute("accept_non_anonymous", false)
+                && !conversation.isX3dhpqSecretGroup()) {
             synchronized (this.inProgressConferenceJoins) {
                 this.inProgressConferenceJoins.remove(conversation);
             }
@@ -785,6 +786,13 @@ public class MultiUserChatManager extends AbstractManager {
                 getManager(MultiUserChatManager.class).pingAndRejoin(conversation);
             } else {
                 conversation.getMucOptions().setPassword(invite.password);
+                // We were explicitly invited to this room, so joining it (and thus
+                // revealing our real JID to its members) is intended. Record that
+                // consent up front, otherwise checkConfigurationSendPresenceFetchHistory
+                // aborts the join before sending presence for an OPEN, non-anonymous
+                // room (exactly an x3dhpq secret group: membersOnly=false +
+                // whois=anyone), and the invitee never actually enters the room.
+                conversation.setAttribute("accept_non_anonymous", true);
                 this.service.databaseBackend.updateConversation(conversation);
                 if (contact != null && contact.showInContactList()) {
                     getManager(MultiUserChatManager.class).joinFollowingInvite(conversation);
