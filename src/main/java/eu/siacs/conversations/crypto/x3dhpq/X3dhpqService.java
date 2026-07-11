@@ -1574,6 +1574,14 @@ public class X3dhpqService {
      */
     public void sendSenderChainAnnouncement(
             final Jid peerBareJid, final int peerDeviceId, final byte[] annBytes) {
+        sendSenderChainAnnouncement(peerBareJid, peerDeviceId, annBytes, "sender-chain");
+    }
+
+    // payloadType is "sender-chain" (bare announcement) or "group-sync" (the
+    // announcement bundled with the membership journal, see GroupCryptoService).
+    public void sendSenderChainAnnouncement(
+            final Jid peerBareJid, final int peerDeviceId, final byte[] annBytes,
+            final String payloadType) {
         if (db == null || account == null || mXmppConnectionService == null) return;
         final String accountUuid = account.getUuid();
 
@@ -1615,6 +1623,7 @@ public class X3dhpqService {
         // Build an XmppX3dhpqMessage carrying the announcement as payload
         final XmppX3dhpqMessage xmsg = XmppX3dhpqMessage.createOutboundWithRawPayload(
                 account, account.getJid(), ownDeviceId, annBytes);
+        xmsg.setPayloadType(payloadType);
         xmsg.addRecipient(peerBareJid, peerDeviceId, session, isFirst, prekeyMeta);
 
         final im.conversations.android.xmpp.model.stanza.Message packet =

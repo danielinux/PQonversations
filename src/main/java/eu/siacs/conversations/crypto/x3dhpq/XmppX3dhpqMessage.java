@@ -130,9 +130,15 @@ public class XmppX3dhpqMessage {
     }
 
     private boolean senderChainPayload = false;
+    private String payloadTypeOverride = null;
 
     public boolean isSenderChainPayload() {
         return senderChainPayload;
+    }
+
+    /** Override the &lt;payload type&gt; attribute (e.g. "group-sync"). */
+    public void setPayloadType(final String type) {
+        this.payloadTypeOverride = type;
     }
 
     /**
@@ -195,7 +201,9 @@ public class XmppX3dhpqMessage {
 
         final Payload payload = new Payload();
         payload.setContent(payloadCiphertext);
-        if (senderChainPayload) {
+        if (payloadTypeOverride != null) {
+            payload.setType(payloadTypeOverride);
+        } else if (senderChainPayload) {
             payload.setType("sender-chain");
         }
         env.setPayload(payload);

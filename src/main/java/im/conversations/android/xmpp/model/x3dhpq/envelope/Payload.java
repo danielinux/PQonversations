@@ -26,4 +26,10 @@ public class Payload extends Extension implements ByteContent {
     public boolean isSenderChain() {
         return "sender-chain".equals(getType());
     }
+
+    // "group-sync" bundles the SenderChainAnnouncement with the membership journal
+    // (delivered over the pairwise channel so it doesn't depend on MUC MAM).
+    public boolean isGroupSync() {
+        return "group-sync".equals(getType());
+    }
 }

@@ -240,7 +240,8 @@ public class MessageParser extends AbstractParser
     private void parseX3dhpqSenderChain(
             final im.conversations.android.xmpp.model.x3dhpq.envelope.Envelope envelopeEl,
             final Jid from,
-            final eu.siacs.conversations.entities.Account account) {
+            final eu.siacs.conversations.entities.Account account,
+            final boolean isGroupSync) {
         final X3dhpqService x3dhpqService = account.getX3dhpqService();
         if (x3dhpqService == null) return;
         final Integer myDeviceIdObj = x3dhpqService.getOwnDeviceIdOrNull();
@@ -295,7 +296,11 @@ public class MessageParser extends AbstractParser
         final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
                 mXmppConnectionService.getGroupCryptoService(account);
         if (gcs != null) {
-            gcs.onSenderChainAnnouncementReceived(from, incoming.senderDeviceId, annBytes);
+            if (isGroupSync) {
+                gcs.onGroupSyncReceived(from, incoming.senderDeviceId, annBytes);
+            } else {
+                gcs.onSenderChainAnnouncementReceived(from, incoming.senderDeviceId, annBytes);
+            }
         }
     }
 
@@ -687,8 +692,8 @@ public class MessageParser extends AbstractParser
                 // First check for sender-chain announcement payload.
                 try {
                     final var payloadEl = x3dhpqEnvelope.getPayload();
-                    if (payloadEl != null && payloadEl.isSenderChain()) {
-                        parseX3dhpqSenderChain(x3dhpqEnvelope, from, account);
+                    if (payloadEl != null && (payloadEl.isSenderChain() || payloadEl.isGroupSync())) {
+                        parseX3dhpqSenderChain(x3dhpqEnvelope, from, account, payloadEl.isGroupSync());
                         return;
                     }
                     message = parseX3dhpqChat(x3dhpqEnvelope, from, conversation, status);

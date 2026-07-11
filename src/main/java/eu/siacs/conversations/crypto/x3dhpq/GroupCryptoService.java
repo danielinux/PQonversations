@@ -147,6 +147,78 @@ public class GroupCryptoService {
         }
     }
 
+    // ---- group-sync: bundle the journal with the sender-chain announcement ----
+    // Layout (big-endian): uint16 version(=1) | uint32 annLen | ann |
+    //                      uint32 n | { uint32 entryLen | entry } * n
+    // Byte-identical to the Dino (Vala) build_group_sync_bytes.
+
+    private byte[] buildGroupSyncBytes(final byte[] annBytes, final RoomState state) {
+        final java.util.List<byte[]> entries = state.journal.getMarshalledEntries();
+        int total = 2 + 4 + annBytes.length + 4;
+        for (final byte[] e : entries) total += 4 + e.length;
+        final java.nio.ByteBuffer buf =
+                java.nio.ByteBuffer.allocate(total).order(java.nio.ByteOrder.BIG_ENDIAN);
+        buf.putShort((short) 1);
+        buf.putInt(annBytes.length);
+        buf.put(annBytes);
+        buf.putInt(entries.size());
+        for (final byte[] e : entries) { buf.putInt(e.length); buf.put(e); }
+        return buf.array();
+    }
+
+    // Returns {annBytes, entry0, entry1, ...} (ann at index 0), or null if malformed.
+    private static byte[][] parseGroupSync(final byte[] b) {
+        try {
+            final java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(b).order(java.nio.ByteOrder.BIG_ENDIAN);
+            final int ver = buf.getShort() & 0xFFFF;
+            if (ver != 1) return null;
+            final int annLen = buf.getInt();
+            if (annLen < 0 || annLen > buf.remaining()) return null;
+            final byte[] ann = new byte[annLen];
+            buf.get(ann);
+            final int n = buf.getInt();
+            if (n < 0 || n > 1_000_000) return null;
+            final java.util.List<byte[]> out = new java.util.ArrayList<>();
+            out.add(ann);
+            for (int i = 0; i < n; i++) {
+                final int len = buf.getInt();
+                if (len < 0 || len > buf.remaining()) return null;
+                final byte[] e = new byte[len];
+                buf.get(e);
+                out.add(e);
+            }
+            return out.toArray(new byte[0][]);
+        } catch (final RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Handle a group-sync payload: ingest the bundled journal (so membership is
+     *  known), then process the sender-chain announcement. */
+    public void onGroupSyncReceived(final Jid senderJid, final int senderDeviceId, final byte[] groupSyncBytes) {
+        final byte[][] parsed = parseGroupSync(groupSyncBytes);
+        if (parsed == null || parsed.length == 0) {
+            onSenderChainAnnouncementReceived(senderJid, senderDeviceId, groupSyncBytes);
+            return;
+        }
+        final byte[] annBytes = parsed[0];
+        Jid roomBare = null;
+        try {
+            final SenderChainAnnouncement ann = SenderChainAnnouncement.unmarshal(annBytes);
+            roomBare = Jid.of(ann.roomJID).asBareJid();
+        } catch (final Exception ignored) {}
+        if (roomBare != null && parsed.length > 1) {
+            for (int i = 1; i < parsed.length; i++) {
+                processMembershipEntryBytes(roomBare, journalEntryDedupId(parsed[i]), parsed[i]);
+            }
+            final RoomState st = rooms.get(roomBare.toString());
+            Log.d(Config.LOGTAG, TAG + ": group-sync ingested " + (parsed.length - 1)
+                    + " journal entr(ies) for " + roomBare + "; journal now has "
+                    + (st != null ? st.journal.getMembers().size() : -1) + " member(s)");
+        }
+        onSenderChainAnnouncementReceived(senderJid, senderDeviceId, annBytes);
+    }
+
     private void processMembershipEntryBytes(final Jid roomJidBare, final String itemId, final byte[] entryBytes) {
         if (entryBytes == null || entryBytes.length == 0) return;
         final String roomStr = roomJidBare.toString();
@@ -473,7 +545,10 @@ public class GroupCryptoService {
         synchronized (state) {
             if (state.session == null) return;
             final SenderChainAnnouncement ann = state.session.announceSenderChain();
-            final byte[] annBytes = ann.marshal();
+            // Bundle the membership journal with the announcement (group-sync), so
+            // members receive the journal over the pairwise rekey fan-out that
+            // epoch rotation already performs — no dependency on MUC MAM.
+            final byte[] groupSyncBytes = buildGroupSyncBytes(ann.marshal(), state);
 
             // Resolve own AIK once for the self-skip check.
             AccountIdentityPub ownAik = null;
@@ -524,7 +599,7 @@ public class GroupCryptoService {
                         continue;
                     }
                     account.getX3dhpqService().sendSenderChainAnnouncement(
-                            memberJid.asBareJid(), rd.deviceId(), annBytes);
+                            memberJid.asBareJid(), rd.deviceId(), groupSyncBytes, "group-sync");
                     state.announcedTo.add(key);
                     sent++;
                 }

@@ -204,6 +204,16 @@ public final class MembershipJournal {
         return Collections.unmodifiableMap(members);
     }
 
+    /** Marshalled bytes of every verified entry, in order — used to bundle the
+     *  journal into a group-sync sender-chain announcement. */
+    public List<byte[]> getMarshalledEntries() {
+        final List<byte[]> out = new ArrayList<>(entries.size());
+        for (final AuditEntry e : entries) {
+            out.add(e.marshal());
+        }
+        return out;
+    }
+
     /**
      * Returns a read-only view of the removed AIKs map (AIK fp → epoch at removal).
      */
