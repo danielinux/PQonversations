@@ -1327,9 +1327,18 @@ public class X3dhpqService {
 
         final List<Long> sortedIds = new ArrayList<>(byDeviceId.keySet());
         sortedIds.sort(java.util.Comparator.naturalOrder());
+
+        // §11.7 v1->v2 bridge: idempotently root the device-audit DAG in a genesis
+        // Snapshot of TODAY's union, then try to derive the published set from the
+        // DAG fold instead. See ensureDeviceAuditGenesis / resolvePublishDeviceIds
+        // for the SAFETY FALLBACK that guarantees this never changes the published
+        // wire bytes versus the pre-existing union-only logic.
+        ensureDeviceAuditGenesis(accountUuid, byDeviceId);
+        final List<Long> publishIds = resolvePublishDeviceIds(accountUuid, sortedIds);
+
         final List<im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> entries =
                 new ArrayList<>();
-        for (final Long id : sortedIds) {
+        for (final Long id : publishIds) {
             entries.add(byDeviceId.get(id));
         }
 
@@ -1425,6 +1434,162 @@ public class X3dhpqService {
                                         + ": x3dhpq devicelist published");
                     }
                 });
+    }
+
+    /**
+     * x3dhpq-xep-draft.md §11.7 v1-&gt;v2 migration bridge / genesis: if this account
+     * has a confirmed local AIK + local device but has never recorded a device-audit
+     * DAG entry, build and persist a genesis {@code Snapshot} (action=10) asserting
+     * TODAY's authorized device set — the same local ∪ co-account union {@link
+     * #publishDeviceList(java.util.Set)} already builds — signed by the account AIK.
+     * Idempotent: a no-op once any device-audit entry exists for the account. Never
+     * throws to the caller; a failure here only means the DAG stays un-rooted for
+     * this call and {@link #resolvePublishDeviceIds} keeps using the union fallback
+     * — publishing must never be blocked by this bootstrap step.
+     *
+     * <p>Deliberately skips accounts still in §10.6.1 pending-enrollment (device
+     * flagged {@code FLAG_PENDING_ENROLLMENT}): that AIK is tentative and may still
+     * be discarded in favour of a primary's AIK adopted via pairing, so it must
+     * never become the TOFU-pinned root of this account's device-audit DAG.
+     */
+    private void ensureDeviceAuditGenesis(
+            final String accountUuid,
+            final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry>
+                    byDeviceId) {
+        if (db == null) return;
+        try {
+            if (byDeviceId.isEmpty()) return; // nothing to snapshot yet
+            if (!db.listX3dhpqDeviceAuditEntries(accountUuid).isEmpty()) {
+                return; // already bootstrapped (or has real DAG history) — never re-genesis
+            }
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
+                    db.listX3dhpqLocalDevices(accountUuid);
+            if (localRows.isEmpty() || LocalKeyBootstrap.isPending(localRows.get(0))) {
+                return; // no confirmed local primary identity yet (§10.6.1)
+            }
+            final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                    db.loadX3dhpqAccountIdentity(accountUuid);
+            if (aikRow == null) return; // nothing to sign the genesis entry with
+
+            final AccountIdentityKey aik;
+            try {
+                aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX
+                        + ": cannot load AIK for device-audit genesis (non-fatal): "
+                        + e.getMessage());
+                return;
+            }
+
+            final List<Long> ids = new ArrayList<>(byDeviceId.keySet());
+            ids.sort(java.util.Comparator.naturalOrder());
+            final List<im.conversations.x3dhpq.types.DeviceAuditEntryV2.SnapshotDevice>
+                    snapDevices = new ArrayList<>();
+            for (final Long id : ids) {
+                final im.conversations.x3dhpq.types.DeviceList.DeviceListEntry e =
+                        byDeviceId.get(id);
+                snapDevices.add(
+                        new im.conversations.x3dhpq.types.DeviceAuditEntryV2.SnapshotDevice(
+                                id, e.getCert().marshal()));
+            }
+
+            final byte[] ownerAikFp =
+                    im.conversations.x3dhpq.types.DeviceAuditEntryV2.aikFp(aik.getPublic());
+            final byte[] payload =
+                    im.conversations.x3dhpq.types.DeviceAuditEntryV2.buildSnapshotPayload(
+                            ownerAikFp, 0L, snapDevices);
+            final long authorDeviceId = localRows.get(0).deviceId() & 0xffffffffL;
+            final long ts = System.currentTimeMillis() / 1000L;
+
+            final im.conversations.x3dhpq.types.DeviceAuditEntryV2 genesis =
+                    im.conversations.x3dhpq.types.DeviceAuditEntryV2.signNew(
+                            aik,
+                            0L,
+                            authorDeviceId,
+                            java.util.Collections.emptyList(),
+                            im.conversations.x3dhpq.types.DeviceAuditEntryV2.ACTION_SNAPSHOT,
+                            payload,
+                            ts);
+            final String hashHex =
+                    im.conversations.x3dhpq.types.DeviceAuditEntryV2.hex(genesis.computeHash());
+            db.putX3dhpqDeviceAuditEntry(accountUuid, hashHex, genesis.marshal(), ts);
+            Log.i(Config.LOGTAG, LOGPREFIX
+                    + ": device-audit DAG genesis Snapshot bootstrapped for " + accountUuid
+                    + " (" + snapDevices.size() + " device(s), §11.7)");
+        } catch (final Exception e) {
+            // Best-effort only; genesis bootstrap must never block a devicelist publish.
+            Log.w(Config.LOGTAG, LOGPREFIX
+                    + ": device-audit genesis bootstrap failed (non-fatal): " + e.getMessage());
+        }
+    }
+
+    /**
+     * x3dhpq-xep-draft.md §11.7: attempts to derive the published device-id set from
+     * the device-audit DAG fold ({@link im.conversations.x3dhpq.types.DeviceDag#recompute}).
+     * Returns {@code unionIds} UNCHANGED (the SAFETY FALLBACK) whenever the DAG has
+     * no entries, the fold throws, or — critically — the fold's authorized id set
+     * does not exactly equal {@code unionIds}.
+     *
+     * <p>The equality check exists because {@link X3dhpqStanzaBuilder#buildDeviceList}
+     * independently rebuilds the wire {@code <devicelist>} straight from the {@code
+     * x3dhpq_local_device}/{@code x3dhpq_co_account_device} union — NOT from this
+     * method's return value — so if the fold ever disagreed with that union (e.g. a
+     * device enrolled by pairing without yet having an AddDevice audit entry, a
+     * future phase not yet wired), signing over the fold's id set would produce a
+     * SignedPart that does not match the published XML, breaking peer verification.
+     * Falling back to the union whenever they disagree keeps the signed bytes and
+     * the wire bytes identical to the pre-existing (pre-DAG) behaviour in every case
+     * except the one where the fold and the union already agree — i.e. this only
+     * changes anything once later phases keep the DAG properly in sync.
+     */
+    private List<Long> resolvePublishDeviceIds(final String accountUuid, final List<Long> unionIds) {
+        if (db == null) return unionIds;
+        try {
+            final List<DatabaseBackend.X3dhpqDeviceAuditEntryRow> rows =
+                    db.listX3dhpqDeviceAuditEntries(accountUuid);
+            if (rows.isEmpty()) return unionIds;
+
+            final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                    db.loadX3dhpqAccountIdentity(accountUuid);
+            if (aikRow == null) return unionIds;
+            final AccountIdentityPub ownAik;
+            try {
+                ownAik = AccountIdentityPub.unmarshal(aikRow.aikPub());
+            } catch (final Exception e) {
+                return unionIds;
+            }
+            final String ownFpHex =
+                    im.conversations.x3dhpq.types.DeviceAuditEntryV2.hex(
+                            im.conversations.x3dhpq.types.DeviceAuditEntryV2.aikFp(ownAik));
+
+            final im.conversations.x3dhpq.types.DeviceDag dag =
+                    new im.conversations.x3dhpq.types.DeviceDag();
+            for (final DatabaseBackend.X3dhpqDeviceAuditEntryRow row : rows) {
+                dag.ingest(row.entryBlob());
+            }
+            // Mirrors DeviceDagTest's resolver: the only trusted signer is this
+            // account's own (single) AIK, TOFU-pinned at genesis by the DAG itself.
+            final im.conversations.x3dhpq.types.DeviceDag.AikResolver resolver =
+                    fpHex -> ownFpHex.equals(fpHex) ? ownAik : null;
+            final im.conversations.x3dhpq.types.DeviceDag.DeviceState state =
+                    dag.recompute(resolver);
+
+            final List<Long> foldIds = new ArrayList<>(state.authorized.keySet());
+            foldIds.sort(java.util.Comparator.naturalOrder());
+            if (!foldIds.equals(unionIds)) {
+                Log.d(Config.LOGTAG, LOGPREFIX
+                        + ": device-audit DAG fold " + foldIds + " does not match the current"
+                        + " local∪co-account union " + unionIds
+                        + " — publishing from the union (SAFETY FALLBACK, §11.7)");
+                return unionIds;
+            }
+            return foldIds;
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX
+                    + ": device-audit DAG recompute failed, falling back to the union device"
+                    + " set (non-fatal): " + e.getMessage());
+            return unionIds;
+        }
     }
 
     /**

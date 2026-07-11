@@ -73,7 +73,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 60;
+    private static final int DATABASE_VERSION = 61;
 
     // Column/table names for the legacy OMEMO tables, kept only so historical DB
     // migrations continue to work after the OMEMO code was removed.
@@ -477,6 +477,32 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     + " ON DELETE CASCADE"
                     + ")";
 
+    // Device-audit DAG entries (x3dhpq-xep-draft.md §11.7): the multi-writer
+    // device-authorization ratchet log folded by DeviceDag/DeviceAuditEntryV2
+    // (libs/x3dhpq-core) to derive the account's authorized device set. entry_blob
+    // is the opaque DeviceAuditEntryV2.marshal() bytes; entry_hash_hex is
+    // hex(SHA-256(marshal())), used both as the ingest dedup key and as a parent
+    // reference for later entries.
+    //
+    // SCHEMA SAFETY: this table intentionally has NO foreign key to
+    // x3dhpq_account_identity. A pending-enrollment device already has an AIK row
+    // (see LocalKeyBootstrap#ensureBootstrapped's FK-crash fix), but genesis-import
+    // ordering here must not be able to reproduce that class of bug — so the only
+    // FK is to accounts(uuid), which is always satisfied (the row is created by
+    // account bind, long before any x3dhpq state exists). Added in DATABASE_VERSION
+    // = 61.
+    private static final String CREATE_X3DHPQ_DEVICE_AUDIT =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_device_audit ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "entry_hash_hex TEXT NOT NULL,"
+                    + "entry_blob BLOB NOT NULL,"
+                    + "created_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, entry_hash_hex),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES "
+                    + Account.TABLENAME + "(" + Account.UUID + ")"
+                    + " ON DELETE CASCADE"
+                    + ")";
+
     private static final String RESOLVER_RESULTS_TABLENAME = "resolver_results";
 
     private static final String CREATE_RESOLVER_RESULTS_TABLE =
@@ -758,6 +784,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         db.execSQL(CREATE_X3DHPQ_PAIRING_SESSION_EXPIRY_INDEX);
         db.execSQL(CREATE_X3DHPQ_CO_ACCOUNT_DEVICE);
         db.execSQL(CREATE_X3DHPQ_COMMITTED_DEVICE);
+        db.execSQL(CREATE_X3DHPQ_DEVICE_AUDIT);
     }
 
     @Override
@@ -1376,6 +1403,11 @@ public class DatabaseBackend extends SQLiteOpenHelper
         // x3dhpq_committed_device table (added in DATABASE_VERSION = 60).
         if (oldVersion < 60 && newVersion >= 60) {
             db.execSQL(CREATE_X3DHPQ_COMMITTED_DEVICE);
+        }
+        // x3dhpq_device_audit table (added in DATABASE_VERSION = 61). No FK to
+        // x3dhpq_account_identity — see CREATE_X3DHPQ_DEVICE_AUDIT javadoc.
+        if (oldVersion < 61 && newVersion >= 61) {
+            db.execSQL(CREATE_X3DHPQ_DEVICE_AUDIT);
         }
     }
 
@@ -3139,6 +3171,11 @@ public class DatabaseBackend extends SQLiteOpenHelper
             byte[] stateBlob,
             long expiresAt) {}
 
+    // A single device-audit DAG entry (§11.7): entryBlob is the opaque
+    // DeviceAuditEntryV2.marshal() bytes, entryHashHex is hex(SHA-256(entryBlob)).
+    public record X3dhpqDeviceAuditEntryRow(
+            String accountUuid, String entryHashHex, byte[] entryBlob, long createdAt) {}
+
     // ---- x3dhpq transaction helpers ----
 
     // Begins a write transaction; pair with setTransactionSuccessful()/endTransaction().
@@ -3450,6 +3487,55 @@ public class DatabaseBackend extends SQLiteOpenHelper
         try {
             while (c.moveToNext()) {
                 result.add(c.getInt(c.getColumnIndexOrThrow("device_id")));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
+    }
+
+    // ---- x3dhpq DAO: device_audit (§11.7 device-authorization DAG) ----
+
+    /**
+     * Persists a device-audit DAG entry (dedup key: entry_hash_hex). Idempotent —
+     * re-ingesting the same entry (e.g. re-running the genesis-bootstrap check) is a
+     * silent no-op via CONFLICT_IGNORE, mirroring DeviceDag#ingest's own
+     * content-hash dedup semantics.
+     */
+    public void putX3dhpqDeviceAuditEntry(
+            String accountUuid, String entryHashHex, byte[] entryBlob, long createdAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("entry_hash_hex", entryHashHex);
+        v.put("entry_blob", entryBlob);
+        v.put("created_at", createdAt);
+        db.insertWithOnConflict(
+                "x3dhpq_device_audit", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+    }
+
+    /** All device-audit entries for {@code accountUuid}, oldest first (insertion order is not
+     * authorization order — callers must run DeviceDag's own canonical-order fold). */
+    public List<X3dhpqDeviceAuditEntryRow> listX3dhpqDeviceAuditEntries(String accountUuid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_device_audit",
+                        null,
+                        "account_uuid=?",
+                        new String[] {accountUuid},
+                        null,
+                        null,
+                        "created_at ASC");
+        final List<X3dhpqDeviceAuditEntryRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                result.add(
+                        new X3dhpqDeviceAuditEntryRow(
+                                c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                                c.getString(c.getColumnIndexOrThrow("entry_hash_hex")),
+                                c.getBlob(c.getColumnIndexOrThrow("entry_blob")),
+                                c.getLong(c.getColumnIndexOrThrow("created_at"))));
             }
         } finally {
             c.close();

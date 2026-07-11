@@ -392,6 +392,27 @@ public class LocalKeyBootstrapTest {
         @Override
         public int sweepExpiredX3dhpqPairingSessions(long nowUnixSeconds) { return 0; }
 
+        final Map<String, List<DatabaseBackend.X3dhpqDeviceAuditEntryRow>> deviceAuditRows =
+                new HashMap<>();
+
+        @Override
+        public void putX3dhpqDeviceAuditEntry(
+                String accountUuid, String entryHashHex, byte[] entryBlob, long createdAt) {
+            final List<DatabaseBackend.X3dhpqDeviceAuditEntryRow> rows =
+                    deviceAuditRows.computeIfAbsent(accountUuid, k -> new ArrayList<>());
+            if (rows.stream().anyMatch(r -> r.entryHashHex().equals(entryHashHex))) {
+                return; // mirrors the real DAO's CONFLICT_IGNORE dedup
+            }
+            rows.add(new DatabaseBackend.X3dhpqDeviceAuditEntryRow(
+                    accountUuid, entryHashHex, entryBlob, createdAt));
+        }
+
+        @Override
+        public List<DatabaseBackend.X3dhpqDeviceAuditEntryRow> listX3dhpqDeviceAuditEntries(
+                String accountUuid) {
+            return deviceAuditRows.getOrDefault(accountUuid, new ArrayList<>());
+        }
+
         @Override
         public void beginTransaction() {}
 

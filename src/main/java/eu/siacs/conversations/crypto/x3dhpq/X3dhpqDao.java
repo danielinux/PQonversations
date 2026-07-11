@@ -45,6 +45,13 @@ public interface X3dhpqDao {
     void putX3dhpqCommittedDevices(String accountUuid, java.util.Collection<Integer> ids);
     java.util.Set<Integer> loadX3dhpqCommittedDeviceIds(String accountUuid);
 
+    // --- device-audit DAG (§11.7): the multi-writer device-authorization ratchet
+    // log folded by im.conversations.x3dhpq.types.DeviceDag to derive the account's
+    // authorized device set. entryBlob is opaque DeviceAuditEntryV2.marshal() bytes;
+    // entryHashHex is hex(SHA-256(entryBlob)), the ingest dedup key. ---
+    void putX3dhpqDeviceAuditEntry(String accountUuid, String entryHashHex, byte[] entryBlob, long createdAt);
+    List<DatabaseBackend.X3dhpqDeviceAuditEntryRow> listX3dhpqDeviceAuditEntries(String accountUuid);
+
     // --- signed pre-key ---
     void putX3dhpqSignedPreKey(String accountUuid, int keyId, byte[] pubX, byte[] privX, byte[] sigEd, byte[] sigMldsa, long createdAt);
     DatabaseBackend.X3dhpqSignedPreKeyRow loadLatestX3dhpqSignedPreKey(String accountUuid);
