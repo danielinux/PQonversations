@@ -335,6 +335,28 @@ public final class MucDetailsContextMenuHelper {
                     @Override
                     public void onSuccess(Void result) {
                         Log.d(Config.LOGTAG, "affiliation change success");
+                        // Banning/removing must also revoke the member from the
+                        // x3dhpq membership journal and rotate the group epoch, so
+                        // a MUC outcast that stays in the crypto member set can no
+                        // longer receive future group keys. Only meaningful for
+                        // secret (private, non-anonymous) x3dhpq groups.
+                        if (conversation.isPrivateAndNonAnonymous()
+                                && user.getRealJid() != null
+                                && activity.xmppConnectionService != null) {
+                            final var gcs =
+                                    activity.xmppConnectionService.getGroupCryptoService(account);
+                            if (gcs != null) {
+                                try {
+                                    gcs.publishRemoveMember(
+                                            conversation.getAddress().asBareJid(),
+                                            user.getRealJid().asBareJid());
+                                } catch (final Exception e) {
+                                    Log.d(Config.LOGTAG,
+                                            "x3dhpq: failed to revoke banned member from journal",
+                                            e);
+                                }
+                            }
+                        }
                     }
 
                     @Override
