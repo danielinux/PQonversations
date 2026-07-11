@@ -129,7 +129,15 @@ public class HttpUploadConnection
         final long originalFileSize = file.length();
         final TransportSecurity transportSecurity;
         this.delayed = delay;
-        if (Config.ENCRYPT_ON_HTTP_UPLOADED) {
+        // WS7: an x3dhpq-encrypted message MUST have its media AES-256-GCM
+        // encrypted (aesgcm:// / XEP-0454) so the file is opaque to the server,
+        // matching the end-to-end guarantee of the text. This mirrors the old
+        // OMEMO behaviour (encrypt uploads when the message is E2EE), rather than
+        // relying only on the global ENCRYPT_ON_HTTP_UPLOADED flag.
+        final boolean encryptUpload =
+                Config.ENCRYPT_ON_HTTP_UPLOADED
+                        || message.getEncryption() == Message.ENCRYPTION_X3DHPQ;
+        if (encryptUpload) {
             final var keyIv = new byte[44];
             SECURE_RANDOM.nextBytes(keyIv);
             transportSecurity = TransportSecurity.ofKeyAndIv(keyIv);

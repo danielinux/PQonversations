@@ -1709,8 +1709,13 @@ public class XmppConnectionService extends Service {
                             }
                         }
                     } else {
-                        Log.d(Config.LOGTAG,
-                                "x3dhpq: skipping send — message needs uploading first");
+                        // WS7: encrypted media. The file must be uploaded first;
+                        // sendFileMessage AES-GCM-encrypts + HTTP-uploads it (see
+                        // HttpUploadConnection, keyed on the x3dhpq encryption) and
+                        // then re-enters sendMessage with an aesgcm:// URL body,
+                        // which the branch above end-to-end encrypts via x3dhpq
+                        // (1:1 or group). Same call the NONE/PGP branches make.
+                        this.sendFileMessage(message, delay, forceP2P);
                     }
                     break;
             }
