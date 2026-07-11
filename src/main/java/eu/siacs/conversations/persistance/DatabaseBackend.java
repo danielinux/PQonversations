@@ -3184,6 +3184,12 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 "x3dhpq_account_identity", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    public void deleteX3dhpqAccountIdentity(String accountUuid) {
+        final SQLiteDatabase db = getWritableDatabase();
+        // FK ON DELETE CASCADE removes this account's local devices + prekeys too.
+        db.delete("x3dhpq_account_identity", "account_uuid=?", new String[] {accountUuid});
+    }
+
     public X3dhpqAccountIdentityRow loadX3dhpqAccountIdentity(String accountUuid) {
         final SQLiteDatabase db = getReadableDatabase();
         final Cursor c =

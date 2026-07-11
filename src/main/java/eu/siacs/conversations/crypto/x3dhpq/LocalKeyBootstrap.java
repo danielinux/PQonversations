@@ -100,7 +100,7 @@ public final class LocalKeyBootstrap {
                     devices.get(0).deviceId(),
                     existing.fingerprint(),
                     false,
-                    false,
+                    isPending(devices.get(0)),
                     db.loadLatestX3dhpqSignedPreKey(uuid) != null
                             ? db.loadLatestX3dhpqSignedPreKey(uuid).keyId()
                             : -1,
@@ -108,33 +108,29 @@ public final class LocalKeyBootstrap {
                     db.listX3dhpqUnusedOneTimePreKeyIds(uuid).size());
         }
 
-        // No AIK locally. If device-level material was already generated on a
-        // previous (pending) call, this is an idempotent re-entry — do NOT
-        // regenerate DIK/SPK/prekeys, just report the still-pending state.
-        final var devices = db.listX3dhpqLocalDevices(uuid);
-        if (!devices.isEmpty() && isPending(devices.get(0))) {
-            final DatabaseBackend.X3dhpqLocalDeviceRow pendingRow = devices.get(0);
-            return new BootstrapResult(
-                    uuid,
-                    pendingRow.deviceId(),
-                    "",
-                    false,
-                    true,
-                    db.loadLatestX3dhpqSignedPreKey(uuid) != null
-                            ? db.loadLatestX3dhpqSignedPreKey(uuid).keyId()
-                            : -1,
-                    db.listX3dhpqKemPreKeyIds(uuid).size(),
-                    db.listX3dhpqUnusedOneTimePreKeyIds(uuid).size());
-        }
+        // --- Genuinely first-ever call for this account/install (§10.6.1). ---
+        //
+        // The schema's FK (x3dhpq_local_device / prekey tables → x3dhpq_account_identity)
+        // requires an AIK row to exist before any device/prekey row, so we mint the AIK
+        // LOCALLY together with the device. Crucially the device is stamped
+        // FLAG_PENDING_ENROLLMENT: publication is gated on that flag in
+        // X3dhpqService#publishLocalState (it calls resolvePendingEnrollment() and
+        // returns before publishDeviceList/publishOwnBundle), so the freshly minted AIK
+        // is NEVER announced to contacts until the enrollment gate resolves — a genuine
+        // first device is confirmed as primary and published, a secondary stays pending
+        // and adopts the existing primary's AIK via pairing (which replaces this row).
+        // This satisfies §10.6.1's intent (no premature/unexplained AIK rotation visible
+        // to contacts) within the FK constraints; the local tentative AIK is discarded on
+        // pairing.
 
-        // --- Genuinely first-ever call for this account/install: generate
-        // device-level material only (§10.6.1). AIK minting is deferred to
-        // promoteToPrimary(), called by the caller once it has determined
-        // (via a network check against the account's own devicelist) that no
-        // AIK exists anywhere for this account. ---
-
-        // Device ID: random 32-bit unsigned, non-zero.
         final int deviceId = generateDeviceId();
+
+        // AIK: Ed25519 + ML-DSA-65 (minted locally; unpublished while pending).
+        final KeyPair aikEd = X3dhpqCrypto.ed25519GenerateKeypair();
+        final KeyPair aikMldsa = X3dhpqCrypto.mldsa65GenerateKeypair();
+        final AccountIdentityPub aip = new AccountIdentityPub(aikEd.pub, aikMldsa.pub);
+        final AccountIdentityKey aik = new AccountIdentityKey(aikEd.priv, aikMldsa.priv, aip);
+        final String fingerprint = aip.fingerprint(X3dhpqCrypto.BLAKE2B_160);
 
         // DIK: Ed25519 + X25519 + ML-DSA-65
         final KeyPair dikEd = X3dhpqCrypto.ed25519GenerateKeypair();
@@ -146,32 +142,40 @@ public final class LocalKeyBootstrap {
                         dikX.priv, dikX.pub,
                         dikMldsa.priv, dikMldsa.pub);
 
-        // Unsigned placeholder DC (no AIK exists yet to sign it). Flags carry ONLY
-        // the local-only FLAG_PENDING_ENROLLMENT sentinel — see its Javadoc for why
-        // this can never leak onto the wire. This placeholder is fully replaced
-        // once either promoteToPrimary() (below) or pairing confirmation
-        // (PairToExistingActivity#installPairingResult) issues a real, signed DC.
+        // DC signed by the (local) AIK as primary. The DC carries FLAG_PRIMARY on the
+        // wire; the local-only FLAG_PENDING_ENROLLMENT lives only in the device row's
+        // flags column (never in the DC bytes), so confirming the device later is a pure
+        // flag update with no re-sign needed.
         final long createdAt = System.currentTimeMillis() / 1000L;
-        final DeviceCertificate pendingDc =
+        final DeviceCertificate unsignedDc =
                 new DeviceCertificate(
                         1, deviceId,
                         dikEd.pub, dikX.pub, dikMldsa.pub,
-                        createdAt, (byte) 0,
+                        createdAt, (byte) DeviceCertificate.FLAG_PRIMARY,
                         null, null);
+        final byte[] dcSignedPart = unsignedDc.signedPart();
+        final byte[] dcSigEd = X3dhpqCrypto.ed25519Sign(aikEd.priv, dcSignedPart);
+        final byte[] dcSigMldsa = X3dhpqCrypto.mldsa65Sign(aikMldsa.priv, dcSignedPart);
+        final DeviceCertificate dc =
+                new DeviceCertificate(
+                        1, deviceId,
+                        dikEd.pub, dikX.pub, dikMldsa.pub,
+                        createdAt, (byte) DeviceCertificate.FLAG_PRIMARY,
+                        dcSigEd, dcSigMldsa);
 
-        // SPK: X25519 keypair signed by DIK (both algorithms) — needs no AIK.
+        // SPK: X25519 keypair signed by DIK (both algorithms).
         final int spkKeyId = 1;
         final KeyPair spk = X3dhpqCrypto.x25519GenerateKeypair();
         final byte[] spkSigEd = X3dhpqCrypto.ed25519Sign(dikEd.priv, spk.pub);
         final byte[] spkSigMldsa = X3dhpqCrypto.mldsa65Sign(dikMldsa.priv, spk.pub);
 
-        // KEM pre-keys (ids 1..N) — no AIK needed.
+        // KEM pre-keys (ids 1..N).
         final KemKeyPair[] kemKeys = new KemKeyPair[DEFAULT_KEM_PREKEY_COUNT];
         for (int i = 0; i < DEFAULT_KEM_PREKEY_COUNT; i++) {
             kemKeys[i] = X3dhpqCrypto.mlkem768GenerateKeypair();
         }
 
-        // OPKs (ids 1..N) — no AIK needed.
+        // OPKs (ids 1..N).
         final KeyPair[] opks = new KeyPair[DEFAULT_ONE_TIME_PREKEY_COUNT];
         for (int i = 0; i < DEFAULT_ONE_TIME_PREKEY_COUNT; i++) {
             opks[i] = X3dhpqCrypto.x25519GenerateKeypair();
@@ -179,9 +183,11 @@ public final class LocalKeyBootstrap {
 
         db.beginTransaction();
         try {
+            // account_identity FIRST — local_device / prekey rows FK-reference it.
+            db.putX3dhpqAccountIdentity(uuid, aik.marshal(), aip.marshal(), fingerprint);
             db.putX3dhpqLocalDevice(
-                    uuid, deviceId, dik.marshal(), pendingDc.marshal(), createdAt,
-                    FLAG_PENDING_ENROLLMENT);
+                    uuid, deviceId, dik.marshal(), dc.marshal(), createdAt,
+                    DeviceCertificate.FLAG_PRIMARY | FLAG_PENDING_ENROLLMENT);
             db.putX3dhpqSignedPreKey(uuid, spkKeyId, spk.pub, spk.priv, spkSigEd, spkSigMldsa, createdAt);
             for (int i = 0; i < DEFAULT_KEM_PREKEY_COUNT; i++) {
                 db.putX3dhpqKemPreKey(uuid, i + 1, kemKeys[i].pub, kemKeys[i].priv);
@@ -197,7 +203,7 @@ public final class LocalKeyBootstrap {
         return new BootstrapResult(
                 uuid,
                 deviceId,
-                "",
+                fingerprint,
                 true,
                 true,
                 spkKeyId,
@@ -224,28 +230,45 @@ public final class LocalKeyBootstrap {
      * state instead of minting a second one.
      */
     public BootstrapResult promoteToPrimary(final String uuid) {
-        final DatabaseBackend.X3dhpqAccountIdentityRow already = db.loadX3dhpqAccountIdentity(uuid);
-        if (already != null) {
-            // Someone else (e.g. a just-completed pairing) already resolved this
-            // account's identity; do not race past it.
-            return ensureBootstrapped(uuid);
-        }
         final var devices = db.listX3dhpqLocalDevices(uuid);
-        if (devices.isEmpty() || !isPending(devices.get(0))) {
+        if (devices.isEmpty()) {
             throw new IllegalStateException(
                     "x3dhpq: promoteToPrimary called for " + uuid
-                            + " but no pending device row exists — call ensureBootstrapped first");
+                            + " but no device row exists — call ensureBootstrapped first");
         }
         final DatabaseBackend.X3dhpqLocalDeviceRow pendingRow = devices.get(0);
-        final DeviceIdentityKey dik = DeviceIdentityKey.unmarshal(pendingRow.dikPriv());
+        DatabaseBackend.X3dhpqAccountIdentityRow identity = db.loadX3dhpqAccountIdentity(uuid);
 
-        // Mint AIK.
+        // Common case (post-{@link #ensureBootstrapped}): the AIK was already minted
+        // locally and the DC already signed as primary — confirming this device as
+        // primary is a pure flag update (clear FLAG_PENDING_ENROLLMENT), so publication
+        // may proceed. No re-mint, no re-sign.
+        if (identity != null) {
+            if (isPending(pendingRow)) {
+                db.putX3dhpqLocalDevice(
+                        uuid, pendingRow.deviceId(), pendingRow.dikPriv(), pendingRow.dc(),
+                        pendingRow.createdAt(), DeviceCertificate.FLAG_PRIMARY);
+            }
+            return new BootstrapResult(
+                    uuid,
+                    pendingRow.deviceId(),
+                    identity.fingerprint(),
+                    true,
+                    false,
+                    db.loadLatestX3dhpqSignedPreKey(uuid) != null
+                            ? db.loadLatestX3dhpqSignedPreKey(uuid).keyId()
+                            : -1,
+                    db.listX3dhpqKemPreKeyIds(uuid).size(),
+                    db.listX3dhpqUnusedOneTimePreKeyIds(uuid).size());
+        }
+
+        // Defensive fallback: no AIK row yet (should not happen after ensureBootstrapped,
+        // which mints the AIK). Mint one and re-sign the DC as primary under it.
+        final DeviceIdentityKey dik = DeviceIdentityKey.unmarshal(pendingRow.dikPriv());
         final KeyPair aikEd = X3dhpqCrypto.ed25519GenerateKeypair();
         final KeyPair aikMldsa = X3dhpqCrypto.mldsa65GenerateKeypair();
         final AccountIdentityPub aip = new AccountIdentityPub(aikEd.pub, aikMldsa.pub);
         final AccountIdentityKey aik = new AccountIdentityKey(aikEd.priv, aikMldsa.priv, aip);
-
-        // Re-sign the DC (same DIK, same createdAt/deviceId) as primary under the new AIK.
         final DeviceCertificate unsignedDc =
                 new DeviceCertificate(
                         1, pendingRow.deviceId(),
@@ -261,9 +284,7 @@ public final class LocalKeyBootstrap {
                         dik.getPubEd25519(), dik.getPubX25519(), dik.getPubMLDSA(),
                         pendingRow.createdAt(), (byte) DeviceCertificate.FLAG_PRIMARY,
                         dcSigEd, dcSigMldsa);
-
         final String fingerprint = aip.fingerprint(X3dhpqCrypto.BLAKE2B_160);
-
         db.beginTransaction();
         try {
             db.putX3dhpqAccountIdentity(uuid, aik.marshal(), aip.marshal(), fingerprint);
@@ -274,7 +295,6 @@ public final class LocalKeyBootstrap {
         } finally {
             db.endTransaction();
         }
-
         return new BootstrapResult(
                 uuid,
                 pendingRow.deviceId(),
@@ -302,16 +322,21 @@ public final class LocalKeyBootstrap {
     public BootstrapResult mintFreshIdentity(final String uuid) {
         db.beginTransaction();
         try {
+            // Wipe the whole local identity. Deleting the account_identity row
+            // cascades (ON DELETE CASCADE) to this account's local devices and
+            // prekeys, giving ensureBootstrapped() a clean slate to mint into.
             for (final DatabaseBackend.X3dhpqLocalDeviceRow row : db.listX3dhpqLocalDevices(uuid)) {
                 db.deleteX3dhpqLocalDevice(uuid, row.deviceId());
             }
+            db.deleteX3dhpqAccountIdentity(uuid);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
         // Re-run the normal fresh-device path (now guaranteed empty local state) to
-        // generate new device material, then immediately promote it to primary — this
-        // account intentionally starts a brand-new identity, bypassing the pending gate.
+        // generate a brand-new AIK + device material, then immediately confirm it as
+        // primary — this account intentionally starts a fresh identity, bypassing the
+        // pending gate.
         ensureBootstrapped(uuid);
         return promoteToPrimary(uuid);
     }

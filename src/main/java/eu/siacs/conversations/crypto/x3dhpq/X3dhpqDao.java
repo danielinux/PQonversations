@@ -13,6 +13,9 @@ public interface X3dhpqDao {
     // --- account identity ---
     void putX3dhpqAccountIdentity(String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint);
     DatabaseBackend.X3dhpqAccountIdentityRow loadX3dhpqAccountIdentity(String accountUuid);
+    // Deletes this account's AIK row; the FK ON DELETE CASCADE removes its local
+    // devices and prekeys too. Used by the destructive "generate new identity" path.
+    void deleteX3dhpqAccountIdentity(String accountUuid);
 
     // --- devicelist version + last-seen content state (§8.2, §8.5) ---
     void putX3dhpqDeviceListState(String accountUuid, String ownerJid, long version,

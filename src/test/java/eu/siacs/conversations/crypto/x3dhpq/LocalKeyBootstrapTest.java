@@ -58,6 +58,13 @@ public class LocalKeyBootstrapTest {
             return identityRows.get(accountUuid);
         }
 
+        @Override
+        public void deleteX3dhpqAccountIdentity(String accountUuid) {
+            identityRows.remove(accountUuid);
+            // Mimic the real schema's FK ON DELETE CASCADE.
+            deviceRows.remove(accountUuid);
+        }
+
         // key: accountUuid + ":" + ownerJid
         final Map<String, DatabaseBackend.X3dhpqDeviceListStateRow> deviceListStateRows =
                 new HashMap<>();
@@ -90,10 +97,15 @@ public class LocalKeyBootstrapTest {
                 byte[] dc,
                 long createdAt,
                 int flags) {
-            deviceRows.computeIfAbsent(accountUuid, k -> new ArrayList<>())
-                    .add(
-                            new DatabaseBackend.X3dhpqLocalDeviceRow(
-                                    accountUuid, deviceId, dikPriv, dc, createdAt, flags));
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
+                    deviceRows.computeIfAbsent(accountUuid, k -> new ArrayList<>());
+            // Mimic the real INSERT ... ON CONFLICT REPLACE keyed on (account,device_id):
+            // a re-put of the same device replaces the row (e.g. clearing the pending flag)
+            // rather than appending a duplicate.
+            rows.removeIf(r -> r.deviceId() == deviceId);
+            rows.add(
+                    new DatabaseBackend.X3dhpqLocalDeviceRow(
+                            accountUuid, deviceId, dikPriv, dc, createdAt, flags));
             localDeviceInserts++;
         }
 
