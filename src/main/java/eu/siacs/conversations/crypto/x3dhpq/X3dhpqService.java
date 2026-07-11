@@ -219,11 +219,18 @@ public class X3dhpqService {
             if (payload instanceof im.conversations.android.xmpp.model.x3dhpq.pair.PairHello
                     && account != null
                     && account.getXmppConnection() != null) {
-                account.getXmppConnection()
-                        .getManager(
-                                eu.siacs.conversations.xmpp.manager.VerifyDeviceManager.class)
-                        .handlePairHello(
-                                (im.conversations.android.xmpp.model.x3dhpq.pair.PairHello) payload);
+                final eu.siacs.conversations.xmpp.manager.VerifyDeviceManager verify =
+                        account.getXmppConnection()
+                                .getManager(
+                                        eu.siacs.conversations.xmpp.manager.VerifyDeviceManager
+                                                .class);
+                // Defense-in-depth: this runs on the connection thread, so a null
+                // manager must never NPE the whole connection. (The manager is now
+                // registered in Managers; this guard only covers a future regression.)
+                if (verify != null) {
+                    verify.handlePairHello(
+                            (im.conversations.android.xmpp.model.x3dhpq.pair.PairHello) payload);
+                }
             }
             return true;
         } else if (Namespace.X3DHPQ_DEVTRACKER.equals(node)) {

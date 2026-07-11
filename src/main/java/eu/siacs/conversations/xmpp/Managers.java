@@ -43,6 +43,7 @@ import eu.siacs.conversations.xmpp.manager.StanzaIdManager;
 import eu.siacs.conversations.xmpp.manager.StreamHostManager;
 import eu.siacs.conversations.xmpp.manager.UnifiedPushManager;
 import eu.siacs.conversations.xmpp.manager.VCardManager;
+import eu.siacs.conversations.xmpp.manager.VerifyDeviceManager;
 
 public class Managers {
 
@@ -100,6 +101,7 @@ public class Managers {
                 .put(StreamHostManager.class, new StreamHostManager(context, connection))
                 .put(UnifiedPushManager.class, new UnifiedPushManager(context, connection))
                 .put(VCardManager.class, new VCardManager(context, connection))
+                .put(VerifyDeviceManager.class, new VerifyDeviceManager(context, connection))
                 .build();
     }
 }
