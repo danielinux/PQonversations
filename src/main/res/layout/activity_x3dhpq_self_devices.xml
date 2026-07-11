@@ -16,12 +16,14 @@
         android:paddingBottom="12dp">
 
         <TextView
+            android:id="@+id/pending_enrollment_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/x3dhpq_pending_enrollment_title"
             android:textStyle="bold" />
 
         <TextView
+            android:id="@+id/pending_enrollment_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/x3dhpq_pending_enrollment_text"
@@ -42,6 +44,37 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="@string/x3dhpq_generate_new_identity_button" />
+
+    </LinearLayout>
+
+    <!-- §11.8 queued enrollment request: a disabled device published a persistent
+         pair-hello asking to join this account; surfaced here so acting on it does not
+         require the pairing screen to already be open when the request arrives. -->
+    <LinearLayout
+        android:id="@+id/join_request_banner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_join_request_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/join_request_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="8dp" />
+
+        <Button
+            android:id="@+id/review_join_request_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_review_join_request_button" />
 
     </LinearLayout>
 

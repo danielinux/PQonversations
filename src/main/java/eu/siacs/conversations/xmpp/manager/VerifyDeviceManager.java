@@ -2,7 +2,9 @@ package eu.siacs.conversations.xmpp.manager;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.util.Log;
+import androidx.preference.PreferenceManager;
 import eu.siacs.conversations.Config;
 import eu.siacs.conversations.xmpp.XmppConnection;
 import im.conversations.android.xmpp.model.x3dhpq.pair.PairHello;
@@ -36,6 +38,15 @@ public class VerifyDeviceManager extends AbstractManager {
 
     /** Intent extra: the CPace session id carried by {@code <pair-hello>} (base64url, no padding). */
     public static final String EXTRA_SID = "sid";
+
+    // Prefs keys for the §11.8 "queued enrollment request" surfacing: persisted so a
+    // returning authorized device can show "A new device wants to join your account"
+    // without the pairing screen having been foregrounded when the pair-hello arrived
+    // (live +notify) or was fetched (X3dhpqService#fetchPairHelloOnConnect).
+    private static final String PREF_PENDING_FULL_JID_PREFIX = "x3dhpq_pending_join_fulljid_";
+    private static final String PREF_PENDING_DEVICE_ID_PREFIX = "x3dhpq_pending_join_deviceid_";
+    private static final String PREF_PENDING_SID_PREFIX = "x3dhpq_pending_join_sid_";
+    private static final String PREF_PENDING_AT_PREFIX = "x3dhpq_pending_join_at_";
 
     public VerifyDeviceManager(final Context context, final XmppConnection connection) {
         super(context, connection);
@@ -87,5 +98,55 @@ public class VerifyDeviceManager extends AbstractManager {
         intent.putExtra(EXTRA_SID, sid);
 
         context.sendBroadcast(intent);
+
+        // §11.8 "Queued enrollment request": persist so the device-management UI can
+        // surface "A new device wants to join your account" even if no activity was in
+        // the foreground to catch the broadcast above (e.g. arrived via
+        // X3dhpqService#fetchPairHelloOnConnect on a later reconnect rather than a live
+        // +notify). Cleared explicitly once a human acts on it (see
+        // clearPendingJoinRequest), never automatically, so it survives across restarts
+        // until handled.
+        persistPendingJoinRequest(
+                getAccount().getJid().asBareJid().toString(),
+                fullJid,
+                deviceId != null ? deviceId.intValue() : 0,
+                sid);
+    }
+
+    private void persistPendingJoinRequest(
+            final String accountBareJid, final String fullJid, final int deviceId, final String sid) {
+        try {
+            final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+            prefs.edit()
+                    .putString(PREF_PENDING_FULL_JID_PREFIX + accountBareJid, fullJid)
+                    .putInt(PREF_PENDING_DEVICE_ID_PREFIX + accountBareJid, deviceId)
+                    .putString(PREF_PENDING_SID_PREFIX + accountBareJid, sid)
+                    .putLong(PREF_PENDING_AT_PREFIX + accountBareJid, System.currentTimeMillis() / 1000L)
+                    .apply();
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, "VerifyDeviceManager: failed to persist pending join request"
+                    + " (non-fatal, §11.8): " + e.getMessage());
+        }
+    }
+
+    /**
+     * §11.8 device-management UI accessor: the full JID of a queued, not-yet-actioned
+     * enrollment request for {@code accountBareJid}, or {@code null} if there isn't one.
+     */
+    public static String getPendingJoinRequestFullJid(
+            final Context context, final String accountBareJid) {
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getString(PREF_PENDING_FULL_JID_PREFIX + accountBareJid, null);
+    }
+
+    /** Clears the queued-enrollment-request banner state; call once a human acts on it. */
+    public static void clearPendingJoinRequest(final Context context, final String accountBareJid) {
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        prefs.edit()
+                .remove(PREF_PENDING_FULL_JID_PREFIX + accountBareJid)
+                .remove(PREF_PENDING_DEVICE_ID_PREFIX + accountBareJid)
+                .remove(PREF_PENDING_SID_PREFIX + accountBareJid)
+                .remove(PREF_PENDING_AT_PREFIX + accountBareJid)
+                .apply();
     }
 }

@@ -226,4 +226,46 @@ public class IqGenerator extends AbstractGenerator {
         options.putString("pubsub#max_items", "10"); // headroom for re-publishes
         return publish(Namespace.X3DHPQ_BUNDLE, item, options);
     }
+
+    /**
+     * §11.8 "Queued enrollment request": explicitly fetches the account's own {@code
+     * pair-hello} item (§10.1a) rather than relying solely on live {@code +notify} —
+     * lets an authorized device that was offline when a disabled device queued its
+     * request still discover it on the next reconnect.
+     */
+    public Iq generateX3dhpqRequestPairHello(final Jid ownBareJid) {
+        final var packet = retrieve(Namespace.X3DHPQ_PAIR, null);
+        packet.setTo(ownBareJid);
+        return packet;
+    }
+
+    /**
+     * Fetches the account's own §11.8 sealed device-state tracker item. Always sent to
+     * the account's own bare JID — the tracker is account-internal state, never
+     * published/read for a contact.
+     */
+    public Iq generateX3dhpqRequestDevTracker(final Jid ownBareJid) {
+        final var packet = retrieve(Namespace.X3DHPQ_DEVTRACKER, null);
+        packet.setTo(ownBareJid);
+        return packet;
+    }
+
+    /**
+     * Publishes the §11.8 sealed device-state tracker to PEP node
+     * {@code urn:xmppqr:x3dhpq:devtracker:0}. Item id is always "current". Whitelist
+     * (owner-only) access, mirroring the pair-hello node (§10.1a) — unlike the
+     * devicelist/bundle nodes, this is never meant to be readable by contacts.
+     */
+    public Iq generateX3dhpqPublishDevTracker(
+            final im.conversations.android.xmpp.model.x3dhpq.devtracker.DevTracker tracker,
+            final String itemId) {
+        final Element item = new Element("item");
+        item.setAttribute("id", itemId);
+        item.addChild(tracker); // DevTracker extends Extension/Element
+        final Bundle options = new Bundle();
+        options.putString("pubsub#access_model", "whitelist");
+        options.putString("pubsub#persist_items", "true");
+        options.putString("pubsub#max_items", "1");
+        return publish(Namespace.X3DHPQ_DEVTRACKER, item, options);
+    }
 }

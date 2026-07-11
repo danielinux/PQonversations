@@ -103,6 +103,12 @@ public class PairNewDeviceActivity extends XmppActivity {
                             mAccount.getX3dhpqService()
                                     .publishAddDeviceAuditEntry(
                                             (int) issuedCert.getDeviceId(), issuedCert);
+                            // §11.8: this confirmation resolves any queued enrollment
+                            // request banner for the account (whichever device it came
+                            // from — at most one is normally pending at a time).
+                            VerifyDeviceManager.clearPendingJoinRequest(
+                                    PairNewDeviceActivity.this,
+                                    mAccount.getJid().asBareJid().toString());
                         } catch (final Exception e) {
                             Log.e(
                                     Config.LOGTAG,

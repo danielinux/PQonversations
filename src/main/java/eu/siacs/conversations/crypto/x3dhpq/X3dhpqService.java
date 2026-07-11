@@ -26,6 +26,10 @@ import im.conversations.android.xmpp.model.x3dhpq.devicelist.Device;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.MldsaSig;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.Sig;
+import im.conversations.android.xmpp.model.x3dhpq.devtracker.DevTracker;
+import im.conversations.android.xmpp.model.x3dhpq.envelope.Envelope;
+import im.conversations.android.xmpp.model.x3dhpq.envelope.Key;
+import im.conversations.android.xmpp.model.x3dhpq.envelope.Payload;
 import im.conversations.android.xmpp.model.x3dhpq.group.MembershipEntry;
 import im.conversations.android.xmpp.model.x3dhpq.recovery.Recovery;
 import im.conversations.x3dhpq.crypto.X3dhpqCrypto;
@@ -222,6 +226,18 @@ public class X3dhpqService {
                                 (im.conversations.android.xmpp.model.x3dhpq.pair.PairHello) payload);
             }
             return true;
+        } else if (Namespace.X3DHPQ_DEVTRACKER.equals(node)) {
+            // §11.8: a live +notify re-seal of our own tracker (device-set change on
+            // another of our devices, or our own echoed publish). Best-effort: catches
+            // revocation immediately instead of waiting for the next reconnect. Never
+            // allowed to throw into the caller — see interpretDeviceTrackerSafely.
+            if (payload instanceof DevTracker
+                    && account != null
+                    && from != null
+                    && from.asBareJid().equals(account.getJid().asBareJid())) {
+                interpretDeviceTrackerSafely((DevTracker) payload);
+            }
+            return true;
         }
         return false;
     }
@@ -260,6 +276,11 @@ public class X3dhpqService {
             final var entry =
                     items.getFirstItemWithId(
                             im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class);
+            if (entry != null) {
+                handleEvent(from, node, entry.getKey(), entry.getValue());
+            }
+        } else if (Namespace.X3DHPQ_DEVTRACKER.equals(node)) {
+            final var entry = items.getFirstItemWithId(DevTracker.class);
             if (entry != null) {
                 handleEvent(from, node, entry.getKey(), entry.getValue());
             }
@@ -352,6 +373,27 @@ public class X3dhpqService {
             return;
         }
 
+        // §11.8: an already-enrolled device checks on every connect whether it can
+        // still decrypt the account's sealed tracker — losing that ability is how
+        // revocation reaches an offline device. Best-effort/async; never blocks the
+        // publish below.
+        try {
+            checkDeviceTrackerForRevocation();
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": checkDeviceTrackerForRevocation failed"
+                    + " (non-fatal, §11.8): " + e.getMessage());
+        }
+
+        // §11.8 "Queued enrollment request": explicitly fetch our own pair-hello item
+        // on every connect (in addition to live +notify) so a request queued while we
+        // were offline is still discovered and surfaced.
+        try {
+            fetchPairHelloOnConnect();
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": fetchPairHelloOnConnect failed (non-fatal,"
+                    + " §11.8/§10.1a): " + e.getMessage());
+        }
+
         publishDeviceList();
         publishOwnBundle();
     }
@@ -385,16 +427,43 @@ public class X3dhpqService {
     }
 
     /**
-     * Resolves a §10.6.1 pending-enrollment device: fetches the account's own devicelist
-     * from the server. An EMPTY (or absent/error, e.g. {@code item-not-found}) response
-     * means no AIK has ever been published for this account anywhere — this is genuinely
-     * the first device, so it is promoted to primary and its (now signed) devicelist is
-     * published. A NON-empty response means an existing primary already owns this
-     * account's AIK — this device remains pending, publishes nothing, and waits to be
-     * confirmed via CPace pairing (§10.6.2), which installs a primary-issued AIK/DC and
-     * clears the pending state (see {@code PairToExistingActivity#installPairingResult}).
+     * Resolves a §10.6.1 pending-enrollment device. §11.8 ENHANCEMENT: first checks
+     * whether the account's sealed device-state tracker is published at all — presence
+     * alone (a pending device has no AIK yet to verify the signature against) is already
+     * the "an account identity already exists" signal, exactly like the pre-existing
+     * devicelist-emptiness check below, which is now used only as the fallback when no
+     * tracker has been published yet (e.g. a legacy account that predates §11.8, or the
+     * very first device — see {@link #resolvePendingEnrollmentViaDeviceList}).
      */
     private void resolvePendingEnrollment() {
+        if (db == null || account == null || mXmppConnectionService == null) return;
+        fetchDeviceTrackerPresence(present -> {
+            if (!isPendingEnrollment()) {
+                Log.d(Config.LOGTAG, LOGPREFIX
+                        + ": pending-enrollment resolved concurrently (pairing"
+                        + " confirmation arrived first); nothing to do");
+                return;
+            }
+            if (present) {
+                Log.i(Config.LOGTAG, LOGPREFIX
+                        + ": account " + account.getJid().asBareJid()
+                        + " already has a published sealed device-state tracker —"
+                        + " remaining pending-enrollment, awaiting confirmation by an"
+                        + " existing device (§10.6, §11.8)");
+                // Stays pending. No publish. UX: X3dhpqSelfDevicesActivity surfaces this
+                // state and offers "generate a new identity instead" (§10.6.4b) or
+                // Associate (§10.6.4a, now also queues a persistent enrollment request,
+                // §11.8 "Queued enrollment request").
+                return;
+            }
+            // Tracker absent: fall back to the pre-§11.8 devicelist-emptiness check
+            // (also covers legacy accounts that never published a tracker).
+            resolvePendingEnrollmentViaDeviceList();
+        });
+    }
+
+    /** Pre-§11.8 fallback path of {@link #resolvePendingEnrollment()}; see its docs. */
+    private void resolvePendingEnrollmentViaDeviceList() {
         if (db == null || account == null || mXmppConnectionService == null) return;
         final Jid ownBareJid = account.getJid().asBareJid();
         Log.d(Config.LOGTAG, LOGPREFIX
@@ -1273,25 +1342,16 @@ public class X3dhpqService {
     }
 
     /**
-     * Overload of {@link #publishDeviceList()} that additionally names the device
-     * ids being explicitly revoked in this call (§8.6). Every other caller should
-     * keep using the no-arg overload, which passes an empty set.
-     *
-     * <p>Before signing/sending, this enforces the "no accidental/injected
-     * devicelist shrink without revocation" guard: a device set SMALLER than the
-     * account's last committed authoritative set (see {@code
-     * DatabaseBackend#putX3dhpqCommittedDevices}) — other than the ids in {@code
-     * allowRemovals} — is refused outright, so a transient/buggy/injected partial
-     * local state can never silently drop a contact's devices.
+     * Extracted from {@link #publishDeviceList(java.util.Set)}: builds the canonical
+     * device-id -&gt; {@link im.conversations.x3dhpq.types.DeviceList.DeviceListEntry}
+     * union of {@code x3dhpq_local_device} and {@code x3dhpq_co_account_device} (a
+     * locally-generated row wins over a co-account entry for the same id). Pure
+     * read/derive, no side effects — safe to call from both the devicelist publish
+     * path and the §11.8 sealed-tracker publish path so the two never disagree on
+     * which devices are currently authorized.
      */
-    public void publishDeviceList(final java.util.Set<Integer> allowRemovals) {
-        final String accountUuid = account.getUuid();
-        final String ownerJid = account.getJid().asBareJid().toString();
-
-        // Build the canonical core entries from the union, keyed by device_id so a
-        // locally-generated row always wins over a cached co-account entry for the
-        // same id (should not normally collide), then sorted ascending (unsigned)
-        // — the §8.3 signed-input order.
+    private java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry>
+            computeUnionDeviceEntries(final String accountUuid) {
         final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> byDeviceId =
                 new java.util.LinkedHashMap<>();
 
@@ -1324,6 +1384,31 @@ public class X3dhpqService {
             byDeviceId.put(id, new im.conversations.x3dhpq.types.DeviceList.DeviceListEntry(
                     id, row.addedAt(), (byte) row.flags(), cert));
         }
+        return byDeviceId;
+    }
+
+    /**
+     * Overload of {@link #publishDeviceList()} that additionally names the device
+     * ids being explicitly revoked in this call (§8.6). Every other caller should
+     * keep using the no-arg overload, which passes an empty set.
+     *
+     * <p>Before signing/sending, this enforces the "no accidental/injected
+     * devicelist shrink without revocation" guard: a device set SMALLER than the
+     * account's last committed authoritative set (see {@code
+     * DatabaseBackend#putX3dhpqCommittedDevices}) — other than the ids in {@code
+     * allowRemovals} — is refused outright, so a transient/buggy/injected partial
+     * local state can never silently drop a contact's devices.
+     */
+    public void publishDeviceList(final java.util.Set<Integer> allowRemovals) {
+        final String accountUuid = account.getUuid();
+        final String ownerJid = account.getJid().asBareJid().toString();
+
+        // Build the canonical core entries from the union (§11.8 reuses this exact
+        // union as the sealed tracker's authorized-recipient set, via
+        // computeUnionDeviceEntries, so the sealed set always matches the just-
+        // published devicelist).
+        final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> byDeviceId =
+                computeUnionDeviceEntries(accountUuid);
 
         final List<Long> sortedIds = new ArrayList<>(byDeviceId.keySet());
         sortedIds.sort(java.util.Comparator.naturalOrder());
@@ -1434,6 +1519,14 @@ public class X3dhpqService {
                                         + ": x3dhpq devicelist published");
                     }
                 });
+
+        // §11.8: re-seal the device-state tracker whenever the device set changes.
+        // Hooked here (the single implementation both publishDeviceList() overloads
+        // funnel through) rather than at each call site, so no current or future
+        // caller can forget it. Independent PEP item/IQ; failures only log (see the
+        // try/catch inside publishSealedDeviceTracker) and never affect the devicelist
+        // publish above or the account-bind path.
+        publishSealedDeviceTracker();
     }
 
     /**
@@ -1612,6 +1705,657 @@ public class X3dhpqService {
             missing.removeAll(allowRemovals);
         }
         return missing;
+    }
+
+    // =====================================================================================
+    // §11.8: Sealed device-state tracker (urn:xmppqr:x3dhpq:devtracker:0)
+    //
+    // Additive PEP infrastructure on top of the §11.7 DeviceDag fold. Lets an authorized
+    // device sync — and a new/revoked device learn an identity already exists — while
+    // every OTHER device of the account is offline. "Being able to decrypt the tracker
+    // IS the proof of authorization" (§11.8). Every entry point below is best-effort and
+    // MUST NOT throw into publishLocalState()/the account-bind path; failures only log.
+    // =====================================================================================
+
+    private static final byte[] DEVTRACKER_SIGNED_DOMAIN =
+            "X3DHPQ-DevTracker-v1\0".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] DEVTRACKER_PAYLOAD_DOMAIN =
+            "X3DHPQ-DevTracker-Payload-v1\0".getBytes(StandardCharsets.UTF_8);
+
+    public enum TrackerOutcome {
+        /** No item published for this account yet — genuinely first-device territory. */
+        ABSENT,
+        /** Signature verifies (where checkable) and our own &lt;key&gt; copy decrypted. */
+        AUTHORIZED,
+        /** Present (and signed, where checkable) but our own copy did not decrypt. */
+        NOT_DECRYPTABLE,
+        /** Present but the hybrid AIK signature failed to verify — ignored, never acted on. */
+        INVALID
+    }
+
+    /** Throwaway (never persisted) PQXDH sender session + its prekey envelope. */
+    private static final class EphemeralPqxdh {
+        final Session session;
+        final PrekeyEnvelope envelope;
+
+        EphemeralPqxdh(final Session session, final PrekeyEnvelope envelope) {
+            this.session = session;
+            this.envelope = envelope;
+        }
+    }
+
+    /** Parsed plaintext devtracker payload (§11.8: folded DeviceState + DAG heads + optional AIK_priv). */
+    private static final class DecodedTracker {
+        im.conversations.x3dhpq.types.DeviceAuditEntryV2.Snapshot snapshot;
+        List<byte[]> heads;
+        AccountIdentityKey aikPriv; // nullable
+    }
+
+    /**
+     * (Re)publishes the §11.8 sealed device-state tracker for THIS account. Call from every
+     * place {@link #publishDeviceList()} is called so the sealed recipient set never lags
+     * the published devicelist (§11.8: "ANY authorized device re-publishes it on every
+     * device-set change, adding/removing recipient copies").
+     *
+     * <p>Payload = the folded {@code DeviceState} (device_id -&gt; DC, via the exact same
+     * §11.7 {@code Snapshot} encoding used for the DAG genesis/migration bridge) + the
+     * current device-audit DAG head hashes (self-contained catch-up) + the shared AIK_priv
+     * (§11.8 "MAY carry" — this implementation always does, sealed, so a device that lost
+     * its local AIK row can recover it). Sealed exactly like a 1:1 pairwise envelope
+     * (§9.3/§9.3a): random content key, AES-256-GCM payload, one hybrid X25519+ML-KEM-768
+     * {@code &lt;emk&gt;} per authorized device via a FRESH PQXDH "first message" against
+     * that device's own published bundle (§11.8: decryptability must not depend on any
+     * prior session state) — reusing {@link XmppX3dhpqMessage} end-to-end, exactly the
+     * construction {@link #sendSenderChainAnnouncement} already uses for 1:1 envelopes.
+     * The whole item is additionally AIK-signed (hybrid), sig placed as the last children
+     * of {@code <devtracker>} (mirrors §8.4's devicelist placement).
+     */
+    public void publishSealedDeviceTracker() {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            return;
+        }
+        try {
+            if (isPendingEnrollment()) {
+                return; // no confirmed AIK yet (§10.6.1) — nothing to sign/seal with
+            }
+            final String accountUuid = account.getUuid();
+            final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> byDeviceId =
+                    computeUnionDeviceEntries(accountUuid);
+            if (byDeviceId.isEmpty()) {
+                return;
+            }
+            final List<Long> ids = new ArrayList<>(byDeviceId.keySet());
+            ids.sort(java.util.Comparator.naturalOrder());
+
+            final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                    db.loadX3dhpqAccountIdentity(accountUuid);
+            if (aikRow == null) {
+                return;
+            }
+            final AccountIdentityKey aik;
+            final AccountIdentityPub aikPub;
+            try {
+                aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
+                aikPub = AccountIdentityPub.unmarshal(aikRow.aikPub());
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker publish — cannot load AIK: "
+                        + e.getMessage());
+                return;
+            }
+
+            final byte[] plaintext =
+                    buildDeviceTrackerPlaintextPayload(accountUuid, byDeviceId, ids, aikPub, aik);
+            if (plaintext == null) {
+                return;
+            }
+
+            final int ownDeviceId = getOwnDeviceId();
+            final XmppX3dhpqMessage xmsg = XmppX3dhpqMessage.createOutboundWithRawPayload(
+                    account, account.getJid(), ownDeviceId, plaintext);
+            xmsg.setPayloadType("devtracker");
+
+            final Jid ownBareJid = account.getJid().asBareJid();
+            int sealedCount = 0;
+            boolean anyMissing = false;
+            for (final Long id : ids) {
+                final int deviceId = id.intValue();
+                final EphemeralPqxdh eph = establishEphemeralSelfSession(deviceId);
+                if (eph == null) {
+                    anyMissing = true;
+                    continue;
+                }
+                final PrekeyEnvelope pe = eph.envelope;
+                final XmppX3dhpqMessage.PrekeyMetadata pm = pe != null
+                        ? new XmppX3dhpqMessage.PrekeyMetadata(
+                                pe.ephemeralPub, pe.opkId, pe.kemKeyId, pe.kemCiphertext,
+                                pe.dcMarshal, pe.aikEd25519Pub, pe.aikMldsaPub)
+                        : null;
+                // isFirst=true always: every seal is a fresh, self-contained PQXDH message.
+                xmsg.addRecipient(ownBareJid, deviceId, eph.session, true, pm);
+                sealedCount++;
+            }
+            if (sealedCount == 0) {
+                Log.d(Config.LOGTAG, LOGPREFIX + ": devtracker publish deferred — no recipient"
+                        + " bundle cached yet; bundle fetch(es) kicked off, will retry on the"
+                        + " next device-set-change publish (§11.8)");
+                return;
+            }
+
+            final Envelope env = xmsg.toExtension();
+            final DevTracker tracker = new DevTracker();
+            tracker.setSenderDevice(ownDeviceId);
+            tracker.setSenderJid(ownBareJid.toString());
+            tracker.setTs(env.getTs());
+            for (final Key k : env.getKeys()) {
+                tracker.addKey(k);
+            }
+            tracker.setPayload(env.getPayload());
+            final long version = nextTrackerVersion(accountUuid);
+            tracker.setVersion(version);
+            tracker.setIssuedAt(System.currentTimeMillis() / 1000L);
+
+            final byte[] signedPart = deviceTrackerSignedPart(tracker);
+            tracker.setSig(X3dhpqCrypto.ed25519Sign(aik.getPrivEd25519(), signedPart));
+            tracker.setMldsaSig(X3dhpqCrypto.mldsa65Sign(aik.getPrivMLDSA(), signedPart));
+
+            final boolean missingRecipients = anyMissing;
+            final int finalSealedCount = sealedCount;
+            final int totalIds = ids.size();
+            final Iq iq = mXmppConnectionService.getIqGenerator()
+                    .generateX3dhpqPublishDevTracker(tracker, "current");
+            mXmppConnectionService.sendIqPacket(account, iq, response -> {
+                if (response.getType() == Iq.Type.ERROR) {
+                    Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker publish failed: " + response);
+                } else {
+                    Log.d(Config.LOGTAG, LOGPREFIX + ": devtracker published (§11.8), "
+                            + finalSealedCount + "/" + totalIds + " recipient(s) sealed"
+                            + (missingRecipients
+                                    ? ", some bundles still missing — will re-seal later"
+                                    : ""));
+                }
+            });
+        } catch (final Exception e) {
+            // Guardrail: sealing/tracker failures must only log, never throw into the
+            // devicelist publish / account-bind path.
+            Log.w(Config.LOGTAG, LOGPREFIX + ": publishSealedDeviceTracker failed (non-fatal,"
+                    + " §11.8): " + e.getMessage());
+        }
+    }
+
+    /**
+     * §11.8: runs a FRESH PQXDH initiation against {@code deviceId}'s currently-cached own-
+     * account bundle (kicking off a fetch and returning {@code null} if not yet cached — the
+     * caller should just skip this recipient this round; the next device-set-change publish
+     * retries it). Deliberately does NOT persist the resulting {@link Session} via {@code
+     * db.putX3dhpqSession} — unlike {@link #establishOutboundSession}, which this otherwise
+     * mirrors, persisting here would silently clobber whatever live pairwise session is
+     * already used for ordinary self-copy message fan-out to the very same
+     * (accountUuid, ownBareJid, deviceId) slot (see {@link #addRecipientDevices}), corrupting
+     * that Double-Ratchet's state on both sides. The tracker seal is a one-shot, self-
+     * contained "first message" envelope, never an ongoing ratcheted conversation, so a
+     * throwaway Session per publish is correct and safe.
+     */
+    private EphemeralPqxdh establishEphemeralSelfSession(final int deviceId) {
+        if (db == null || account == null) {
+            return null;
+        }
+        final String accountUuid = account.getUuid();
+        final Jid ownBareJid = account.getJid().asBareJid();
+
+        final DatabaseBackend.X3dhpqRemoteBundleRow row =
+                db.loadX3dhpqRemoteBundle(accountUuid, ownBareJid.toString(), deviceId);
+        if (row == null || row.bundleXml() == null || row.bundleXml().length == 0) {
+            requestPeerBundle(ownBareJid, deviceId);
+            return null;
+        }
+        final BundleData peerBundle;
+        try {
+            peerBundle = BundleParser.fromBundle(parseBundleXml(row.bundleXml()));
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker seal — failed to parse own bundle"
+                    + " for device " + deviceId + ": " + e.getMessage());
+            return null;
+        }
+
+        final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
+                db.listX3dhpqLocalDevices(accountUuid);
+        if (localRows.isEmpty()) {
+            return null;
+        }
+        final DatabaseBackend.X3dhpqLocalDeviceRow localRow = localRows.get(0);
+        final DeviceIdentityKey dik;
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow;
+        final AccountIdentityPub aikPub;
+        try {
+            dik = DeviceIdentityKey.unmarshal(localRow.dikPriv());
+            aikRow = db.loadX3dhpqAccountIdentity(accountUuid);
+            if (aikRow == null) {
+                return null;
+            }
+            aikPub = AccountIdentityPub.unmarshal(aikRow.aikPub());
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker seal — failed to load local keys: "
+                    + e.getMessage());
+            return null;
+        }
+
+        final PqxdhResult result = PqxdhInitiator.initiate(
+                dik.getPrivX25519(), dik.getPubX25519(), dik.getPubEd25519(),
+                localRow.dc(), aikPub.getPubEd25519(), aikPub.getPubMLDSA(),
+                peerBundle, X3dhpqCrypto.HKDF_SHA512);
+
+        final Session session = Session.fromPqxdhSenderWithPeerDh(result, peerBundle.spkPub);
+        return new EphemeralPqxdh(session, result.getEnvelope());
+    }
+
+    /** Monotonic per-account devtracker version counter, cached in prefs (no schema change). */
+    private long nextTrackerVersion(final String accountUuid) {
+        if (mXmppConnectionService == null) {
+            return 1L;
+        }
+        final android.content.SharedPreferences prefs =
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(
+                        mXmppConnectionService);
+        final String key = "x3dhpq_devtracker_version_" + accountUuid;
+        final long next = prefs.getLong(key, 0L) + 1L;
+        prefs.edit().putLong(key, next).apply();
+        return next;
+    }
+
+    /**
+     * Builds the §11.8 plaintext devtracker payload: domain separator | u32-len-prefixed
+     * §11.7 {@code Snapshot} (folded DeviceState) | u32 head-count + u32-len-prefixed DAG
+     * head hashes | 1-byte has-AIK-priv flag + (if set) u32-len-prefixed {@code
+     * AccountIdentityKey.marshal()}. This exact framing is internal to this client's §11.8
+     * implementation (the XEP draft does not pin a byte layout for the payload, only for
+     * the outer seal); see the porting notes for cross-client alignment.
+     */
+    private byte[] buildDeviceTrackerPlaintextPayload(
+            final String accountUuid,
+            final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> byDeviceId,
+            final List<Long> ids,
+            final AccountIdentityPub ownAikPub,
+            final AccountIdentityKey aikToEmbed) {
+        try {
+            final byte[] ownerAikFp =
+                    im.conversations.x3dhpq.types.DeviceAuditEntryV2.aikFp(ownAikPub);
+            final List<im.conversations.x3dhpq.types.DeviceAuditEntryV2.SnapshotDevice> snapDevices =
+                    new ArrayList<>();
+            for (final Long id : ids) {
+                final im.conversations.x3dhpq.types.DeviceList.DeviceListEntry e = byDeviceId.get(id);
+                if (e == null) {
+                    continue;
+                }
+                snapDevices.add(new im.conversations.x3dhpq.types.DeviceAuditEntryV2.SnapshotDevice(
+                        id, e.getCert().marshal()));
+            }
+            final byte[] snapshot = im.conversations.x3dhpq.types.DeviceAuditEntryV2
+                    .buildSnapshotPayload(ownerAikFp, 0L, snapDevices);
+
+            final im.conversations.x3dhpq.types.DeviceDag dag =
+                    new im.conversations.x3dhpq.types.DeviceDag();
+            for (final DatabaseBackend.X3dhpqDeviceAuditEntryRow row :
+                    db.listX3dhpqDeviceAuditEntries(accountUuid)) {
+                dag.ingest(row.entryBlob());
+            }
+            final List<byte[]> heads = dag.currentHeads();
+
+            final java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            out.write(DEVTRACKER_PAYLOAD_DOMAIN);
+            writeU32(out, snapshot.length);
+            out.write(snapshot);
+            writeU32(out, heads.size());
+            for (final byte[] h : heads) {
+                writeU32(out, h.length);
+                out.write(h);
+            }
+            if (aikToEmbed != null) {
+                out.write(1);
+                final byte[] aikBlob = aikToEmbed.marshal();
+                writeU32(out, aikBlob.length);
+                out.write(aikBlob);
+            } else {
+                out.write(0);
+            }
+            return out.toByteArray();
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": buildDeviceTrackerPlaintextPayload failed: "
+                    + e.getMessage());
+            return null;
+        }
+    }
+
+    private static void writeU32(final java.io.ByteArrayOutputStream out, final int v) {
+        out.write((v >>> 24) & 0xff);
+        out.write((v >>> 16) & 0xff);
+        out.write((v >>> 8) & 0xff);
+        out.write(v & 0xff);
+    }
+
+    /** Inverse of {@link #buildDeviceTrackerPlaintextPayload}; throws on malformed input. */
+    private static DecodedTracker parseDeviceTrackerPlaintextPayload(final byte[] plaintext) {
+        final ByteBuffer buf = ByteBuffer.wrap(plaintext);
+        final byte[] domain = new byte[DEVTRACKER_PAYLOAD_DOMAIN.length];
+        buf.get(domain);
+        if (!Arrays.equals(domain, DEVTRACKER_PAYLOAD_DOMAIN)) {
+            throw new IllegalArgumentException("bad devtracker payload domain separator");
+        }
+        final int snapLen = buf.getInt();
+        final byte[] snapBytes = new byte[snapLen];
+        buf.get(snapBytes);
+        final DecodedTracker out = new DecodedTracker();
+        out.snapshot = im.conversations.x3dhpq.types.DeviceAuditEntryV2.parseSnapshot(snapBytes);
+        final int headCount = buf.getInt();
+        out.heads = new ArrayList<>(headCount);
+        for (int i = 0; i < headCount; i++) {
+            final int hLen = buf.getInt();
+            final byte[] h = new byte[hLen];
+            buf.get(h);
+            out.heads.add(h);
+        }
+        final byte hasAik = buf.get();
+        if (hasAik != 0) {
+            final int aikLen = buf.getInt();
+            final byte[] aikBytes = new byte[aikLen];
+            buf.get(aikBytes);
+            out.aikPriv = AccountIdentityKey.unmarshal(aikBytes);
+        }
+        return out;
+    }
+
+    /**
+     * §11.8 outer SignedPart: domain separator | version(u64) | issued_at(u64) |
+     * SHA-256(payload ciphertext) | key-count(u32) | SHA-256(canonical per-recipient
+     * key digest, sorted by rid ascending). Hashing the bulk content (rather than
+     * inlining it) keeps the signed input small and fixed-size while still binding the
+     * signature to every byte actually published.
+     */
+    private static byte[] deviceTrackerSignedPart(final DevTracker tracker) {
+        final long version = parseUnsignedLongOrZero(tracker.getVersion());
+        final long issuedAt = parseLongOrZero(tracker.getIssuedAt());
+        final byte[] payloadBytes =
+                tracker.getPayload() != null ? tracker.getPayload().asBytes() : new byte[0];
+        final byte[] payloadHash = X3dhpqCrypto.SHA256.hash(payloadBytes);
+
+        final List<Key> keys = new ArrayList<>(tracker.getKeys());
+        keys.sort(java.util.Comparator.comparingInt(
+                k -> k.getRecipientDeviceId() != null ? k.getRecipientDeviceId() : 0));
+        final java.io.ByteArrayOutputStream keyBytes = new java.io.ByteArrayOutputStream();
+        for (final Key k : keys) {
+            final int rid = k.getRecipientDeviceId() != null ? k.getRecipientDeviceId() : 0;
+            writeU32(keyBytes, rid);
+            final byte[] hdr = k.getHdr() != null ? k.getHdr().asBytes() : new byte[0];
+            final byte[] emk = k.getEmk() != null ? k.getEmk().asBytes() : new byte[0];
+            writeU32(keyBytes, hdr.length);
+            keyBytes.write(hdr, 0, hdr.length);
+            writeU32(keyBytes, emk.length);
+            keyBytes.write(emk, 0, emk.length);
+        }
+        final byte[] keysHash = X3dhpqCrypto.SHA256.hash(keyBytes.toByteArray());
+
+        final ByteBuffer out = ByteBuffer.allocate(
+                DEVTRACKER_SIGNED_DOMAIN.length + 8 + 8 + payloadHash.length + 4 + keysHash.length);
+        out.put(DEVTRACKER_SIGNED_DOMAIN);
+        out.putLong(version);
+        out.putLong(issuedAt);
+        out.put(payloadHash);
+        out.putInt(keys.size());
+        out.put(keysHash);
+        return out.array();
+    }
+
+    private static long parseLongOrZero(final String s) {
+        try {
+            return s == null ? 0L : Long.parseLong(s);
+        } catch (final NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private static long parseUnsignedLongOrZero(final String s) {
+        try {
+            return s == null ? 0L : Long.parseUnsignedLong(s);
+        } catch (final NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    /**
+     * §11.8 login-time presence check: used to ENHANCE {@link #resolvePendingEnrollment()}.
+     * Fetches the account's own tracker item and reports only whether one is published —
+     * "present" is itself already the "an account identity already exists" signal for a
+     * device with no AIK to verify against yet, mirroring how the pre-existing devicelist-
+     * emptiness fallback check already works (no signature check either).
+     */
+    private void fetchDeviceTrackerPresence(final java.util.function.Consumer<Boolean> onResult) {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            onResult.accept(false);
+            return;
+        }
+        final Jid ownBareJid = account.getJid().asBareJid();
+        final Iq iq = mXmppConnectionService.getIqGenerator().generateX3dhpqRequestDevTracker(ownBareJid);
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            boolean present = false;
+            try {
+                if (response.getType() == Iq.Type.RESULT) {
+                    final Extension payload = extractPubsubPayload(response, DevTracker.class);
+                    present = payload instanceof DevTracker;
+                }
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker presence fetch failed (non-fatal,"
+                        + " §11.8): " + e.getMessage());
+            }
+            onResult.accept(present);
+        });
+    }
+
+    /**
+     * §11.8 login-time check for an ALREADY-ENROLLED device (offline revocation
+     * detection): fetches the tracker, verifies the hybrid AIK signature against our own
+     * pinned AIK, and attempts to decrypt our own {@code &lt;key&gt;} copy. Sets the
+     * {@link #isDisabledByTrackerRevocation()} flag consumed by the device-management UI.
+     * No-op while {@link #isPendingEnrollment()} (that case is handled by {@link
+     * #resolvePendingEnrollment()}'s tracker-presence check instead) or if nothing is
+     * published yet (this login's {@link #publishSealedDeviceTracker()} call will create
+     * it).
+     */
+    public void checkDeviceTrackerForRevocation() {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            return;
+        }
+        if (isPendingEnrollment()) {
+            return;
+        }
+        final Jid ownBareJid = account.getJid().asBareJid();
+        final Iq iq = mXmppConnectionService.getIqGenerator().generateX3dhpqRequestDevTracker(ownBareJid);
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            try {
+                if (response.getType() != Iq.Type.RESULT) {
+                    return;
+                }
+                final Extension payload = extractPubsubPayload(response, DevTracker.class);
+                if (!(payload instanceof DevTracker)) {
+                    return; // absent — publishSealedDeviceTracker() will create it this login
+                }
+                interpretDeviceTrackerSafely((DevTracker) payload);
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker revocation check failed"
+                        + " (non-fatal, §11.8): " + e.getMessage());
+            }
+        });
+    }
+
+    /** try/catch wrapper around {@link #interpretDeviceTracker} — never throws to callers. */
+    private void interpretDeviceTrackerSafely(final DevTracker tracker) {
+        try {
+            final TrackerOutcome outcome = interpretDeviceTracker(tracker);
+            switch (outcome) {
+                case AUTHORIZED:
+                    setTrackerRevokedFlag(false);
+                    break;
+                case NOT_DECRYPTABLE:
+                    Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker present + AIK-signed but our"
+                            + " own <key> copy did not decrypt — treating as revoked (§11.8)");
+                    setTrackerRevokedFlag(true);
+                    break;
+                case INVALID:
+                    Log.w(Config.LOGTAG, LOGPREFIX + ": devtracker AIK signature did not verify"
+                            + " — ignoring (possible tamper/downgrade, §11.8)");
+                    break;
+                case ABSENT:
+                default:
+                    break;
+            }
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": interpretDeviceTrackerSafely failed (non-fatal,"
+                    + " §11.8): " + e.getMessage());
+        }
+    }
+
+    /**
+     * Core §11.8 interpretation: verifies the hybrid AIK signature (against our own
+     * pinned AIK — always available here since callers only reach this once enrolled) and
+     * attempts to decrypt our own {@code &lt;key&gt;} copy exactly like an inbound 1:1
+     * message (see {@link eu.siacs.conversations.parser.MessageParser}), reusing {@link
+     * #acceptInboundSessionAsSession}. A throwaway {@link Envelope} carries the tracker's
+     * keys/payload into {@link XmppX3dhpqMessage#fromExtension} without modifying the
+     * shared {@code Envelope} class.
+     */
+    private TrackerOutcome interpretDeviceTracker(final DevTracker tracker) {
+        if (db == null || account == null) {
+            return TrackerOutcome.ABSENT;
+        }
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(account.getUuid());
+        AccountIdentityPub aikPub = null;
+        if (aikRow != null) {
+            try {
+                aikPub = AccountIdentityPub.unmarshal(aikRow.aikPub());
+            } catch (final Exception ignored) {
+                // aikPub stays null; treated as "cannot verify" below
+            }
+        }
+        if (aikPub == null) {
+            return TrackerOutcome.NOT_DECRYPTABLE;
+        }
+
+        final byte[] signedPart = deviceTrackerSignedPart(tracker);
+        final Sig sig = tracker.getSig();
+        final MldsaSig mldsaSig = tracker.getMldsaSig();
+        final boolean sigOk = sig != null && mldsaSig != null
+                && X3dhpqCrypto.ed25519Verify(aikPub.getPubEd25519(), signedPart, sig.asBytes())
+                && X3dhpqCrypto.mldsa65Verify(aikPub.getPubMLDSA(), signedPart, mldsaSig.asBytes());
+        if (!sigOk) {
+            return TrackerOutcome.INVALID;
+        }
+
+        final Integer ownDeviceId = getOwnDeviceIdOrNull();
+        if (ownDeviceId == null) {
+            return TrackerOutcome.NOT_DECRYPTABLE;
+        }
+        try {
+            final Envelope tmp = new Envelope();
+            tmp.setSenderDevice(parseIntOrZero(tracker.getSenderDevice()));
+            tmp.setSenderJid(tracker.getSenderJid());
+            tmp.setTs(tracker.getTs());
+            for (final Key k : tracker.getKeys()) {
+                tmp.addKey(k);
+            }
+            tmp.setPayload(tracker.getPayload());
+
+            final XmppX3dhpqMessage incoming =
+                    XmppX3dhpqMessage.fromExtension(account, account.getJid().asBareJid(), tmp);
+            final XmppX3dhpqMessage.EncryptedKey k = incoming.findKeyForDevice(ownDeviceId);
+            if (k == null || k.prekey == null) {
+                return TrackerOutcome.NOT_DECRYPTABLE;
+            }
+            final PrekeyEnvelope env = new PrekeyEnvelope(
+                    k.prekey.ephemeralPub, k.prekey.kemCiphertext, k.prekey.kemKeyId,
+                    k.prekey.opkId, k.prekey.dcMarshal, k.prekey.aikEd25519Pub,
+                    k.prekey.aikMldsaPub);
+            final Session session =
+                    acceptInboundSessionAsSession(account.getJid().asBareJid(), ownDeviceId, env);
+            final byte[] plaintext = incoming.decrypt(session, k);
+            onDeviceTrackerDecrypted(plaintext);
+            return TrackerOutcome.AUTHORIZED;
+        } catch (final Exception e) {
+            Log.d(Config.LOGTAG, LOGPREFIX + ": devtracker own-copy decrypt failed (§11.8): "
+                    + e.getMessage());
+            return TrackerOutcome.NOT_DECRYPTABLE;
+        }
+    }
+
+    private static int parseIntOrZero(final String s) {
+        try {
+            return s == null ? 0 : Integer.parseInt(s);
+        } catch (final NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Best-effort fold-forward on a successfully decrypted tracker payload: logs the
+     * asserted device set for diagnostics, and — §11.8 "self-refreshing, device-key-sealed
+     * recovery" — adopts the embedded AIK_priv ONLY in the defensive case where this
+     * (already-authorized) device somehow has no local AIK row at all. Never overwrites an
+     * existing row; never merges co-account device rows (that stays gated behind the
+     * audit-chain trust check in {@link #handleInboundDeviceList}, §10.6.3).
+     */
+    private void onDeviceTrackerDecrypted(final byte[] plaintext) {
+        if (db == null || account == null) {
+            return;
+        }
+        try {
+            final DecodedTracker decoded = parseDeviceTrackerPlaintextPayload(plaintext);
+            final int deviceCount = decoded.snapshot != null ? decoded.snapshot.devices.size() : 0;
+            Log.d(Config.LOGTAG, LOGPREFIX + ": devtracker decrypted — " + deviceCount
+                    + " authorized device(s), "
+                    + (decoded.heads != null ? decoded.heads.size() : 0) + " DAG head(s) (§11.8)");
+            if (decoded.aikPriv != null) {
+                final DatabaseBackend.X3dhpqAccountIdentityRow existing =
+                        db.loadX3dhpqAccountIdentity(account.getUuid());
+                if (existing == null) {
+                    final String fp = decoded.aikPriv.getPublic().fingerprint(X3dhpqCrypto.BLAKE2B_160);
+                    db.putX3dhpqAccountIdentity(account.getUuid(),
+                            decoded.aikPriv.marshal(), decoded.aikPriv.getPublic().marshal(), fp);
+                    Log.i(Config.LOGTAG, LOGPREFIX + ": adopted AIK_priv recovered from the"
+                            + " sealed device-state tracker (§11.8)");
+                }
+            }
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": onDeviceTrackerDecrypted failed to parse payload"
+                    + " (non-fatal, §11.8): " + e.getMessage());
+        }
+    }
+
+    private void setTrackerRevokedFlag(final boolean revoked) {
+        if (mXmppConnectionService == null || account == null) {
+            return;
+        }
+        final android.content.SharedPreferences prefs =
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(
+                        mXmppConnectionService);
+        prefs.edit()
+                .putBoolean("x3dhpq_devtracker_revoked_" + account.getUuid(), revoked)
+                .apply();
+    }
+
+    /**
+     * §11.8: true once this (previously-authorized) device observed a validly-signed
+     * sealed tracker whose own {@code &lt;key&gt;} copy it could not decrypt — the offline
+     * revocation signal. Consumed by the device-management UI ({@code
+     * X3dhpqSelfDevicesActivity}) to surface the same associate-or-reset choice normally
+     * shown only for §10.6.1 pending enrollment. Cleared automatically the next time this
+     * device is seen decrypting the tracker again (e.g. after being re-added).
+     */
+    public boolean isDisabledByTrackerRevocation() {
+        if (mXmppConnectionService == null || account == null) {
+            return false;
+        }
+        final android.content.SharedPreferences prefs =
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(
+                        mXmppConnectionService);
+        return prefs.getBoolean("x3dhpq_devtracker_revoked_" + account.getUuid(), false);
     }
 
     /**
@@ -2098,6 +2842,45 @@ public class X3dhpqService {
     }
 
     // ---- Pairing rendezvous: <pair-hello> (XEP §10.1a) ----
+
+    /**
+     * §11.8 "Queued enrollment request": explicitly fetches our own {@code pair-hello}
+     * item on every connect, rather than relying solely on live self-PEP {@code
+     * +notify}. A disabled device's request is published once and persists on the
+     * server (whitelist, {@code persist_items=true}); an authorized device that was
+     * offline at publish time would otherwise never learn about it until the disabled
+     * device happens to be online again at the exact same moment. Routes the fetched
+     * item through the same {@link #handleEvent} path a live event uses, so it both
+     * (a) drives the pairing FSM immediately if the pairing screen happens to be open,
+     * and (b) persists the "A new device wants to join your account" banner state via
+     * {@link VerifyDeviceManager#handlePairHello} regardless.
+     */
+    public void fetchPairHelloOnConnect() {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            return;
+        }
+        final Jid ownBareJid = account.getJid().asBareJid();
+        final Iq iq = mXmppConnectionService.getIqGenerator().generateX3dhpqRequestPairHello(ownBareJid);
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            try {
+                if (response.getType() != Iq.Type.RESULT) {
+                    return;
+                }
+                final PubSub pubsub = response.getExtension(PubSub.class);
+                final Items items = pubsub != null ? pubsub.getItems() : null;
+                final var entry = items != null
+                        ? items.getFirstItemWithId(
+                                im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class)
+                        : null;
+                if (entry != null) {
+                    handleEvent(ownBareJid, Namespace.X3DHPQ_PAIR, entry.getKey(), entry.getValue());
+                }
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": fetchPairHelloOnConnect processing failed"
+                        + " (non-fatal, §11.8/§10.1a): " + e.getMessage());
+            }
+        });
+    }
 
     /**
      * Method B rendezvous (§10.1a): publishes a {@code <pair-hello>} item to THIS device's own PEP

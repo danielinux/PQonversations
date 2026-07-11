@@ -1239,6 +1239,11 @@
     <string name="x3dhpq_retrust_button">Re-trust</string>
     <string name="x3dhpq_associate_existing_identity_button">Associate with existing identity</string>
     <string name="x3dhpq_confirm_waiting_device_button">Confirm a waiting device</string>
+    <string name="x3dhpq_identity_revoked_title">This device was removed from the account</string>
+    <string name="x3dhpq_identity_revoked_text">Another device revoked this device\'s access. Associate again with the account\'s existing identity, or generate a new identity instead (this loses access to prior messages and groups).</string>
+    <string name="x3dhpq_join_request_title">A new device wants to join your account</string>
+    <string name="x3dhpq_join_request_text">%1$s asked to join this account. Review it and complete the pairing code/QR exchange to confirm.</string>
+    <string name="x3dhpq_review_join_request_button">Review request</string>
     <string name="x3dhpq_device_this_device">This device</string>
     <string name="x3dhpq_device_role_primary">Primary</string>
     <string name="x3dhpq_device_role_secondary">Secondary</string>

@@ -350,6 +350,9 @@ public class DiscoManager extends AbstractManager {
         // Serverless pairing rendezvous (§10.1a): subscribe to our own pair node so a
         // new device's <pair-hello> reaches existing primary resources via self-PEP.
         features.add(notify(Namespace.X3DHPQ_PAIR));
+        // §11.8 sealed device-state tracker: subscribe to our own tracker node so a
+        // re-seal (device-set change) reaches every one of our own online resources.
+        features.add(notify(Namespace.X3DHPQ_DEVTRACKER));
         if (!appSettings.isUseTor() && !account.isOnion()) {
             features.addAll(PRIVACY_SENSITIVE);
             features.addAll(VOIP_NAMESPACES);

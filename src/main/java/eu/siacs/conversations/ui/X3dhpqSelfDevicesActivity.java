@@ -42,10 +42,15 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     private Button mAddDeviceButton;
     private Button mConfirmWaitingDeviceButton;
     private View mPendingEnrollmentBanner;
+    private TextView mPendingEnrollmentTitleView;
+    private TextView mPendingEnrollmentTextView;
     private Button mAssociateExistingIdentityButton;
     private Button mGenerateNewIdentityButton;
     private View mBlockedIdentitiesContainer;
     private ListView mBlockedIdentitiesList;
+    private View mJoinRequestBanner;
+    private TextView mJoinRequestTextView;
+    private Button mReviewJoinRequestButton;
 
     private String mAccountUuid;
     private Account mAccount;
@@ -79,10 +84,15 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mAddDeviceButton = findViewById(R.id.add_device_button);
         mConfirmWaitingDeviceButton = findViewById(R.id.confirm_waiting_device_button);
         mPendingEnrollmentBanner = findViewById(R.id.pending_enrollment_banner);
+        mPendingEnrollmentTitleView = findViewById(R.id.pending_enrollment_title);
+        mPendingEnrollmentTextView = findViewById(R.id.pending_enrollment_text);
         mAssociateExistingIdentityButton = findViewById(R.id.associate_existing_identity_button);
         mGenerateNewIdentityButton = findViewById(R.id.generate_new_identity_button);
         mBlockedIdentitiesContainer = findViewById(R.id.blocked_identities_container);
         mBlockedIdentitiesList = findViewById(R.id.blocked_identities_list);
+        mJoinRequestBanner = findViewById(R.id.join_request_banner);
+        mJoinRequestTextView = findViewById(R.id.join_request_text);
+        mReviewJoinRequestButton = findViewById(R.id.review_join_request_button);
 
         mAdapter = new DeviceAdapter();
         mDeviceListView.setAdapter(mAdapter);
@@ -106,6 +116,17 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mAssociateExistingIdentityButton.setOnClickListener(
                 v -> startActivity(PairToExistingActivity.makeIntent(this, mAccountUuid)));
         mGenerateNewIdentityButton.setOnClickListener(v -> showGenerateNewIdentityDialog());
+        // §11.8 queued enrollment request: jump straight to the "confirm a waiting
+        // device" scan flow, same entry point as the manual button, and clear the
+        // banner state now that a human is acting on it.
+        mReviewJoinRequestButton.setOnClickListener(
+                v -> {
+                    if (mAccount != null) {
+                        eu.siacs.conversations.xmpp.manager.VerifyDeviceManager.clearPendingJoinRequest(
+                                this, mAccount.getJid().asBareJid().toString());
+                    }
+                    startActivity(PairNewDeviceActivity.makeIntentConfirmPending(this, mAccountUuid));
+                });
     }
 
     /** §10.6.4b: destructive confirmation dialog before minting a brand-new identity. */
@@ -180,12 +201,34 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
             mAikFingerprintView.setText(R.string.x3dhpq_aik_fp_label);
         }
 
-        // --- §10.6.1/§10.6.4 pending-enrollment banner ---
-        final boolean pending = service.isPendingEnrollment();
+        // --- §10.6.1/§10.6.4 pending-enrollment banner, extended by §11.8: a device
+        //     that lost the ability to decrypt the sealed device-state tracker (offline
+        //     revocation detection) is shown the same associate-or-reset choice. ---
+        final boolean pendingEnrollment = service.isPendingEnrollment();
+        final boolean revoked = !pendingEnrollment && service.isDisabledByTrackerRevocation();
+        final boolean pending = pendingEnrollment || revoked;
         mPendingEnrollmentBanner.setVisibility(pending ? View.VISIBLE : View.GONE);
+        if (revoked) {
+            mPendingEnrollmentTitleView.setText(R.string.x3dhpq_identity_revoked_title);
+            mPendingEnrollmentTextView.setText(R.string.x3dhpq_identity_revoked_text);
+        } else {
+            mPendingEnrollmentTitleView.setText(R.string.x3dhpq_pending_enrollment_title);
+            mPendingEnrollmentTextView.setText(R.string.x3dhpq_pending_enrollment_text);
+        }
         mDeviceListView.setVisibility(pending ? View.GONE : View.VISIBLE);
         mAddDeviceButton.setEnabled(!pending);
         mConfirmWaitingDeviceButton.setEnabled(!pending);
+
+        // --- §11.8 queued enrollment request banner ---
+        final String joinRequestFullJid = eu.siacs.conversations.xmpp.manager.VerifyDeviceManager
+                .getPendingJoinRequestFullJid(this, mAccount.getJid().asBareJid().toString());
+        if (joinRequestFullJid != null && !pending) {
+            mJoinRequestBanner.setVisibility(View.VISIBLE);
+            mJoinRequestTextView.setText(
+                    getString(R.string.x3dhpq_join_request_text, joinRequestFullJid));
+        } else {
+            mJoinRequestBanner.setVisibility(View.GONE);
+        }
 
         // --- associated devices: union of this install's own device + every co-account
         //     sibling, §10.6.3 trust-gated (empty while pending — see above). ---

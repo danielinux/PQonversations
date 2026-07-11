@@ -143,4 +143,7 @@ public final class Namespace {
     public static final String X3DHPQ_AUDIT = "urn:xmppqr:x3dhpq:audit:0";
     public static final String X3DHPQ_RECOVERY = "urn:xmppqr:x3dhpq:recovery:0";
     public static final String X3DHPQ_GROUP = "urn:xmppqr:x3dhpq:group:0";
+    // §11.8: sealed device-state tracker (AIK-signed, payload sealed hybrid
+    // X25519+ML-KEM-768 to each authorized device's published bundle key).
+    public static final String X3DHPQ_DEVTRACKER = "urn:xmppqr:x3dhpq:devtracker:0";
 }
