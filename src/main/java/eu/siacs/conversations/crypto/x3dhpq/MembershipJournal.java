@@ -118,11 +118,6 @@ public final class MembershipJournal {
             }
         } else {
             if (lastHash == null || !Arrays.equals(prevHash, lastHash)) {
-                final StringBuilder p = new StringBuilder(), l = new StringBuilder();
-                for (byte b : prevHash) p.append(String.format("%02x", b));
-                if (lastHash != null) for (byte b : lastHash) l.append(String.format("%02x", b));
-                android.util.Log.w(Config.LOGTAG, "MJ-CHAIN seq=" + entry.getSeq()
-                        + " entry.prevHash=" + p + " ourLastHash=" + l);
                 throw new IllegalArgumentException("MembershipJournal: chain link broken at seq " + entry.getSeq());
             }
         }
@@ -150,15 +145,6 @@ public final class MembershipJournal {
                 ownerAik.getPubEd25519(), signedPart, entry.getSigEd25519());
         boolean mlOk = X3dhpqCrypto.mldsa65Verify(
                 ownerAik.getPubMLDSA(), signedPart, entry.getSigMLDSA());
-        {
-            final StringBuilder sp = new StringBuilder();
-            for (int i = 0; i < Math.min(signedPart.length, 60); i++) sp.append(String.format("%02x", signedPart[i]));
-            android.util.Log.w(Config.LOGTAG, "MJ-DIAG seq=" + entry.getSeq()
-                    + " ownerFp=" + ownerAik.fingerprint(X3dhpqCrypto.BLAKE2B_160).replace(" ", "")
-                    + " spLen=" + signedPart.length + " edSig=" + entry.getSigEd25519().length
-                    + " mlSig=" + entry.getSigMLDSA().length
-                    + " edOk=" + edOk + " mlOk=" + mlOk + " spHead=" + sp);
-        }
         if (!edOk || !mlOk) {
             throw new IllegalArgumentException(
                     "MembershipJournal: signature verification failed at seq " + entry.getSeq()

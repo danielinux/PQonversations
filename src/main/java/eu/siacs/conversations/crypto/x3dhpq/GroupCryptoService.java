@@ -236,10 +236,32 @@ public class GroupCryptoService {
                     state.appliedMembershipItemIds.add(itemId);
                 }
                 rebuildGroupSession(roomStr, state);
+                // The room now has a verified membership journal → durably mark
+                // the conversation as an x3dhpq secret group so encryption
+                // detection no longer depends on the MUC being members-only
+                // (rooms are OPEN transports now).
+                markConversationAsX3dhpqGroup(roomJidBare);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, TAG + ": failed to append journal entry "
                         + itemId + " for " + roomStr + ": " + e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Durably latch a MUC conversation as an x3dhpq secret group (persisted
+     * {@link Conversation#ATTRIBUTE_X3DHPQ_GROUP}). Idempotent and cheap on
+     * repeat calls: {@link Conversation#setAttribute} only reports a change the
+     * first time, so the DB write + UI refresh happen once. Called on the owner
+     * path (group creation) and on every invitee's first journal ingest.
+     */
+    private void markConversationAsX3dhpqGroup(final Jid roomJidBare) {
+        if (mXmppConnectionService == null || account == null) return;
+        final Conversation conversation = mXmppConnectionService.find(account, roomJidBare);
+        if (conversation == null) return;
+        if (conversation.setAttribute(Conversation.ATTRIBUTE_X3DHPQ_GROUP, true)) {
+            mXmppConnectionService.updateConversation(conversation);
+            mXmppConnectionService.updateConversationUi();
         }
     }
 
@@ -688,6 +710,11 @@ public class GroupCryptoService {
         final Jid roomBare = roomJid.asBareJid();
         final String roomStr = roomBare.toString();
         final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
+
+        // Owner is (re)establishing group membership → durably latch the room as
+        // an x3dhpq secret group so its OPEN (non-members-only) MUC still drives
+        // x3dhpq encryption for the creator's outgoing messages.
+        markConversationAsX3dhpqGroup(roomBare);
 
         // Resolve our own AIK (priv + pub) for signing.
         final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =

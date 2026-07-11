@@ -59,6 +59,13 @@ public class Conversation extends AbstractEntity
     public static final String ATTRIBUTE_LAST_CLEAR_HISTORY = "last_clear_history";
     public static final String ATTRIBUTE_FORMERLY_PRIVATE_NON_ANONYMOUS =
             "formerly_private_non_anonymous";
+    // Durable "this MUC is an x3dhpq secret group" latch. Set once the room has a
+    // membership journal (owner bootstraps it at creation; an invitee sets it on
+    // first journal ingest) and never cleared. Decouples secret-group detection
+    // from the MUC being members-only: x3dhpq rooms are now OPEN transports whose
+    // membership is governed solely by the signed journal, so membersOnly() is no
+    // longer a reliable signal. Mirrors Dino's db.has_membership_journal().
+    public static final String ATTRIBUTE_X3DHPQ_GROUP = "x3dhpq_group";
     public static final String ATTRIBUTE_PINNED_ON_TOP = "pinned_on_top";
     static final String ATTRIBUTE_MUC_PASSWORD = "muc_password";
     static final String ATTRIBUTE_CAPS2_HASH = "muc_caps2_hash";
@@ -773,7 +780,14 @@ public class Conversation extends AbstractEntity
      * labelling in the UI.
      */
     public boolean isX3dhpqSecretGroup() {
-        return mode == MODE_MULTI && isPrivateAndNonAnonymous();
+        if (mode != MODE_MULTI) {
+            return false;
+        }
+        // Durable journal-backed latch is the authoritative signal for OPEN
+        // x3dhpq rooms. Fall back to the members-only/non-anonymous heuristic for
+        // legacy rooms created before the open-transport switch (and to bootstrap
+        // the latch the first time such a room is observed).
+        return getBooleanAttribute(ATTRIBUTE_X3DHPQ_GROUP, false) || isPrivateAndNonAnonymous();
     }
 
     public synchronized MucOptions getMucOptions() {

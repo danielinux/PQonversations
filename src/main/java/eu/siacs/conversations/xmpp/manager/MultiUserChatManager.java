@@ -327,6 +327,14 @@ public class MultiUserChatManager extends AbstractManager {
         return Futures.transform(
                 configured,
                 c -> {
+                    // Durably mark this as an x3dhpq secret group BEFORE inviting.
+                    // The room is an OPEN MUC (not members-only), so encryption
+                    // detection can't rely on membersOnly(); the journal-backed
+                    // latch is authoritative. Setting it here also lets invite()
+                    // gate the journal bootstrap on isX3dhpqSecretGroup().
+                    if (conversation.setAttribute(Conversation.ATTRIBUTE_X3DHPQ_GROUP, true)) {
+                        getDatabase().updateConversation(conversation);
+                    }
                     for (var invitee : addresses) {
                         this.service.invite(conversation, invitee);
                     }
@@ -1345,39 +1353,35 @@ public class MultiUserChatManager extends AbstractManager {
                     state.membersOnly() ? Affiliation.MEMBER : Affiliation.NONE;
             Log.d(Config.LOGTAG, "changing affiliation of invitee to " + targetAffiliation);
             this.setAffiliation(conversation, targetAffiliation, address);
-            // After the muc#admin set-affiliation lands, bootstrap/extend the
-            // x3dhpq membership journal so the room becomes encryption-capable.
-            // Without this, getNextEncryption() falls back to plaintext until
-            // someone publishes a journal entry — which never happens
-            // automatically in the original Conversations flow.
-            if (targetAffiliation == Affiliation.MEMBER) {
-                final var gcs = service.getGroupCryptoService(conversation.getAccount());
-                if (gcs == null) {
-                    Log.w(Config.LOGTAG,
+        }
+
+        // Bootstrap/extend the x3dhpq membership journal so the invitee becomes a
+        // crypto member. For a secret PQ group the journal is the SOLE source of
+        // truth for membership — the MUC is an OPEN, agnostic transport — so this
+        // must fire for EVERY invite regardless of the invitee's MUC affiliation
+        // (open rooms grant Affiliation.NONE). Gated on the durable
+        // isX3dhpqSecretGroup() latch, not on members-only, and independent of the
+        // set-affiliation IQ above: as room owner we can extend the journal at any
+        // time. Without this, getNextEncryption() would fall back to plaintext.
+        if (conversation.isX3dhpqSecretGroup()) {
+            final var gcs = service.getGroupCryptoService(conversation.getAccount());
+            if (gcs == null) {
+                Log.w(Config.LOGTAG,
+                        conversation.getAccount().getJid().asBareJid()
+                                + ": no GroupCryptoService available; cannot bootstrap journal");
+            } else {
+                // Defensive try/catch: the journal publish must NEVER crash this
+                // codepath, otherwise the mediated invite that follows is never
+                // sent and the invitee can't join.
+                try {
+                    gcs.publishAddMember(
+                            conversation.getAddress().asBareJid(),
+                            address.asBareJid());
+                } catch (Throwable t) {
+                    Log.e(Config.LOGTAG,
                             conversation.getAccount().getJid().asBareJid()
-                                    + ": no GroupCryptoService available; cannot bootstrap journal");
-                } else {
-                    // Fire immediately. The publish is independent of the
-                    // muc#admin set-affiliation IQ on the server side: as long
-                    // as we are room owner, we can publish to the room's
-                    // group:0 PEP node regardless of the invitee's current
-                    // affiliation. This avoids a race where the
-                    // setAffiliation Future never resolves and our hook never
-                    // fires.
-                    //
-                    // Defensive try/catch: the journal publish must NEVER
-                    // crash this codepath, otherwise the mediated invite that
-                    // follows is never sent and the invitee can't join.
-                    try {
-                        gcs.publishAddMember(
-                                conversation.getAddress().asBareJid(),
-                                address.asBareJid());
-                    } catch (Throwable t) {
-                        Log.e(Config.LOGTAG,
-                                conversation.getAccount().getJid().asBareJid()
-                                        + ": publishAddMember threw — invite proceeds without journal bootstrap",
-                                t);
-                    }
+                                    + ": publishAddMember threw — invite proceeds without journal bootstrap",
+                            t);
                 }
             }
         }
@@ -1591,7 +1595,14 @@ public class MultiUserChatManager extends AbstractManager {
     public static Map<String, Object> defaultGroupChatConfiguration() {
         return new ImmutableMap.Builder<String, Object>()
                 .put("muc#roomconfig_persistentroom", true)
-                .put("muc#roomconfig_membersonly", true)
+                // Secret PQ groups are NOT members-only: the x3dhpq membership
+                // journal is the sole source of truth for who may decrypt, and the
+                // MUC stays an agnostic transport. An open room sidesteps
+                // server-side entry gating (affiliation grants, CAPTCHA on
+                // members-only entry). A non-member can join the MUC but only sees
+                // ciphertext. The invite path already skips the affiliation grant
+                // when the room is not members-only.
+                .put("muc#roomconfig_membersonly", false)
                 .put("muc#roomconfig_publicroom", false)
                 .put("muc#roomconfig_whois", "anyone")
                 .put("muc#roomconfig_changesubject", false)
