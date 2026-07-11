@@ -119,7 +119,12 @@ public class GroupCryptoService {
     public void ingestJournalEntry(final Jid roomJid, final byte[] entryBytes) {
         if (roomJid == null || entryBytes == null || entryBytes.length == 0) return;
         final String itemId = journalEntryDedupId(entryBytes);
+        Log.d(Config.LOGTAG, TAG + ": ingest journal-entry (" + entryBytes.length
+                + " bytes, id=" + itemId + ") for " + roomJid.asBareJid());
         processMembershipEntryBytes(roomJid.asBareJid(), itemId, entryBytes);
+        final RoomState st = rooms.get(roomJid.asBareJid().toString());
+        Log.d(Config.LOGTAG, TAG + ": after ingest, room " + roomJid.asBareJid()
+                + " has " + (st != null ? st.journal.getMembers().size() : -1) + " journal member(s)");
         flushAnnouncementQueue(roomJid.asBareJid().toString());
         // Surface the membership change (add/remove) to the UI so the roster and
         // conversation views reflect the new group state without a manual refresh.

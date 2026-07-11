@@ -275,6 +275,21 @@ public class MultiUserChatManager extends AbstractManager {
         }
         if (mucOptions.isPrivateAndNonAnonymous()) {
             fetchMembers(conversation);
+            // WS1: the x3dhpq membership journal rides the MUC groupchat channel
+            // and is retrieved via MUC MAM. disco#info is routinely denied to a
+            // just-joined member on a members-only room ("Access denied by service
+            // policy"), which leaves mucOptions.mamSupport() false and suppresses
+            // the catchupMUC above — so the journal (and thus crypto membership)
+            // would never be fetched. Force a group-journal catch-up here,
+            // independent of mamSupport(), for every secret group we join.
+            final var gcs = service.getGroupCryptoService(account);
+            if (gcs != null) {
+                Log.d(Config.LOGTAG, account.getJid().asBareJid()
+                        + ": x3dhpq forcing group-journal catch-up for "
+                        + conversation.getAddress().asBareJid()
+                        + " (mamSupport=" + mucOptions.mamSupport() + ")");
+                gcs.subscribeAndCatchUp(conversation.getAddress().asBareJid());
+            }
         }
         synchronized (this.inProgressConferenceJoins) {
             this.inProgressConferenceJoins.remove(conversation);
