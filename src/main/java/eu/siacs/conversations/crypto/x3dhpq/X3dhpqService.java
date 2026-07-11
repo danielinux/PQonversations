@@ -399,22 +399,141 @@ public class X3dhpqService {
     }
 
     /**
-     * §10.6.4b: the explicit, user-chosen "generate a new identity instead" override
-     * from the pending-enrollment registration-choice UX. Destructive — see {@link
-     * LocalKeyBootstrap#mintFreshIdentity}. Only meaningful while {@link
-     * #isPendingEnrollment()} is true; the caller (UI) is expected to have already
-     * shown the destructive-action warning from §10.6.4b before invoking this.
+     * §10.6.6 "Account reset (identity override)": the one destructive device-lifecycle
+     * operation. Formerly named {@code generateNewIdentity()} (§10.6.4b registration-
+     * choice override); reworked to also carry out the two additional §10.6.6 steps that
+     * make this a proper account reset rather than just a local re-mint:
+     *
+     * <ol>
+     *   <li>Mint a brand-new AIK (a new ratchet root) via {@link
+     *       LocalKeyBootstrap#mintFreshIdentity}. That call's cascading delete of the OLD
+     *       {@code x3dhpq_account_identity} row also drops every {@code
+     *       x3dhpq_co_account_device}/{@code x3dhpq_committed_device} row FK-linked to it —
+     *       i.e. de-associating ALL previously associated devices is already a side effect
+     *       of the mint, so the very next {@link #publishDeviceList()} below publishes a
+     *       fresh list containing ONLY the new device, per §10.6.6.</li>
+     *   <li>Where this device still held the OLD {@code AIK_priv} (captured BEFORE the
+     *       mint), append a {@code RotateAIK} entry (action=3, payload = new AIK pub,
+     *       §11.4/§11.7) to the OLD device-audit DAG, signed by the OLD AIK — §12.1 step 3 /
+     *       §12.4 ("signed by the old AIK, before it is retired"). This is a LOCAL append to
+     *       {@code x3dhpq_device_audit} only (that table has no FK to {@code
+     *       x3dhpq_account_identity}, so the OLD chain survives the mint above); there is no
+     *       dedicated wire node for individual v2 DAG entries yet in this client (§11.7's
+     *       sealed device-state tracker, unchanged by this method, is how a fold of THIS
+     *       (new) account state reaches other devices going forward). If the old AIK_priv is
+     *       not held (e.g. this device was itself disabled), that step is skipped, per
+     *       §10.6.6 "where the old AIK_priv is still held".</li>
+     * </ol>
+     *
+     * <p>What this method deliberately does NOT and cannot do — the caller (UI) MUST
+     * present these as destructive BEFORE invoking it (§10.6.6): prior messages under the
+     * old identity are lost; the account loses membership in every prior group (its old
+     * AIK fingerprint is no longer a journal member) and needs re-invitation; and because
+     * this is the "same JID, different AIK" event (§10.6.5), every peer must manually
+     * re-validate the new identity before traffic resumes. None of that is a local
+     * operation this method can perform.
+     *
+     * <p>Wrapped so a failure can never crash the caller (bind-safety guardrail): only the
+     * identity mint itself is unconditional (mirroring the pre-existing behaviour), every
+     * other step here is best-effort/logged-only on failure.
      */
-    public void generateNewIdentity() {
+    public void performAccountReset() {
         if (db == null || account == null || mXmppConnectionService == null) return;
+        final String accountUuid = account.getUuid();
+
+        // Capture the OLD AIK (if we still hold its private key) and the OLD device-audit
+        // DAG's current heads/author-device-id BEFORE mintFreshIdentity() wipes the local
+        // identity — both are needed to sign+chain the RotateAIK entry below.
+        AccountIdentityKey oldAik = null;
+        long oldAuthorDeviceId = 0L;
+        im.conversations.x3dhpq.types.DeviceDag oldDag = new im.conversations.x3dhpq.types.DeviceDag();
+        try {
+            final DatabaseBackend.X3dhpqAccountIdentityRow oldRow =
+                    db.loadX3dhpqAccountIdentity(accountUuid);
+            if (oldRow != null && oldRow.aikPriv() != null && oldRow.aikPriv().length > 0) {
+                oldAik = AccountIdentityKey.unmarshal(oldRow.aikPriv());
+            }
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> oldLocalRows =
+                    db.listX3dhpqLocalDevices(accountUuid);
+            if (!oldLocalRows.isEmpty()) {
+                oldAuthorDeviceId = oldLocalRows.get(0).deviceId() & 0xffffffffL;
+            }
+            for (final DatabaseBackend.X3dhpqDeviceAuditEntryRow row :
+                    db.listX3dhpqDeviceAuditEntries(accountUuid)) {
+                oldDag.ingest(row.entryBlob());
+            }
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": account reset — failed to capture the OLD"
+                    + " AIK/DAG state (RotateAIK chain entry will be skipped, non-fatal): "
+                    + e.getMessage());
+            oldAik = null;
+        }
+
         final LocalKeyBootstrap bootstrap = new LocalKeyBootstrap(mXmppConnectionService.databaseBackend);
-        final LocalKeyBootstrap.BootstrapResult result = bootstrap.mintFreshIdentity(account.getUuid());
+        final LocalKeyBootstrap.BootstrapResult result = bootstrap.mintFreshIdentity(accountUuid);
         Log.i(Config.LOGTAG, LOGPREFIX + ": " + account.getJid().asBareJid()
-                + " explicitly generated a NEW identity (§10.6.4b), fp=" + result.fingerprint);
+                + " performed an ACCOUNT RESET (§10.6.6) — minted a NEW identity, fp="
+                + result.fingerprint + "; every previously associated device is now"
+                + " de-associated and the account needs re-invitation to every prior group");
+
+        if (oldAik != null) {
+            try {
+                appendRotateAikToOldChain(
+                        accountUuid, oldAik, oldAuthorDeviceId,
+                        oldDag.currentHeads(), oldDag.nextLamport(), result.fingerprint);
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": account reset — RotateAIK chain entry"
+                        + " append failed (non-fatal; the new identity is still valid): "
+                        + e.getMessage());
+            }
+        } else {
+            Log.i(Config.LOGTAG, LOGPREFIX + ": account reset — no OLD AIK_priv was held by"
+                    + " this device; skipping the RotateAIK chain entry (§10.6.6: \"where the"
+                    + " old AIK_priv is still held\")");
+        }
+
         if (!result.pendingEnrollment) {
             publishDeviceList();
             publishOwnBundle();
         }
+    }
+
+    /**
+     * §12.1 step 3 / §12.4: builds, signs with the OLD AIK, and locally appends a {@code
+     * RotateAIK} (action=3) device-audit-DAG entry (§11.7) to the OLD chain for {@code
+     * accountUuid} — payload {@code uint16(new_aik_len) | AccountIdentityPub.marshal()}
+     * per §11.4, chained onto {@code parents} (the OLD DAG's heads captured by the caller
+     * before the mint). Mirrors {@link #ensureDeviceAuditGenesis}'s use of the same local-
+     * only {@code x3dhpq_device_audit} table — there is no dedicated publish node for
+     * individual v2 DAG entries in this client yet.
+     */
+    private void appendRotateAikToOldChain(
+            final String accountUuid,
+            final AccountIdentityKey oldAik,
+            final long authorDeviceId,
+            final List<byte[]> parents,
+            final long lamport,
+            final String newFingerprintForLog) {
+        final DatabaseBackend.X3dhpqAccountIdentityRow newRow = db.loadX3dhpqAccountIdentity(accountUuid);
+        if (newRow == null || newRow.aikPub() == null || newRow.aikPub().length == 0) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": account reset — no NEW AIK row available to"
+                    + " build the RotateAIK payload from; skipping");
+            return;
+        }
+        final byte[] payload =
+                im.conversations.x3dhpq.types.DeviceAuditEntryV2.buildRotateAikPayload(newRow.aikPub());
+        final long ts = System.currentTimeMillis() / 1000L;
+        final im.conversations.x3dhpq.types.DeviceAuditEntryV2 entry =
+                im.conversations.x3dhpq.types.DeviceAuditEntryV2.signNew(
+                        oldAik, lamport, authorDeviceId, parents,
+                        im.conversations.x3dhpq.types.DeviceAuditEntryV2.ACTION_ROTATE_AIK,
+                        payload, ts);
+        final String hashHex =
+                im.conversations.x3dhpq.types.DeviceAuditEntryV2.hex(entry.computeHash());
+        db.putX3dhpqDeviceAuditEntry(accountUuid, hashHex, entry.marshal(), ts);
+        Log.i(Config.LOGTAG, LOGPREFIX + ": account reset — appended a RotateAIK entry to the"
+                + " OLD device-audit DAG (signed by the OLD AIK, §12.4); new AIK fp="
+                + newFingerprintForLog);
     }
 
     /** True if this install's local device is still in §10.6.1 pending-enrollment (DIK, no AIK). */
@@ -424,6 +543,20 @@ public class X3dhpqService {
                 db.listX3dhpqLocalDevices(account.getUuid());
         if (rows.isEmpty()) return false;
         return LocalKeyBootstrap.isPending(rows.get(0));
+    }
+
+    /**
+     * §10.6.6 "authorized vs disabled": true once this device holds {@code AIK_priv} and is
+     * a confirmed member of the account's device set — the complement of {@link
+     * #isPendingEnrollment()}. This is the single gate for both outbound send (§10.6.6
+     * "a disabled device ... MUST NOT send as the account") and device-management actions
+     * (§10.6.6 "any authorized device ... may append: authorize a new device ... or revoke
+     * any device") — a disabled/pending device must not be able to do either. Returns
+     * {@code false} (never authorized) when this service has no live account (test-only
+     * construction paths).
+     */
+    public boolean isAuthorizedDevice() {
+        return account != null && !isPendingEnrollment();
     }
 
     /**

@@ -139,7 +139,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
                         R.string.x3dhpq_generate_new_identity_button,
                         (dialog, which) -> {
                             if (mAccount != null && xmppConnectionServiceBound) {
-                                mAccount.getX3dhpqService().generateNewIdentity();
+                                mAccount.getX3dhpqService().performAccountReset();
                                 Toast.makeText(this, R.string.x3dhpq_pair_status_done, Toast.LENGTH_LONG)
                                         .show();
                                 refresh();

@@ -251,9 +251,21 @@ public class PairNewDeviceActivity extends XmppActivity {
             // TODO: render QR — BarcodeProvider failed
         }
 
-        // Build FSM options: fresh random uint32 device-id, sharePrimary=false.
+        // Build FSM options: fresh random uint32 device-id, sharePrimary=true.
+        //
+        // §10.6.6: "Because share_primary gives every confirmed device AIK_priv, ANY
+        // authorized device ... may append [to the device-authorization ratchet]." A
+        // device confirmed WITHOUT share_primary never receives AIK_priv and so can
+        // never sign a devicelist/audit update — it would be stuck a permanent "confirmed
+        // but not authorized" second-class device, unable to manage the account despite
+        // §10.6.6's "no privileged primary" model. Sharing AIK_priv on every confirmation
+        // is what makes every device an equal manager, matching the multi-writer
+        // device-authorization DAG (§11.7) this client now folds against. This changes a
+        // wire VALUE (has_priv=1 instead of 0), not the wire FORMAT — §10.4's issuance
+        // payload already carries the has_priv flag and the (now always populated)
+        // AIK_priv field unconditionally.
         final long newDeviceId = Integer.toUnsignedLong(rng.nextInt());
-        mOpts = new PairingFsm.Options(newDeviceId, false, new byte[0], (byte) 0);
+        mOpts = new PairingFsm.Options(newDeviceId, true, new byte[0], (byte) 0);
 
         // Obtain (or lazily create) the PairingSessionService for this account.
         mPairingService = mAccount.getX3dhpqService().getPairingSessionService();

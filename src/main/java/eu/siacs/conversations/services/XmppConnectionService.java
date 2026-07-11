@@ -1699,6 +1699,27 @@ public class XmppConnectionService extends Service {
                             account.getJid().asBareJid()
                                     + ": x3dhpq send path entered for message to "
                                     + message.getCounterpart());
+                    // §10.6.6 "am I authorized?" gate: a disabled/pending device must not
+                    // send as the account (peers would reject its unverifiable DC anyway).
+                    // Conversation#computeDefaultEncryption() already keeps an ordinary
+                    // conversation off this path while disabled, but an x3dhpq secret group
+                    // (getNextEncryption() bypasses computeDefaultEncryption for those) or a
+                    // conversation with an explicit per-conversation encryption override
+                    // (ATTRIBUTE_NEXT_ENCRYPTION) can still reach here — this is the single
+                    // authoritative choke point that covers every case, 1:1 and group alike.
+                    // An AUTHORIZED device (the overwhelmingly common case) is completely
+                    // unaffected by this check.
+                    if (account.getX3dhpqService() != null
+                            && !account.getX3dhpqService().isAuthorizedDevice()) {
+                        Log.w(Config.LOGTAG,
+                                account.getJid().asBareJid()
+                                        + ": x3dhpq send blocked — this device is"
+                                        + " disabled/waiting for sync (§10.6.6)");
+                        message.setStatus(Message.STATUS_SEND_FAILED);
+                        markMessage(message, Message.STATUS_SEND_FAILED,
+                                getString(R.string.x3dhpq_device_waiting_for_sync));
+                        break;
+                    }
                     if (!message.needsUploading()) {
                         if (conversation.getMode() == Conversation.MODE_MULTI) {
                             // §13 group encryption path — sender chain
@@ -1716,6 +1737,18 @@ public class XmppConnectionService extends Service {
                                 final im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup groupEnv =
                                         gcs.encryptGroupMessage(conversation.getAddress().asBareJid(), plaintext);
                                 packet = mMessageGenerator.generateX3dhpqGroupMessage(message, groupEnv);
+                            } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.DeviceDisabledException e) {
+                                // §10.6.6: this device is disabled/pending, not the room —
+                                // give the user the actionable reason instead of the
+                                // generic "room not enabled" message.
+                                Log.w(Config.LOGTAG,
+                                        account.getJid().asBareJid()
+                                                + ": x3dhpq group send blocked — this device is"
+                                                + " disabled/waiting for sync (§10.6.6): "
+                                                + e.getMessage());
+                                message.setStatus(Message.STATUS_SEND_FAILED);
+                                markMessage(message, Message.STATUS_SEND_FAILED,
+                                        getString(R.string.x3dhpq_device_waiting_for_sync));
                             } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
                                 Log.w(Config.LOGTAG,
                                         account.getJid().asBareJid()

@@ -2935,6 +2935,22 @@ public class ConversationFragment extends XmppFragment
                     R.string.this_account_is_logged_out,
                     R.string.log_in,
                     this.mEnableAccountListener);
+        } else if (account.getX3dhpqService() != null
+                && account.getX3dhpqService().isPendingEnrollment()
+                && (conversation.isX3dhpqSecretGroup() || conversation.isPqUpgraded())) {
+            // §10.6.6: this device is disabled/waiting for sync and cannot send x3dhpq
+            // messages for this account — tell the user why instead of a silent/opaque
+            // send failure. Scoped to conversations that would actually use x3dhpq (secret
+            // groups always do; a 1:1 latched to x3dhpq via ATTRIBUTE_PQ_UPGRADED does too)
+            // so an unrelated OMEMO/plaintext conversation on the same account is
+            // unaffected. Deep-links into the same device-management screen the pending
+            // banner there also offers.
+            showSnackbar(
+                    R.string.x3dhpq_device_waiting_for_sync,
+                    R.string.x3dhpq_manage_devices_button,
+                    v -> startActivity(
+                            eu.siacs.conversations.ui.X3dhpqSelfDevicesActivity.makeIntent(
+                                    requireContext(), account.getUuid())));
         } else if (conversation.isBlocked()) {
             showSnackbar(R.string.contact_blocked, R.string.unblock, this.mUnblockClickListener);
         } else if (contact != null

@@ -853,6 +853,16 @@ public class Conversation extends AbstractEntity
         if (!suitableForOmemoByDefault(this)) {
             return Message.ENCRYPTION_NONE;
         }
+        // §10.6.6: "am I authorized?" gate. A device that is disabled/pending (has not
+        // been confirmed by an existing authorized device, or was revoked) MUST NOT send
+        // as the account — peers would reject its unverifiable DC anyway. Checked BEFORE
+        // isIdentityBlocked/isCapable so a disabled device never offers x3dhpq (or falls
+        // through to it via the peer-capability checks below); an AUTHORIZED device (the
+        // overwhelmingly common case) is completely unaffected by this check.
+        if (getAccount().getX3dhpqService() != null
+                && !getAccount().getX3dhpqService().isAuthorizedDevice()) {
+            return Message.ENCRYPTION_NONE;
+        }
         // WS4: device-enrollment re-trust gate. If the peer's identity looks like it
         // silently reconstructed (§10.6.5) and the user has not yet explicitly
         // re-trusted it, halt sending entirely rather than falling through to

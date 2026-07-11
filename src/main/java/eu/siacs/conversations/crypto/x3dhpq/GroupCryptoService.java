@@ -546,9 +546,19 @@ public class GroupCryptoService {
      * @return an {@link EnvelopeGroup} extension ready to attach to the groupchat stanza,
      *         or null if the room is not yet x3dhpq-enabled (no journal).
      * @throws GroupNotEnabledException if the room journal is missing or unverified.
+     * @throws DeviceDisabledException  (a {@link GroupNotEnabledException} subtype) if THIS
+     *         device is disabled/pending (§10.6.6) and must not send as the account —
+     *         checked first, before the room even has to be looked up, so a disabled
+     *         device never emits a group-encrypted message. An AUTHORIZED device (the
+     *         common case) is completely unaffected by this check.
      */
     public EnvelopeGroup encryptGroupMessage(final Jid roomJid, final byte[] plaintext)
             throws GroupNotEnabledException {
+        if (account.getX3dhpqService() != null && !account.getX3dhpqService().isAuthorizedDevice()) {
+            throw new DeviceDisabledException(
+                    "This device is waiting for sync and cannot send group messages yet"
+                            + " (§10.6.6)");
+        }
         final String roomStr = roomJid.asBareJid().toString();
         final RoomState state = rooms.get(roomStr);
         if (state == null || state.session == null) {
@@ -1709,8 +1719,22 @@ public class GroupCryptoService {
     // Exception type
     // -------------------------------------------------------------------------
 
-    public static final class GroupNotEnabledException extends Exception {
+    public static class GroupNotEnabledException extends Exception {
         public GroupNotEnabledException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * §10.6.6: thrown by {@link #encryptGroupMessage} instead of the generic {@link
+     * GroupNotEnabledException} when the reason a group message cannot be sent is that
+     * THIS device is disabled/pending, not that the room itself is unconfigured. A
+     * {@link GroupNotEnabledException} subtype so existing catch sites keep working
+     * unchanged; callers that want to show a more specific reason can {@code instanceof}
+     * this type (see {@code XmppConnectionService#sendMessage}).
+     */
+    public static final class DeviceDisabledException extends GroupNotEnabledException {
+        public DeviceDisabledException(String message) {
             super(message);
         }
     }
