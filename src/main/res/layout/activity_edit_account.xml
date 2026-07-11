@@ -753,6 +753,52 @@
 
                             </LinearLayout>
                         </RelativeLayout>
+
+                        <!-- x3dhpq (post-quantum) identity + device management entry point.
+                             Reachable regardless of connection status: fingerprint / device
+                             list live in the local DB. Hidden until an x3dhpq identity has
+                             been bootstrapped for this account. -->
+                        <RelativeLayout
+                            android:id="@+id/x3dhpq_fingerprint_box"
+                            android:layout_width="wrap_content"
+                            android:layout_height="match_parent"
+                            android:layout_marginTop="12dp"
+                            android:visibility="gone"
+                            tools:visibility="visible">
+
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_alignParentStart="true"
+                                android:layout_centerVertical="true"
+                                android:layout_toStartOf="@+id/action_manage_x3dhpq_devices"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/x3dhpq_fingerprint"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:fontFamily="monospace"
+                                    android:textAppearance="?textAppearanceBodyMedium" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/x3dhpq_manage_devices_desc"
+                                    android:textAppearance="?textAppearanceLabelMedium" />
+                            </LinearLayout>
+
+                            <ImageButton
+                                android:id="@+id/action_manage_x3dhpq_devices"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_alignParentEnd="true"
+                                android:layout_centerVertical="true"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:contentDescription="@string/x3dhpq_manage_devices_button"
+                                android:padding="@dimen/image_button_padding"
+                                android:src="@drawable/ic_smartphone_24dp" />
+                        </RelativeLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

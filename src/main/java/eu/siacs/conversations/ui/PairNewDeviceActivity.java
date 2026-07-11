@@ -38,6 +38,13 @@ public class PairNewDeviceActivity extends XmppActivity {
 
     public static final String EXTRA_ACCOUNT = "account_uuid";
 
+    /**
+     * Optional boolean intent extra: when true, immediately launches the QR scanner for the
+     * §10.6.2 "new-device-presents" confirm flow instead of waiting on this screen showing
+     * its own code. Set by the devices screen's "Confirm a waiting device" entry point.
+     */
+    public static final String EXTRA_AUTO_CONFIRM_PENDING = "auto_confirm_pending";
+
     /** Request code for scanning a PENDING device's own QR (§10.6.2 new-device-presents). */
     private static final int REQUEST_SCAN_PENDING_DEVICE_QR = 0x3A1C;
 
@@ -130,6 +137,17 @@ public class PairNewDeviceActivity extends XmppActivity {
     public static Intent makeIntent(final Context ctx, final String accountUuid) {
         final Intent intent = new Intent(ctx, PairNewDeviceActivity.class);
         intent.putExtra(EXTRA_ACCOUNT, accountUuid);
+        return intent;
+    }
+
+    /**
+     * §10.6.2 "Confirm a waiting device" entry point: same screen, but immediately opens the
+     * QR scanner for the pending device's own code/QR instead of showing this device's code
+     * first. Used by the devices screen's dedicated "confirm" button so that flow is one tap.
+     */
+    public static Intent makeIntentConfirmPending(final Context ctx, final String accountUuid) {
+        final Intent intent = makeIntent(ctx, accountUuid);
+        intent.putExtra(EXTRA_AUTO_CONFIRM_PENDING, true);
         return intent;
     }
 
@@ -237,6 +255,12 @@ public class PairNewDeviceActivity extends XmppActivity {
 
         // Register broadcast receiver for verify-device headline from the new device.
         registerPairReceiver();
+
+        // §10.6.2 "Confirm a waiting device" shortcut: skip straight to scanning the
+        // pending device's own code/QR instead of waiting on this screen showing ours.
+        if (getIntent().getBooleanExtra(EXTRA_AUTO_CONFIRM_PENDING, false)) {
+            mHandler.post(this::launchPendingDeviceQrScanner);
+        }
     }
 
     /** Registers the broadcast receiver that listens for the new device's full JID. */

@@ -100,6 +100,25 @@ public final class DeviceCertificate {
         return buf.array();
     }
 
+    // Display-only fingerprint for device-management UIs (NOT part of any wire format or
+    // signed input). Mirrors AccountIdentityPub#fingerprint: BLAKE2b-160 of marshal(), take
+    // the first 15 bytes, hex-encode uppercase, split every 5 chars into 6 groups, e.g.
+    // "7AD37 1A1A3 67A62 B6533 1BC5A 2204C".
+    public String fingerprint(Blake2b160 hasher) {
+        byte[] digest = hasher.hash(marshal());
+        StringBuilder hex = new StringBuilder(40);
+        for (byte b : digest) {
+            hex.append(String.format("%02X", b & 0xff));
+        }
+        String h30 = hex.substring(0, 30);
+        return h30.substring(0, 5) + " " +
+               h30.substring(5, 10) + " " +
+               h30.substring(10, 15) + " " +
+               h30.substring(15, 20) + " " +
+               h30.substring(20, 25) + " " +
+               h30.substring(25, 30);
+    }
+
     public static DeviceCertificate unmarshal(byte[] raw) {
         if (raw == null || raw.length < 6) {
             throw new IllegalArgumentException("DC too short");

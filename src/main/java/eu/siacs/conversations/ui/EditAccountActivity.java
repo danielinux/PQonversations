@@ -1365,6 +1365,37 @@ public class EditAccountActivity extends OmemoActivity
                 this.binding.serviceOutage.setVisibility(View.GONE);
             }
         }
+        updateX3dhpqBox();
+    }
+
+    /**
+     * x3dhpq device-management entry point (deliverable 1 of the WS4 UI): shows the
+     * account's AIK fingerprint and a shortcut into {@link X3dhpqSelfDevicesActivity}.
+     * Independent of connection status — the fingerprint and device list live in the
+     * local DB — but hidden until an x3dhpq identity has actually been bootstrapped for
+     * this account (fresh accounts before first login have none yet).
+     */
+    private void updateX3dhpqBox() {
+        if (!xmppConnectionServiceBound || this.mAccount == null) {
+            this.binding.x3dhpqFingerprintBox.setVisibility(View.GONE);
+            return;
+        }
+        final var identity =
+                xmppConnectionService.databaseBackend.loadX3dhpqAccountIdentity(
+                        this.mAccount.getUuid());
+        if (identity == null || identity.fingerprint() == null) {
+            this.binding.x3dhpqFingerprintBox.setVisibility(View.GONE);
+            return;
+        }
+        this.binding.x3dhpqFingerprintBox.setVisibility(View.VISIBLE);
+        this.binding.x3dhpqFingerprint.setText(identity.fingerprint());
+        final OnClickListener openDevices =
+                view ->
+                        startActivity(
+                                eu.siacs.conversations.ui.X3dhpqSelfDevicesActivity.makeIntent(
+                                        this, this.mAccount.getUuid()));
+        this.binding.x3dhpqFingerprint.setOnClickListener(openDevices);
+        this.binding.actionManageX3dhpqDevices.setOnClickListener(openDevices);
     }
 
     private void updateDisplayName(String displayName) {

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One row of the associated-devices list (X3dhpqSelfDevicesActivity). Shows the device
+     label/role/"this device" marker, its DC fingerprint (spaced hex, for OOB compare),
+     confirmed-vs-pending trust status, and the added-at date, plus an explicit revoke
+     action (§8.6). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:gravity="center_vertical">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/device_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textStyle="bold"
+            android:textAppearance="?textAppearanceBodyMedium" />
+
+        <TextView
+            android:id="@+id/device_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="?textAppearanceLabelMedium" />
+
+        <TextView
+            android:id="@+id/device_fingerprint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textIsSelectable="true"
+            android:textAppearance="?textAppearanceLabelMedium" />
+
+        <TextView
+            android:id="@+id/device_added_at"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="?textAppearanceLabelMedium" />
+
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/device_revoke_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:text="@string/x3dhpq_remove_device" />
+
+</LinearLayout>

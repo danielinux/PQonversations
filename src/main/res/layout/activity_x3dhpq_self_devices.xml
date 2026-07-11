@@ -27,10 +27,20 @@
             android:text="@string/x3dhpq_pending_enrollment_text"
             android:paddingBottom="8dp" />
 
+        <!-- §10.6.4a: the default, non-destructive choice — pair with (associate under)
+             the account's existing identity. Opens the new-device-side pairing screen. -->
+        <Button
+            android:id="@+id/associate_existing_identity_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_associate_existing_identity_button" />
+
+        <!-- §10.6.4b: the destructive alternative — mint a brand-new identity instead. -->
         <Button
             android:id="@+id/generate_new_identity_button"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
             android:text="@string/x3dhpq_generate_new_identity_button" />
 
     </LinearLayout>
@@ -50,6 +60,12 @@
             android:text="@string/x3dhpq_blocked_identities_title"
             android:textStyle="bold" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_blocked_identities_help"
+            android:paddingBottom="4dp" />
+
         <ListView
             android:id="@+id/blocked_identities_list"
             android:layout_width="match_parent"
@@ -57,6 +73,8 @@
 
     </LinearLayout>
 
+    <!-- Account AIK fingerprint: shown prominently so it can be compared out-of-band
+         with a contact reading the same value on their device. -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -70,6 +88,7 @@
         android:layout_height="wrap_content"
         android:textIsSelectable="true"
         android:fontFamily="monospace"
+        android:textSize="16sp"
         android:paddingBottom="8dp" />
 
     <TextView
@@ -84,11 +103,31 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <Button
-        android:id="@+id/add_device_button"
+    <!-- §10.6.2 both pairing directions: "Link a new device" shows this device's own
+         code/QR for a new device to scan; "Confirm a waiting device" scans/consumes the
+         code/QR already being shown by a pending device. Both drive PairNewDeviceActivity. -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/x3dhpq_add_device"
-        android:layout_marginTop="8dp" />
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/add_device_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="@string/x3dhpq_add_device" />
+
+        <Button
+            android:id="@+id/confirm_waiting_device_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="@string/x3dhpq_confirm_waiting_device_button" />
+
+    </LinearLayout>
 
 </LinearLayout>

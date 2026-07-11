@@ -2150,6 +2150,117 @@ public class X3dhpqService {
     }
 
     /**
+     * Public accessor for the device-management UI: the set of device ids covered by a
+     * verified §11.4 {@code AddDevice} audit-chain entry for OUR OWN account (fail-closed —
+     * empty if the chain does not verify or we have no AIK yet). Wraps the private {@link
+     * #verifiedAddDeviceIds} gate that {@link #surfaceUnconfirmedSiblingEvent} already uses
+     * to decide trust; exposing it lets {@code X3dhpqSelfDevicesActivity} show the same
+     * confirmed-vs-pending status the trust logic actually enforces, rather than a UI-only
+     * guess.
+     */
+    public java.util.Set<Integer> getVerifiedAddDeviceIds() {
+        if (account == null) return java.util.Collections.emptySet();
+        return verifiedAddDeviceIds(account.getUuid(), account.getJid().asBareJid().toString());
+    }
+
+    /**
+     * One row of the account's associated-devices list (device-management UI, §10.6.3):
+     * the union of this install's own device row and every co-account sibling device,
+     * annotated with "this device"/primary/§11.4 trust status. See {@link
+     * #listAssociatedDevices()}.
+     */
+    public static final class AssociatedDevice {
+        public final int deviceId;
+        /** Parsed certificate, or {@code null} if the stored DC bytes could not be parsed. */
+        public final DeviceCertificate cert;
+        public final long addedAt;
+        public final boolean primary;
+        public final boolean thisDevice;
+        /**
+         * True if this device is the account's primary (the genesis root of trust, which by
+         * construction predates the audit chain and so never has its own AddDevice entry) or
+         * is covered by a verified §11.4 AddDevice entry. False means §10.6.3 "pending/
+         * unconfirmed" — present on the devicelist but NOT trust-gate confirmed.
+         */
+        public final boolean confirmed;
+
+        AssociatedDevice(
+                final int deviceId,
+                final DeviceCertificate cert,
+                final long addedAt,
+                final boolean primary,
+                final boolean thisDevice,
+                final boolean confirmed) {
+            this.deviceId = deviceId;
+            this.cert = cert;
+            this.addedAt = addedAt;
+            this.primary = primary;
+            this.thisDevice = thisDevice;
+            this.confirmed = confirmed;
+        }
+    }
+
+    /**
+     * Builds the full associated-devices list for this account (device-management UI): the
+     * union of this install's own local device row ({@code x3dhpq_local_device}) and every
+     * co-account sibling device ({@code x3dhpq_co_account_device}, populated either by this
+     * install's own pairing-as-primary or by the inbound-devicelist self-heal), deduplicated
+     * by device id, sorted primary-first then by device id. Returns an empty list while
+     * {@link #isPendingEnrollment()} is true (no AIK yet — nothing to list; the caller should
+     * show the pending-enrollment banner instead).
+     */
+    public List<AssociatedDevice> listAssociatedDevices() {
+        final List<AssociatedDevice> result = new ArrayList<>();
+        if (db == null || account == null || isPendingEnrollment()) {
+            return result;
+        }
+        final Integer ownDeviceId = getOwnDeviceIdOrNull();
+        final java.util.Set<Integer> verified = getVerifiedAddDeviceIds();
+        final java.util.LinkedHashMap<Integer, AssociatedDevice> byId = new java.util.LinkedHashMap<>();
+
+        for (final DatabaseBackend.X3dhpqLocalDeviceRow row :
+                db.listX3dhpqLocalDevices(account.getUuid())) {
+            DeviceCertificate cert = null;
+            try {
+                cert = DeviceCertificate.unmarshal(row.dc());
+            } catch (final Exception ignored) {
+                // Keep the row even if the stored DC can't be parsed; fingerprint/role
+                // just won't be shown for it.
+            }
+            final boolean primary = (row.flags() & DeviceCertificate.FLAG_PRIMARY) != 0;
+            final boolean thisDevice = ownDeviceId != null && ownDeviceId == row.deviceId();
+            final boolean confirmed = primary || verified.contains(row.deviceId());
+            byId.put(
+                    row.deviceId(),
+                    new AssociatedDevice(
+                            row.deviceId(), cert, row.createdAt(), primary, thisDevice, confirmed));
+        }
+        for (final DatabaseBackend.X3dhpqCoAccountDeviceRow row :
+                db.listX3dhpqCoAccountDevices(account.getUuid())) {
+            if (byId.containsKey(row.deviceId())) {
+                continue; // this install's own local row already covers this device id
+            }
+            DeviceCertificate cert = null;
+            try {
+                cert = DeviceCertificate.unmarshal(row.dc());
+            } catch (final Exception ignored) {
+                // as above
+            }
+            final boolean primary = (row.flags() & DeviceCertificate.FLAG_PRIMARY) != 0;
+            final boolean confirmed = primary || verified.contains(row.deviceId());
+            byId.put(
+                    row.deviceId(),
+                    new AssociatedDevice(row.deviceId(), cert, row.addedAt(), primary, false, confirmed));
+        }
+        result.addAll(byId.values());
+        result.sort((a, b) -> {
+            if (a.primary != b.primary) return a.primary ? -1 : 1;
+            return Integer.compareUnsigned(a.deviceId, b.deviceId);
+        });
+        return result;
+    }
+
+    /**
      * Returns true if the conversation has a peer with known devices and bundles,
      * so that an outbound x3dhpq message can be prepared.
      * For 1:1 conversations this checks that we have at least one peer device bundle.

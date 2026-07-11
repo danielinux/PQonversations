@@ -16,14 +16,22 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import eu.siacs.conversations.R;
+import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.persistance.DatabaseBackend;
-import im.conversations.x3dhpq.types.DeviceCertificate;
+import im.conversations.x3dhpq.crypto.X3dhpqCrypto;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
+/**
+ * The device-management screen for an x3dhpq account (§8, §10.6, §11): the account's AIK
+ * fingerprint, every associated device (this install's own device plus every co-account
+ * sibling, §10.6.3 trust-gated), both pairing directions (§10.6.2), the §10.6.4
+ * registration-choice UX while pending, explicit per-device revocation (§8.6), and the
+ * §10.6.5 peer re-trust list.
+ */
 public class X3dhpqSelfDevicesActivity extends XmppActivity {
 
     public static final String EXTRA_ACCOUNT = "account_uuid";
@@ -32,7 +40,9 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     private TextView mLocalDeviceIdView;
     private ListView mDeviceListView;
     private Button mAddDeviceButton;
+    private Button mConfirmWaitingDeviceButton;
     private View mPendingEnrollmentBanner;
+    private Button mAssociateExistingIdentityButton;
     private Button mGenerateNewIdentityButton;
     private View mBlockedIdentitiesContainer;
     private ListView mBlockedIdentitiesList;
@@ -41,7 +51,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     private Account mAccount;
 
     private DeviceAdapter mAdapter;
-    private final List<DatabaseBackend.X3dhpqLocalDeviceRow> mDevices = new ArrayList<>();
+    private final List<X3dhpqService.AssociatedDevice> mDevices = new ArrayList<>();
     private ArrayAdapter<String> mBlockedAdapter;
     private final List<String> mBlockedPeers = new ArrayList<>();
 
@@ -67,7 +77,9 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mLocalDeviceIdView = findViewById(R.id.local_device_id);
         mDeviceListView = findViewById(R.id.device_list);
         mAddDeviceButton = findViewById(R.id.add_device_button);
+        mConfirmWaitingDeviceButton = findViewById(R.id.confirm_waiting_device_button);
         mPendingEnrollmentBanner = findViewById(R.id.pending_enrollment_banner);
+        mAssociateExistingIdentityButton = findViewById(R.id.associate_existing_identity_button);
         mGenerateNewIdentityButton = findViewById(R.id.generate_new_identity_button);
         mBlockedIdentitiesContainer = findViewById(R.id.blocked_identities_container);
         mBlockedIdentitiesList = findViewById(R.id.blocked_identities_list);
@@ -81,8 +93,18 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mBlockedIdentitiesList.setOnItemClickListener(
                 (parent, view, position, id) -> showRetrustDialog(mBlockedPeers.get(position)));
 
+        // §10.6.2 "Link a new device": this device shows its own code/QR for a new device
+        // to scan (also listens passively for a self-PEP pair-hello, method B).
         mAddDeviceButton.setOnClickListener(
                 v -> startActivity(PairNewDeviceActivity.makeIntent(this, mAccountUuid)));
+        // §10.6.2 "Confirm a waiting device": jump straight to scanning the code/QR a
+        // pending device is already showing (new-device-presents direction).
+        mConfirmWaitingDeviceButton.setOnClickListener(
+                v -> startActivity(PairNewDeviceActivity.makeIntentConfirmPending(this, mAccountUuid)));
+        // §10.6.4a: the default, non-destructive registration choice — pair this pending
+        // device under the account's existing identity.
+        mAssociateExistingIdentityButton.setOnClickListener(
+                v -> startActivity(PairToExistingActivity.makeIntent(this, mAccountUuid)));
         mGenerateNewIdentityButton.setOnClickListener(v -> showGenerateNewIdentityDialog());
     }
 
@@ -110,7 +132,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     private void showRetrustDialog(final String peerBareJid) {
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.x3dhpq_retrust_button)
-                .setMessage(peerBareJid)
+                .setMessage(getString(R.string.x3dhpq_blocked_identities_help) + "\n\n" + peerBareJid)
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(
                         R.string.x3dhpq_retrust_button,
@@ -143,12 +165,13 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
 
     /** Refresh the list view from the DAO + current devicelist. */
     public void refresh() {
-        if (mAccountUuid == null || !xmppConnectionServiceBound) {
+        if (mAccountUuid == null || !xmppConnectionServiceBound || mAccount == null) {
             return;
         }
         final DatabaseBackend dao = xmppConnectionService.databaseBackend;
+        final X3dhpqService service = mAccount.getX3dhpqService();
 
-        // --- AIK fingerprint ---
+        // --- AIK fingerprint (prominent, for OOB compare) ---
         final DatabaseBackend.X3dhpqAccountIdentityRow identityRow =
                 dao.loadX3dhpqAccountIdentity(mAccountUuid);
         if (identityRow != null && identityRow.fingerprint() != null) {
@@ -157,34 +180,36 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
             mAikFingerprintView.setText(R.string.x3dhpq_aik_fp_label);
         }
 
-        // --- local devices ---
-        final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
-                dao.listX3dhpqLocalDevices(mAccountUuid);
+        // --- §10.6.1/§10.6.4 pending-enrollment banner ---
+        final boolean pending = service.isPendingEnrollment();
+        mPendingEnrollmentBanner.setVisibility(pending ? View.VISIBLE : View.GONE);
+        mDeviceListView.setVisibility(pending ? View.GONE : View.VISIBLE);
+        mAddDeviceButton.setEnabled(!pending);
+        mConfirmWaitingDeviceButton.setEnabled(!pending);
 
-        if (!rows.isEmpty()) {
-            final DatabaseBackend.X3dhpqLocalDeviceRow primary = rows.get(0);
+        // --- associated devices: union of this install's own device + every co-account
+        //     sibling, §10.6.3 trust-gated (empty while pending — see above). ---
+        final Integer ownDeviceId = service.getOwnDeviceIdOrNull();
+        if (!pending && ownDeviceId != null) {
             mLocalDeviceIdView.setText(
                     getString(R.string.x3dhpq_self_devices_title)
                             + " — device id: "
-                            + Integer.toUnsignedString(primary.deviceId()));
+                            + Integer.toUnsignedString(ownDeviceId));
         } else {
             mLocalDeviceIdView.setText("");
         }
 
         mDevices.clear();
-        mDevices.addAll(rows);
+        if (!pending) {
+            mDevices.addAll(service.listAssociatedDevices());
+        }
         mAdapter.notifyDataSetChanged();
-
-        // --- §10.6.1/§10.6.4 pending-enrollment banner ---
-        final boolean pending = mAccount.getX3dhpqService().isPendingEnrollment();
-        mPendingEnrollmentBanner.setVisibility(pending ? View.VISIBLE : View.GONE);
 
         // --- §10.6.5 blocked/unconfirmed identities awaiting explicit re-trust ---
         mBlockedPeers.clear();
         for (final eu.siacs.conversations.entities.Conversation c :
                 xmppConnectionService.getConversations()) {
-            if (c.getAccount() == mAccount
-                    && mAccount.getX3dhpqService().isIdentityBlocked(c)) {
+            if (c.getAccount() == mAccount && service.isIdentityBlocked(c)) {
                 mBlockedPeers.add(c.getAddress().asBareJid().toString());
             }
         }
@@ -199,7 +224,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
 
     // ---- ListView adapter ----
 
-    private class DeviceAdapter extends ArrayAdapter<DatabaseBackend.X3dhpqLocalDeviceRow> {
+    private class DeviceAdapter extends ArrayAdapter<X3dhpqService.AssociatedDevice> {
 
         DeviceAdapter() {
             super(X3dhpqSelfDevicesActivity.this, 0, mDevices);
@@ -215,53 +240,64 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
             if (convertView == null) {
                 row =
                         LayoutInflater.from(getContext())
-                                .inflate(android.R.layout.simple_list_item_2, parent, false);
+                                .inflate(R.layout.item_x3dhpq_device, parent, false);
             } else {
                 row = convertView;
             }
 
-            final DatabaseBackend.X3dhpqLocalDeviceRow device = mDevices.get(position);
+            final X3dhpqService.AssociatedDevice device = mDevices.get(position);
 
-            final TextView text1 = row.findViewById(android.R.id.text1);
-            final TextView text2 = row.findViewById(android.R.id.text2);
+            final TextView labelView = row.findViewById(R.id.device_label);
+            final TextView statusView = row.findViewById(R.id.device_status);
+            final TextView fingerprintView = row.findViewById(R.id.device_fingerprint);
+            final TextView addedAtView = row.findViewById(R.id.device_added_at);
+            final Button revokeButton = row.findViewById(R.id.device_revoke_button);
 
-            final boolean isPrimary =
-                    (device.flags() & DeviceCertificate.FLAG_PRIMARY) != 0;
-            final String primaryLabel = isPrimary ? " [primary]" : "";
-            text1.setText(
-                    "Device id: "
-                            + Integer.toUnsignedString(device.deviceId())
-                            + primaryLabel);
+            final StringBuilder label = new StringBuilder();
+            label.append("Device ").append(Integer.toUnsignedString(device.deviceId));
+            if (device.thisDevice) {
+                label.append(" — ").append(getString(R.string.x3dhpq_device_this_device));
+            }
+            labelView.setText(label.toString());
 
-            final Date createdDate = new Date(device.createdAt() * 1000L);
+            final String role =
+                    getString(
+                            device.primary
+                                    ? R.string.x3dhpq_device_role_primary
+                                    : R.string.x3dhpq_device_role_secondary);
+            final String status =
+                    getString(
+                            device.confirmed
+                                    ? R.string.x3dhpq_device_status_confirmed
+                                    : R.string.x3dhpq_device_status_pending);
+            statusView.setText(role + " · " + status);
+
+            if (device.cert != null) {
+                fingerprintView.setText(device.cert.fingerprint(X3dhpqCrypto.BLAKE2B_160));
+            } else {
+                fingerprintView.setText(R.string.x3dhpq_device_fingerprint_unavailable);
+            }
+
+            final Date addedDate = new Date(device.addedAt * 1000L);
             final String dateStr =
                     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                            .format(createdDate);
-            text2.setText("Created: " + dateStr);
+                            .format(addedDate);
+            addedAtView.setText(getString(R.string.x3dhpq_device_added_at, dateStr));
 
-            // "Remove" button: we use a tag so the click listener captures the correct position.
-            // android.R.layout.simple_list_item_2 does not include a button, so we attach
-            // a tagged click on the whole row's long-press instead of trying to add a child
-            // button into a layout we don't control.  The spec says "remove button per row";
-            // we expose it via long-press to stay within the simple_list_item_2 layout.
-            row.setOnLongClickListener(
-                    v -> {
-                        showRemoveDeviceDialog(device);
-                        return true;
-                    });
+            revokeButton.setOnClickListener(v -> showRemoveDeviceDialog(device));
 
             return row;
         }
     }
 
-    private void showRemoveDeviceDialog(
-            final DatabaseBackend.X3dhpqLocalDeviceRow device) {
+    private void showRemoveDeviceDialog(final X3dhpqService.AssociatedDevice device) {
         final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
         builder.setTitle(R.string.x3dhpq_remove_device);
+        final String deviceIdStr = Integer.toUnsignedString(device.deviceId);
         builder.setMessage(
-                "Remove device "
-                        + Integer.toUnsignedString(device.deviceId())
-                        + "?\n\nThis will delete the local key material for this device.");
+                device.thisDevice
+                        ? getString(R.string.x3dhpq_remove_this_device_confirm, deviceIdStr)
+                        : getString(R.string.x3dhpq_remove_device_confirm, deviceIdStr));
         builder.setNegativeButton(R.string.cancel, null);
         builder.setPositiveButton(
                 R.string.x3dhpq_remove_device,
@@ -269,18 +305,19 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         builder.create().show();
     }
 
-    private void removeDevice(final DatabaseBackend.X3dhpqLocalDeviceRow device) {
+    private void removeDevice(final X3dhpqService.AssociatedDevice device) {
         if (mAccount == null || !xmppConnectionServiceBound) {
             Toast.makeText(this, "Not connected", Toast.LENGTH_SHORT).show();
             return;
         }
-        // Revokes the device (§8.6): deletes its local key material, republishes
-        // the signed devicelist with a bumped version omitting it, and appends a
-        // RemoveDevice audit entry.
-        mAccount.getX3dhpqService().revokeOwnDevice(device.deviceId());
+        // Revokes the device (§8.6): republishes the signed devicelist with a bumped
+        // version omitting it, appends a RemoveDevice audit entry, and tears down its
+        // local key material / sessions (self-revoke and revoking a sibling both go
+        // through the same account-level operation).
+        mAccount.getX3dhpqService().revokeOwnDevice(device.deviceId);
         Toast.makeText(
                         this,
-                        "Removed device " + Integer.toUnsignedString(device.deviceId()),
+                        "Removed device " + Integer.toUnsignedString(device.deviceId),
                         Toast.LENGTH_LONG)
                 .show();
         refresh();
