@@ -129,24 +129,47 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
                 });
     }
 
-    /** §10.6.4b: destructive confirmation dialog before minting a brand-new identity. */
+    /**
+     * §10.6.6 account reset: a big, safe-defaulted destructive confirmation. The default /
+     * most-prominent button is the SAFE choice (Cancel); the destructive action ("Reset
+     * anyway") is the secondary/negative button, so a careless tap never resets the
+     * account. {@link X3dhpqService#performAccountReset()} is only invoked from the
+     * explicit destructive confirm below.
+     */
     private void showGenerateNewIdentityDialog() {
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.x3dhpq_generate_new_identity_button)
-                .setMessage(R.string.x3dhpq_generate_new_identity_confirm)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(
-                        R.string.x3dhpq_generate_new_identity_button,
-                        (dialog, which) -> {
-                            if (mAccount != null && xmppConnectionServiceBound) {
-                                mAccount.getX3dhpqService().performAccountReset();
-                                Toast.makeText(this, R.string.x3dhpq_pair_status_done, Toast.LENGTH_LONG)
-                                        .show();
-                                refresh();
-                            }
-                        })
-                .create()
-                .show();
+        final androidx.appcompat.app.AlertDialog dialog =
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle(R.string.x3dhpq_generate_new_identity_confirm_title)
+                        .setMessage(R.string.x3dhpq_generate_new_identity_confirm)
+                        // Positive = safe default: Cancel. Most prominent / default-focused.
+                        .setPositiveButton(R.string.cancel, null)
+                        // Negative = destructive, deliberate, secondary choice.
+                        .setNegativeButton(
+                                R.string.x3dhpq_generate_new_identity_confirm_action,
+                                (d, which) -> {
+                                    if (mAccount != null && xmppConnectionServiceBound) {
+                                        mAccount.getX3dhpqService().performAccountReset();
+                                        Toast.makeText(
+                                                        this,
+                                                        R.string.x3dhpq_pair_status_done,
+                                                        Toast.LENGTH_LONG)
+                                                .show();
+                                        refresh();
+                                    }
+                                })
+                        .create();
+        dialog.setOnShowListener(
+                d -> {
+                    // Visually mark the destructive button as the deliberate, non-default
+                    // choice (Material error color) — Cancel above keeps the default styling.
+                    final Button negative = dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE);
+                    if (negative != null) {
+                        negative.setTextColor(
+                                com.google.android.material.color.MaterialColors.getColor(
+                                        negative, android.R.attr.colorError));
+                    }
+                });
+        dialog.show();
     }
 
     /** §10.6.5: explicit re-trust confirmation for a peer whose identity was reconstructed. */

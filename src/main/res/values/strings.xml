@@ -1233,7 +1233,9 @@
     <string name="x3dhpq_pending_enrollment_title">Disabled — waiting for sync</string>
     <string name="x3dhpq_pending_enrollment_text">This device is disabled: it cannot send or receive messages for this account until an authorized device confirms it. This account already has an identity on another device — associate with it from any authorized device to confirm this one, or perform an account reset instead (this loses access to prior messages and groups).</string>
     <string name="x3dhpq_generate_new_identity_button">Account reset</string>
-    <string name="x3dhpq_generate_new_identity_confirm">Account reset is destructive and cannot be undone:\n\n• All messages sent or received under the current identity are lost.\n• This account is removed from every group it belonged to and must be re-invited to each one.\n• Every contact must manually re-verify your new identity before they will accept messages from you again.\n\nContinue?</string>
+    <string name="x3dhpq_generate_new_identity_confirm_title">Reset your account?</string>
+    <string name="x3dhpq_generate_new_identity_confirm">This is permanent and cannot be undone:\n\n• Your current identity (key) is permanently lost — this device mints a brand-new one, unrelated to the old key.\n• Every contact will have to manually re-verify your new identity before they will trust and accept messages from you again.\n• You will lose ALL message history from ALL groups you belong to — you are removed from every one of them until someone re-invites you.\n\nMost people should choose Cancel.</string>
+    <string name="x3dhpq_generate_new_identity_confirm_action">Reset anyway</string>
     <string name="x3dhpq_blocked_identities_title">Contacts needing re-trust</string>
     <string name="x3dhpq_blocked_identities_help">This contact\'s identity key changed (their account may have reset it). Compare their new fingerprint out-of-band before trusting it — messages to them are paused until you do.</string>
     <string name="x3dhpq_retrust_button">Re-trust</string>

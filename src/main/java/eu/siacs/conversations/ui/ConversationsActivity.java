@@ -36,6 +36,7 @@ import android.annotation.SuppressLint;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -120,6 +121,12 @@ public class ConversationsActivity extends QrCodeProcessingActivity
     public static final int REQUEST_OPEN_MESSAGE = 0x9876;
     public static final int REQUEST_PLAY_PAUSE = 0x5432;
 
+    // x3dhpq: per-account guard so the disabled-account -> pair-screen navigation
+    // (navigateToPairScreenIfAccountPending) is non-nagging — shown at most once per
+    // pending "session"/state.
+    private static final String PREF_X3DHPQ_PENDING_PROMPT_SHOWN_PREFIX =
+            "x3dhpq_pending_prompt_shown_";
+
     // secondary fragment (when holding the conversation, must be initialized before refreshing the
     // overview fragment
     private static final @IdRes int[] FRAGMENT_ID_NOTIFICATION_ORDER = {
@@ -196,8 +203,63 @@ public class ConversationsActivity extends QrCodeProcessingActivity
             if (openBatteryOptimizationDialogIfNeeded()) {
                 return;
             }
+            if (navigateToPairScreenIfAccountPending()) {
+                return;
+            }
             requestNotificationPermissionIfNeeded();
         }
+    }
+
+    /**
+     * x3dhpq: on reaching the main conversation-list UI post-login, if any logged-in account
+     * is still §10.6.1 pending-enrollment (disabled — not yet authorized by an existing
+     * device), navigate straight to the associate/"pair this device" screen instead of
+     * leaving the user to discover it in settings. Guarded so it fires at most once per
+     * pending "session" (a per-account preference flag, cleared once the account is no
+     * longer pending so a LATER pending state — e.g. after a subsequent account reset —
+     * is prompted again); never fires for an authorized account. A normal (non-modal)
+     * Activity, so the user can always back out.
+     *
+     * @return true if navigation was triggered (caller should not stack further dialogs).
+     */
+    private boolean navigateToPairScreenIfAccountPending() {
+        final SharedPreferences prefs = getPreferences();
+        final SharedPreferences.Editor editor = prefs.edit();
+        boolean changed = false;
+        boolean navigated = false;
+        for (final Account account : xmppConnectionService.getAccounts()) {
+            final String prefKey = PREF_X3DHPQ_PENDING_PROMPT_SHOWN_PREFIX + account.getUuid();
+            final eu.siacs.conversations.crypto.x3dhpq.X3dhpqService x3dhpqService =
+                    account.getX3dhpqService();
+            final boolean pending =
+                    account.isOnlineAndConnected()
+                            && x3dhpqService != null
+                            && x3dhpqService.isPendingEnrollment();
+            if (!pending) {
+                // Not (or no longer) pending: clear any stale guard so a future pending
+                // state for this account is prompted again instead of being silently
+                // suppressed forever.
+                if (prefs.contains(prefKey)) {
+                    editor.remove(prefKey);
+                    changed = true;
+                }
+                continue;
+            }
+            if (prefs.getBoolean(prefKey, false)) {
+                // Already prompted once for this pending session — non-nagging.
+                continue;
+            }
+            if (!navigated) {
+                editor.putBoolean(prefKey, true);
+                changed = true;
+                startActivity(PairToExistingActivity.makeIntent(this, account.getUuid()));
+                navigated = true;
+            }
+        }
+        if (changed) {
+            editor.apply();
+        }
+        return navigated;
     }
 
     private String getBatteryOptimizationPreferenceKey() {
