@@ -68,6 +68,30 @@ class MembershipDagTest {
         return JournalEntryV2.buildMemberPayload(fp, 0);
     }
 
+    // Fixed, deterministic v2 signed_part vector — asserted identically in the
+    // Vala engine's test so the two clients are byte-compatible on the wire.
+    // lamport=1, signer_fp=20xAB, no parents, action=AddMember(5),
+    // payload=buildMemberPayload(20xCD, 0), timestamp=0.
+    static final String V2_SIGNEDPART_VECTOR =
+            "5833444850512d41756469742d763200"     // "X3DHPQ-Audit-v2\0"
+          + "0000000000000001"                     // lamport
+          + "abababababababababababababababababababab" // signer_fp
+          + "0000"                                  // parent_count
+          + "05"                                    // action = AddMember
+          + "00000018"                              // payload_len = 24
+          + "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00000000" // payload
+          + "0000000000000000";                     // timestamp
+
+    @Test
+    void signedPartVector() {
+        final byte[] fp = new byte[20]; java.util.Arrays.fill(fp, (byte) 0xAB);
+        final byte[] subj = new byte[20]; java.util.Arrays.fill(subj, (byte) 0xCD);
+        final JournalEntryV2 e =
+                new JournalEntryV2(1L, fp, new ArrayList<>(), JournalEntryV2.ACTION_ADD_MEMBER,
+                        JournalEntryV2.buildMemberPayload(subj, 0), 0L, new byte[0], new byte[0]);
+        assertEquals(V2_SIGNEDPART_VECTOR, JournalEntryV2.hex(e.signedPart()));
+    }
+
     @Test
     void marshalRoundtrip() {
         final Id owner = makeId();
