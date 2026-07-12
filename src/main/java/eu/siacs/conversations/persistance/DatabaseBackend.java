@@ -3256,12 +3256,28 @@ public class DatabaseBackend extends SQLiteOpenHelper
             String accountUuid, byte[] aikPriv, byte[] aikPub, String fingerprint) {
         final SQLiteDatabase db = getWritableDatabase();
         final ContentValues v = new ContentValues();
-        v.put("account_uuid", accountUuid);
         v.put("aik_priv_marshal", x3dhpqWrap(aikPriv));
         v.put("aik_pub_marshal", aikPub);
         v.put("fingerprint", fingerprint);
-        db.insertWithOnConflict(
-                "x3dhpq_account_identity", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+        // UPDATE-in-place when the row exists; only INSERT when it does not. Adopting the
+        // account AIK (e.g. a newcomer embracing membership) MUST NOT delete-and-reinsert the
+        // identity row: every x3dhpq child table (local_device, co_account_device,
+        // manifest_state, remote_device, ...) is FK'd to account_uuid ON DELETE CASCADE, so a
+        // CONFLICT_REPLACE here silently wiped this device's own bootstrapped local device +
+        // adopted manifest, stranding a freshly-paired device with an AIK pub but no identity.
+        // Intentional resets wipe children via the explicit deleteX3dhpqAccountIdentity(), not
+        // through this method.
+        final int updated =
+                db.update(
+                        "x3dhpq_account_identity",
+                        v,
+                        "account_uuid = ?",
+                        new String[] {accountUuid});
+        if (updated == 0) {
+            v.put("account_uuid", accountUuid);
+            db.insertWithOnConflict(
+                    "x3dhpq_account_identity", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+        }
     }
 
     public void deleteX3dhpqAccountIdentity(String accountUuid) {

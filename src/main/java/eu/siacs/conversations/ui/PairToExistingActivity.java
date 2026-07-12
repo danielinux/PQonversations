@@ -492,6 +492,14 @@ public class PairToExistingActivity extends XmppActivity {
         try {
             dao.beginTransaction();
             try {
+                // Capture this device's own local key row (device_id + DIK priv +
+                // created_at) BEFORE adopting the account AIK. The DIK was bootstrapped
+                // locally before pairing; the AIK adoption below must not lose it.
+                final java.util.List<eu.siacs.conversations.persistance.DatabaseBackend.X3dhpqLocalDeviceRow>
+                        preAdoptDevices = dao.listX3dhpqLocalDevices(mAccountUuid);
+                final eu.siacs.conversations.persistance.DatabaseBackend.X3dhpqLocalDeviceRow selfDevice =
+                        preAdoptDevices.isEmpty() ? null : preAdoptDevices.get(0);
+
                 // Embrace the account membership: adopt the account AIK, dropping
                 // this device's own provisional one. The PUBLIC part is adopted
                 // unconditionally so this device shows the account fingerprint and
@@ -517,21 +525,23 @@ public class PairToExistingActivity extends XmppActivity {
                             fingerprint);
                 }
 
-                // Persist the device certificate issued by the existing primary.
-                if (result.cert != null) {
-                    final java.util.List<eu.siacs.conversations.persistance.DatabaseBackend.X3dhpqLocalDeviceRow> devices =
-                            dao.listX3dhpqLocalDevices(mAccountUuid);
-                    if (!devices.isEmpty()) {
-                        final eu.siacs.conversations.persistance.DatabaseBackend.X3dhpqLocalDeviceRow dev =
-                                devices.get(0);
-                        dao.putX3dhpqLocalDevice(
-                                mAccountUuid,
-                                dev.deviceId(),
-                                dev.dikPriv(),
-                                result.cert.marshal(),
-                                dev.createdAt(),
-                                result.cert.getFlags() & 0xFF);
-                    }
+                // Persist the device certificate issued by the existing primary onto our
+                // own local device row (captured before the AIK adoption above, so it
+                // survives even if a future change reintroduces a cascading identity write).
+                if (result.cert != null && selfDevice != null) {
+                    dao.putX3dhpqLocalDevice(
+                            mAccountUuid,
+                            selfDevice.deviceId(),
+                            selfDevice.dikPriv(),
+                            result.cert.marshal(),
+                            selfDevice.createdAt(),
+                            result.cert.getFlags() & 0xFF);
+                } else if (result.cert != null) {
+                    Log.e(
+                            Config.LOGTAG,
+                            LOGTAG
+                                    + ": no local device row at pairing install — cannot bind"
+                                    + " issued DC; device would be stranded");
                 }
 
                 dao.setTransactionSuccessful();
