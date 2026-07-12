@@ -63,6 +63,10 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
 
     private DeviceAdapter mAdapter;
     private final List<X3dhpqService.AssociatedDevice> mDevices = new ArrayList<>();
+    // Task #54: whether THIS device may author a revoke (it is a trusted member of the
+    // account — present in the manifest fold). Any folded device qualifies, not only the
+    // AIK_priv holder. Recomputed each refresh; gates the per-row Revoke button.
+    private boolean mLocalDeviceCanRevoke = false;
     // device_id → 1-based "Device N" ordinal, recomputed each refresh over the
     // devices currently shown, so the default labels are deterministic and shared.
     private final Map<Integer, Integer> mDeviceOrdinals = new HashMap<>();
@@ -280,6 +284,9 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         if (!pending) {
             mDevices.addAll(service.listAssociatedDevices());
         }
+        // Task #54: enable the Revoke action for ANY trusted (folded) device, not only the
+        // AIK_priv holder — a folded device authors a DIK-signed REMOVE.
+        mLocalDeviceCanRevoke = !pending && service.localDeviceCanAuthorTrust();
         recomputeDeviceOrdinals();
         mAdapter.notifyDataSetChanged();
 
@@ -364,6 +371,11 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
             addedAtView.setText(getString(R.string.x3dhpq_device_added_at, dateStr));
 
             renameButton.setOnClickListener(v -> showRenameDeviceDialog(device.deviceId));
+            // Task #54: the Revoke action is enabled whenever the LOCAL device is a trusted
+            // member of the account (in the manifest fold) — any folded device can author a
+            // DIK-signed REMOVE, not only the AIK_priv holder. Revoking THIS device stays
+            // blocked by the hard self-revoke guard in X3dhpqService#revokeOwnDevice.
+            revokeButton.setEnabled(mLocalDeviceCanRevoke && !device.thisDevice);
             revokeButton.setOnClickListener(v -> showRemoveDeviceDialog(device));
 
             return row;

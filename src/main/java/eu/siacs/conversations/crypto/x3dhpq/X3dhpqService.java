@@ -1696,6 +1696,42 @@ public class X3dhpqService {
     }
 
     /**
+     * Trust Manifest Phase 2 authorization (task #54): true iff THIS device is currently a
+     * trusted member of the account — i.e. its device id is present in the fold of the
+     * current own manifest. Any folded device may author a DIK-signed edit (ADD/REMOVE),
+     * so this — NOT holding AIK_priv — is the gate for revoke authorship and its UI.
+     *
+     * <p>Fallback when no manifest exists yet (pre-migration): a non-pending device whose
+     * own key row is present is a member via the co-account/devicelist model. Genesis
+     * manifest build and devicelist/account-root signing stay AIK_priv-gated elsewhere and
+     * are unaffected by this check.
+     */
+    public boolean localDeviceCanAuthorTrust() {
+        if (db == null || account == null) return false;
+        if (isPendingEnrollment()) return false;
+        final Integer ownId = getOwnDeviceIdOrNull();
+        if (ownId == null) return false;
+        final String accountUuid = account.getUuid();
+        final String ownBare = account.getJid().asBareJid().toString();
+        final TrustManifest m = loadCurrentOwnManifest(accountUuid, ownBare);
+        if (m != null) {
+            try {
+                return TrustManifest.fold(m).containsKey(ownId & 0xffffffffL);
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": localDeviceCanAuthorTrust fold failed: "
+                        + e.getMessage());
+                return false;
+            }
+        }
+        // No manifest yet: trust via existing membership (our own device key row exists).
+        for (final DatabaseBackend.X3dhpqLocalDeviceRow row :
+                db.listX3dhpqLocalDevices(accountUuid)) {
+            if (row.deviceId() == ownId) return true;
+        }
+        return false;
+    }
+
+    /**
      * §D3 newcomer adopt: fetch the account's own trustmanifest, verify+fold, and populate
      * the trust tables. The newcomer sees itself + siblings via the fold once the
      * confirmer's ADD lands; until then it simply has no manifest and stays on the
@@ -3169,6 +3205,14 @@ public class X3dhpqService {
         if (ownId != null && ownId == deviceId) {
             Log.w(Config.LOGTAG, LOGPREFIX + ": REFUSING to revoke this device (" + Integer.toUnsignedString(deviceId)
                     + ") — self-revoke orphans the account; use Account reset instead");
+            return;
+        }
+        // Task #54: revoke authorship is gated on TRUST (this device is in the manifest
+        // fold), NOT on holding AIK_priv. With share_primary gone, any folded device can
+        // author a DIK-signed REMOVE (confirmerRemoveDevice signs under the local DIK).
+        if (!localDeviceCanAuthorTrust()) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": revokeOwnDevice ignored — this device is not a"
+                    + " trusted member of the account (not in the manifest fold)");
             return;
         }
         final String accountUuid = account.getUuid();
