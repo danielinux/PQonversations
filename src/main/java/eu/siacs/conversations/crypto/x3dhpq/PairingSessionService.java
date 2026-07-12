@@ -73,6 +73,23 @@ public final class PairingSessionService {
      */
     private final Map<ByteBuffer, Integer> outboundStepCounters = new HashMap<>();
 
+    /**
+     * Per-sid peer JID this FSM is bound to. Existing-side: the new device we sent PAKE1 to.
+     * New-side: the existing device that sent us the first valid PAKE1 (locked on first contact).
+     * On a multi-resource account, message carbons fan every directed {@code <pair>} stanza out to
+     * all of our resources, so we may see PAKE traffic from OTHER resources — we handshake with
+     * exactly one peer and drop the rest.
+     */
+    private final Map<ByteBuffer, Jid> sessionPeers = new HashMap<>();
+
+    /**
+     * New-side pairing code per sid, kept so the responder can re-arm a fresh FSM if a stray
+     * existing device races in and fails key confirmation. Without this, one bogus initiator (e.g.
+     * a ghost session replaying a stale code) would tear the session down before the genuine device
+     * gets to complete.
+     */
+    private final Map<ByteBuffer, String> newCodes = new HashMap<>();
+
     private final List<Listener> listeners = new ArrayList<>();
 
     private final ExecutorService executor =
@@ -124,6 +141,11 @@ public final class PairingSessionService {
         synchronized (lock) {
             existingFsms.put(key, fsm);
             outboundStepCounters.put(key, 0);
+            // Bind this INITIATOR to the single new device we're pairing with, so
+            // carbon'd/foreign PAKE traffic from other resources is dropped.
+            if (peerJid != null && !peerJid.asBareJid().equals(peerJid)) {
+                sessionPeers.put(key, peerJid);
+            }
         }
 
         // Persist DB row so sweepExpired() can clean up if the process stalls.
@@ -162,6 +184,7 @@ public final class PairingSessionService {
         synchronized (lock) {
             newFsms.put(key, fsm);
             outboundStepCounters.put(key, 0);
+            newCodes.put(key, code);
         }
 
         final long expiresAt = System.currentTimeMillis() / 1000L + TTL_SECONDS;
@@ -245,6 +268,16 @@ public final class PairingSessionService {
             final byte[] sid,
             final PairingMsg inMsg,
             final Jid from) {
+        // Bind to the single new device we sent PAKE1 to; drop carbon'd/foreign traffic.
+        final Jid boundPeer;
+        synchronized (lock) {
+            boundPeer = sessionPeers.get(key);
+        }
+        if (boundPeer != null && (from == null || !boundPeer.equals(from))) {
+            Log.w(Config.LOGTAG, "X3DHPQ-PAIR: EXISTING dropping stanza type=" + inMsg.getType()
+                    + " from non-peer " + from + " (peer=" + boundPeer + ")");
+            return;
+        }
         executor.execute(() -> {
             try {
                 final PairingMsg out;
@@ -265,6 +298,20 @@ public final class PairingSessionService {
                     final DeviceCertificate issuedCert = fsm.getIssuedCert();
                     notifyComplete(sid, null, issuedCert);
                 }
+            } catch (PairingFsm.PairingException e) {
+                if (isStrayStanza(e)) {
+                    // A stray/duplicate/out-of-order stanza (carbon copy of a message we
+                    // already consumed, or one for a different FSM step). The FSM checks the
+                    // message type BEFORE mutating state, so nothing was corrupted — ignore
+                    // it and keep the session alive.
+                    Log.w(Config.LOGTAG, "X3DHPQ-PAIR: EXISTING ignoring stray stanza type="
+                            + inMsg.getType() + " from " + from + ": " + e.getMessage());
+                    return;
+                }
+                Log.w(Config.LOGTAG, LOGTAG + ": Existing FSM step failed for sid="
+                        + hexSid(sid) + ": " + e.getMessage());
+                cleanupSession(key, sid);
+                notifyFailure(sid, e);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, LOGTAG + ": Existing FSM step failed for sid="
                         + hexSid(sid) + ": " + e.getMessage());
@@ -280,11 +327,28 @@ public final class PairingSessionService {
             final byte[] sid,
             final PairingMsg inMsg,
             final Jid from) {
+        // Lock onto the first existing device that reaches us; ignore stanzas from any other
+        // resource. Several existing resources may race to initiate and carbons duplicate each
+        // one's traffic across all our resources — we handshake with exactly one peer. The lock
+        // is only committed AFTER a message from a peer validly advances the FSM (below), so a
+        // bogus/stray first stanza can't hijack the session.
+        synchronized (lock) {
+            final Jid locked = sessionPeers.get(key);
+            if (locked != null && (from == null || !locked.equals(from))) {
+                Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW dropping stanza type=" + inMsg.getType()
+                        + " from non-peer " + from + " (locked=" + locked + ")");
+                return;
+            }
+        }
         executor.execute(() -> {
             try {
                 final PairingMsg out;
                 synchronized (lock) {
                     out = fsm.step(inMsg);
+                    // Commit the peer lock now that this sender validly advanced the FSM.
+                    if (from != null && sessionPeers.get(key) == null) {
+                        sessionPeers.put(key, from);
+                    }
                 }
                 dao.updateX3dhpqPairingState(sid, new byte[0]);
 
@@ -311,6 +375,24 @@ public final class PairingSessionService {
                     final PairingFsm.Result result = fsm.getResult();
                     notifyComplete(sid, result, null);
                 }
+            } catch (PairingFsm.PairingException e) {
+                if (isStrayStanza(e)) {
+                    Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW ignoring stray stanza type="
+                            + inMsg.getType() + " from " + from + ": " + e.getMessage());
+                    return;
+                }
+                // Key-confirm failed for the peer we locked onto. On a polluted account this is
+                // typically a ghost/stray existing device replaying a stale code — NOT the genuine
+                // device the user is pairing. Re-arm a fresh New FSM (fresh CPace state) for the
+                // same sid+code and drop the lock, so the real device can still complete. The
+                // session only truly ends on TTL expiry (sweepExpired).
+                if (rearmNewFsm(key, sid, from, e)) {
+                    return;
+                }
+                Log.w(Config.LOGTAG, LOGTAG + ": New FSM step failed for sid="
+                        + hexSid(sid) + ": " + e.getMessage());
+                cleanupSession(key, sid);
+                notifyFailure(sid, e);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, LOGTAG + ": New FSM step failed for sid="
                         + hexSid(sid) + ": " + e.getMessage());
@@ -318,6 +400,50 @@ public final class PairingSessionService {
                 notifyFailure(sid, e);
             }
         });
+    }
+
+    /**
+     * Re-arm the New-side FSM after a locked peer fails key confirmation, so a stray/ghost
+     * initiator can't tear down a session the genuine device may still complete. Returns true if the
+     * session was successfully re-armed (caller should stop and keep waiting), false if it could not
+     * be (caller should fail the session normally).
+     */
+    private boolean rearmNewFsm(final ByteBuffer key, final byte[] sid, final Jid failedPeer,
+            final PairingFsm.PairingException cause) {
+        final String code;
+        synchronized (lock) {
+            code = newCodes.get(key);
+            // Only re-arm if this is still the active New session for this sid.
+            if (code == null || !newFsms.containsKey(key)) {
+                return false;
+            }
+        }
+        try {
+            final PairingFsm.New fresh = new PairingFsm.New(loadDik(), code, sid);
+            synchronized (lock) {
+                newFsms.put(key, fresh);
+                outboundStepCounters.put(key, 0);
+                sessionPeers.remove(key);
+            }
+            Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW re-armed after auth-fail from stray " + failedPeer
+                    + " (sid=" + hexSid(sid) + "); still waiting for the genuine device");
+            return true;
+        } catch (final Exception rebuild) {
+            Log.w(Config.LOGTAG, LOGTAG + ": failed to re-arm New FSM for sid=" + hexSid(sid)
+                    + ": " + rebuild.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * A {@link PairingFsm.PairingException} means either an unexpected/duplicate stanza
+     * ("protocol violation" — safe to ignore, the FSM validates type before mutating state) or a
+     * genuine crypto failure ("authentication failed" — fatal, wrong code). Only the former is a
+     * stray that we drop while keeping the session alive.
+     */
+    private static boolean isStrayStanza(final PairingFsm.PairingException e) {
+        final String msg = e.getMessage();
+        return msg != null && msg.contains("protocol violation");
     }
 
     // ---- stanza building ----
@@ -344,10 +470,15 @@ public final class PairingSessionService {
         pair.setContent(pairingMsg.marshal());
         packet.addExtension(pair);
 
+        // Pairing stanzas are strictly point-to-point between two devices. Tell the server NOT to
+        // carbon-copy them to the account's other resources (XEP-0280 <private/> + XEP-0334
+        // <no-copy/>) — otherwise every resource sees the handshake traffic and races/duplicates it.
+        packet.addExtension(new im.conversations.android.xmpp.model.carbons.Private());
+        packet.addExtension(new im.conversations.android.xmpp.model.hints.NoCopy());
+
         xmppConnectionService.sendMessagePacket(account, packet);
         Log.d(Config.LOGTAG, LOGTAG + ": sent pair stanza to=" + to
-                + " sid=" + hexSid(sid) + " step=" + step
-                + " msgType=" + pairingMsg.getType());
+                + " sid=" + hexSid(sid) + " step=" + step + " msgType=" + pairingMsg.getType());
     }
 
     // ---- helpers ----
@@ -357,6 +488,8 @@ public final class PairingSessionService {
             existingFsms.remove(key);
             newFsms.remove(key);
             outboundStepCounters.remove(key);
+            sessionPeers.remove(key);
+            newCodes.remove(key);
         }
         try {
             dao.deleteX3dhpqPairingSession(sid);

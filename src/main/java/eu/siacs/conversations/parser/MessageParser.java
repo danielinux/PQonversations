@@ -599,6 +599,10 @@ public class MessageParser extends AbstractParser
         // x3dhpq serverless rendezvous (§10.1a, method A): a directed <message> carrying
         // <pair-hello> triggers the existing device to initiate pairing. Consume it here.
         if (packet.hasExtension(im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class)) {
+            if (isCarbon) {
+                Log.d(Config.LOGTAG, "X3DHPQ-PAIR: dropping carbon'd <pair-hello> from " + packet.getFrom());
+                return;
+            }
             final var hello =
                     packet.getExtension(
                             im.conversations.android.xmpp.model.x3dhpq.pair.PairHello.class);
@@ -609,6 +613,15 @@ public class MessageParser extends AbstractParser
         // x3dhpq pairing stanzas (chat-type <message> carrying <pair>): dispatch to FSM and
         // consume — do not fall through to body/message-archive handlers.
         if (packet.hasExtension(im.conversations.android.xmpp.model.x3dhpq.pair.Pair.class)) {
+            // Pairing is strictly point-to-point between two devices; the genuine handshake is
+            // delivered DIRECTLY to our full JID (never a carbon). A carbon copy is a duplicate of
+            // traffic between two OTHER resources of this account — processing it lets an unrelated
+            // device's handshake (or an OMEMO-only resource's echoed envelope) hijack/duplicate our
+            // FSM. Drop carbons here.
+            if (isCarbon) {
+                Log.d(Config.LOGTAG, "X3DHPQ-PAIR: dropping carbon'd <pair> from " + packet.getFrom());
+                return;
+            }
             final var pairing = account.getPairingSessionService();
             if (pairing != null) {
                 try {

@@ -88,8 +88,7 @@ public class VerifyDeviceManager extends AbstractManager {
         }
 
         Log.d(Config.LOGTAG, getAccount().getJid().asBareJid()
-                + ": received pair-hello from full-jid=" + fullJid
-                + " device-id=" + deviceId);
+                + ": received pair-hello from full-jid=" + fullJid + " device-id=" + deviceId);
 
         final Intent intent = new Intent(ACTION_X3DHPQ_PAIR_NEW_DEVICE);
         intent.putExtra(EXTRA_ACCOUNT_JID, getAccount().getJid().asBareJid().toString());
