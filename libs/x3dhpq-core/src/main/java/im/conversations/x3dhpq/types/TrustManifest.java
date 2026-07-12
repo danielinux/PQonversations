@@ -120,6 +120,34 @@ public final class TrustManifest {
                 && X3dhpqCrypto.mldsa65Verify(mlPub, sp, sigMl);
     }
 
+    // -------------------------------------------------------------------------
+    // Phase 2 — HEAD signature. The publishing device signs signed_part() with its
+    // DIK (the genesis-only device signs its own head at genesis). Interop-safe:
+    // the signed input is the Phase-1 KAT-locked signed_part and Ed25519/ML-DSA-65
+    // are standard. See §B of the Trust Manifest Phase 2 contract.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Return a copy of this manifest whose head is signed under the publishing device's
+     * DIK private keys ( edPriv/mldsaPriv) over {@link #signedPart()}. The manifest's
+     * head fields (version/prev_hash/aik/entries) are unchanged.
+     */
+    public TrustManifest signHead(byte[] dikPrivEd, byte[] dikPrivMldsa) {
+        final byte[] sp = signedPart();
+        final byte[] ed = X3dhpqCrypto.ed25519Sign(dikPrivEd, sp);
+        final byte[] ml = X3dhpqCrypto.mldsa65Sign(dikPrivMldsa, sp);
+        return new TrustManifest(version, prevHash, aik, entries, ed, ml);
+    }
+
+    /**
+     * True iff BOTH hybrid head signatures verify under the given DIK public keys over
+     * {@link #signedPart()}. The caller resolves {@code dikPub*} from a currently-folded
+     * device (§C step 5).
+     */
+    public boolean verifyHead(byte[] dikPubEd, byte[] dikPubMldsa) {
+        return verifySig(dikPubEd, dikPubMldsa);
+    }
+
     /** Parse from wire; returns null on any malformed input. */
     public static TrustManifest unmarshal(byte[] b) {
         final int min = PREFIX.length + 8 + 4 + 32 + 2 + 4 + 2 + 2;

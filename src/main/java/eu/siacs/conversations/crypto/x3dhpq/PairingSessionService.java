@@ -147,7 +147,11 @@ public final class PairingSessionService {
             final PairingFsm.Options opts)
             throws Exception {
         final AccountIdentityKey aik = loadAik();
-        final PairingFsm.Existing fsm = new PairingFsm.Existing(aik, code, sid, opts);
+        // Trust Manifest Phase 2 (contract §E.2): issue the newcomer's DC under the
+        // confirmer's OWN DIK (delegation), not the AIK. The account manifest fold
+        // authorizes the delegated DC via the confirmer's DIK-signed ADD entry (§D2).
+        final DeviceIdentityKey issuerDik = loadDik();
+        final PairingFsm.Existing fsm = new PairingFsm.Existing(aik, issuerDik, code, sid, opts);
 
         final ByteBuffer key = ByteBuffer.wrap(sid.clone());
         synchronized (lock) {

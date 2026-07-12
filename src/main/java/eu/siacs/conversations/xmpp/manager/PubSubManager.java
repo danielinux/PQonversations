@@ -203,6 +203,7 @@ public class PubSubManager extends AbstractManager {
                 || Namespace.X3DHPQ_AUDIT.equals(node)
                 || Namespace.X3DHPQ_RECOVERY.equals(node)
                 || Namespace.X3DHPQ_PAIR.equals(node)
+                || Namespace.X3DHPQ_TRUSTMANIFEST.equals(node)
                 || Namespace.X3DHPQ_GROUP.equals(node)) {
             getManager(X3dhpqManager.class).handleItems(from, items);
         }

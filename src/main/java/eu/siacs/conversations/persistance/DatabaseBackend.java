@@ -73,7 +73,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 61;
+    private static final int DATABASE_VERSION = 62;
 
     // Column/table names for the legacy OMEMO tables, kept only so historical DB
     // migrations continue to work after the OMEMO code was removed.
@@ -503,6 +503,24 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     + " ON DELETE CASCADE"
                     + ")";
 
+    // Trust Manifest Phase 2 per-owner rollback/fork guard state (contract §C.3): the
+    // last accepted TrustManifest version for an owner (own bare JID or a contact), the
+    // SHA-256 of its marshalled blob, and the blob itself (so a same-version republish
+    // can be checked for equivocation/fork). One row per (account, owner). Added in
+    // DATABASE_VERSION = 62.
+    private static final String CREATE_X3DHPQ_MANIFEST_STATE =
+            "CREATE TABLE IF NOT EXISTS x3dhpq_manifest_state ("
+                    + "account_uuid TEXT NOT NULL,"
+                    + "owner_jid TEXT NOT NULL,"
+                    + "version INTEGER NOT NULL,"
+                    + "blob_hash BLOB NOT NULL,"        // SHA-256(TrustManifest.marshal())
+                    + "blob BLOB NOT NULL,"             // TrustManifest.marshal() of the accepted version
+                    + "updated_at INTEGER NOT NULL,"
+                    + "PRIMARY KEY (account_uuid, owner_jid),"
+                    + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
+                    + " ON DELETE CASCADE"
+                    + ")";
+
     private static final String RESOLVER_RESULTS_TABLENAME = "resolver_results";
 
     private static final String CREATE_RESOLVER_RESULTS_TABLE =
@@ -785,6 +803,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         db.execSQL(CREATE_X3DHPQ_CO_ACCOUNT_DEVICE);
         db.execSQL(CREATE_X3DHPQ_COMMITTED_DEVICE);
         db.execSQL(CREATE_X3DHPQ_DEVICE_AUDIT);
+        db.execSQL(CREATE_X3DHPQ_MANIFEST_STATE);
     }
 
     @Override
@@ -1408,6 +1427,10 @@ public class DatabaseBackend extends SQLiteOpenHelper
         // x3dhpq_account_identity — see CREATE_X3DHPQ_DEVICE_AUDIT javadoc.
         if (oldVersion < 61 && newVersion >= 61) {
             db.execSQL(CREATE_X3DHPQ_DEVICE_AUDIT);
+        }
+        // x3dhpq_manifest_state table (Trust Manifest Phase 2, added in DATABASE_VERSION = 62).
+        if (oldVersion < 62 && newVersion >= 62) {
+            db.execSQL(CREATE_X3DHPQ_MANIFEST_STATE);
         }
     }
 
@@ -3078,6 +3101,14 @@ public class DatabaseBackend extends SQLiteOpenHelper
             byte[] contentHash,
             boolean acceptedSigned) {}
 
+    // Trust Manifest Phase 2 per-owner rollback/fork guard state (contract §C.3).
+    public record X3dhpqManifestStateRow(
+            String accountUuid,
+            String ownerJid,
+            long version,
+            byte[] blobHash,
+            byte[] blob) {}
+
     public record X3dhpqLocalDeviceRow(
             String accountUuid,
             int deviceId,
@@ -3290,6 +3321,51 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     c.getLong(c.getColumnIndexOrThrow("version")),
                     c.getBlob(c.getColumnIndexOrThrow("content_hash")),
                     c.getInt(c.getColumnIndexOrThrow("accepted_signed")) != 0);
+        } finally {
+            c.close();
+        }
+    }
+
+    // ---- x3dhpq DAO: trust-manifest state (Phase 2, contract §C.3) ----
+
+    public void putX3dhpqManifestState(
+            String accountUuid,
+            String ownerJid,
+            long version,
+            byte[] blobHash,
+            byte[] blob,
+            long updatedAt) {
+        final SQLiteDatabase db = getWritableDatabase();
+        final ContentValues v = new ContentValues();
+        v.put("account_uuid", accountUuid);
+        v.put("owner_jid", ownerJid);
+        v.put("version", version);
+        v.put("blob_hash", blobHash != null ? blobHash : new byte[0]);
+        v.put("blob", blob != null ? blob : new byte[0]);
+        v.put("updated_at", updatedAt);
+        db.insertWithOnConflict(
+                "x3dhpq_manifest_state", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public X3dhpqManifestStateRow loadX3dhpqManifestState(String accountUuid, String ownerJid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_manifest_state",
+                        null,
+                        "account_uuid=? AND owner_jid=?",
+                        new String[] {accountUuid, ownerJid},
+                        null,
+                        null,
+                        null);
+        try {
+            if (!c.moveToFirst()) return null;
+            return new X3dhpqManifestStateRow(
+                    c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                    c.getString(c.getColumnIndexOrThrow("owner_jid")),
+                    c.getLong(c.getColumnIndexOrThrow("version")),
+                    c.getBlob(c.getColumnIndexOrThrow("blob_hash")),
+                    c.getBlob(c.getColumnIndexOrThrow("blob")));
         } finally {
             c.close();
         }

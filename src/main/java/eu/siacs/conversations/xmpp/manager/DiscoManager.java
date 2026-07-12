@@ -353,6 +353,9 @@ public class DiscoManager extends AbstractManager {
         // §11.8 sealed device-state tracker: subscribe to our own tracker node so a
         // re-seal (device-set change) reaches every one of our own online resources.
         features.add(notify(Namespace.X3DHPQ_DEVTRACKER));
+        // Trust Manifest Phase 2 (contract §A): subscribe so the manifest's `current`
+        // item reaches us via +notify, exactly like devicelist/audit.
+        features.add(notify(Namespace.X3DHPQ_TRUSTMANIFEST));
         if (!appSettings.isUseTor() && !account.isOnion()) {
             features.addAll(PRIVACY_SENSITIVE);
             features.addAll(VOIP_NAMESPACES);

@@ -22,6 +22,11 @@ public interface X3dhpqDao {
                                   byte[] contentHash, boolean acceptedSigned, long updatedAt);
     DatabaseBackend.X3dhpqDeviceListStateRow loadX3dhpqDeviceListState(String accountUuid, String ownerJid);
 
+    // --- Trust Manifest Phase 2 per-owner rollback/fork guard state (contract §C.3) ---
+    void putX3dhpqManifestState(String accountUuid, String ownerJid, long version,
+                                byte[] blobHash, byte[] blob, long updatedAt);
+    DatabaseBackend.X3dhpqManifestStateRow loadX3dhpqManifestState(String accountUuid, String ownerJid);
+
     // --- local device ---
     void putX3dhpqLocalDevice(String accountUuid, int deviceId, byte[] dikPriv, byte[] dc, long createdAt, int flags);
     List<DatabaseBackend.X3dhpqLocalDeviceRow> listX3dhpqLocalDevices(String accountUuid);

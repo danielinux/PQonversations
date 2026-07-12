@@ -57,6 +57,12 @@ public final class PairingFsm {
 
     public static final class Existing {
         private final AccountIdentityKey aik;
+        // Trust Manifest Phase 2 (contract §E.2): when non-null, the newcomer's DC is
+        // issued (signed) under the CONFIRMER's DIK, not the AIK. The fold authorizes a
+        // delegated DC via the ADD entry's author-DIK signature, so a non-genesis DC signed
+        // by the confirmer's DIK is consistent. When null (legacy/self-genesis path and the
+        // core round-trip tests) the DC is signed under the AIK as before.
+        private final DeviceIdentityKey issuerDik;
         private final CPaceState cpace;
         private final byte[] sid;
         private final Options opts;
@@ -67,8 +73,14 @@ public final class PairingFsm {
         private DeviceCertificate issuedCert;
 
         public Existing(AccountIdentityKey aik, String code, byte[] sid, Options opts) throws Exception {
+            this(aik, null, code, sid, opts);
+        }
+
+        public Existing(AccountIdentityKey aik, DeviceIdentityKey issuerDik, String code, byte[] sid,
+                Options opts) throws Exception {
             BouncyCastleInstaller.ensureRegistered();
             this.aik = aik;
+            this.issuerDik = issuerDik;
             this.sid = sid.clone();
             this.opts = opts;
             this.cpace = CPaceCrypto.newSession(
@@ -134,8 +146,12 @@ public final class PairingFsm {
                             new byte[0],
                             new byte[0]);
                     byte[] sp = stub.signedPart();
-                    byte[] sigEd = X3dhpqCrypto.ed25519Sign(aik.getPrivEd25519(), sp);
-                    byte[] sigMldsa = X3dhpqCrypto.mldsa65Sign(aik.getPrivMLDSA(), sp);
+                    // §E.2: sign the newcomer's DC under the confirmer's DIK when provided,
+                    // else under the AIK (legacy / self-genesis).
+                    byte[] signEd = issuerDik != null ? issuerDik.getPrivEd25519() : aik.getPrivEd25519();
+                    byte[] signMl = issuerDik != null ? issuerDik.getPrivMLDSA() : aik.getPrivMLDSA();
+                    byte[] sigEd = X3dhpqCrypto.ed25519Sign(signEd, sp);
+                    byte[] sigMldsa = X3dhpqCrypto.mldsa65Sign(signMl, sp);
                     DeviceCertificate dc = new DeviceCertificate(
                             1,
                             opts.newDeviceId,

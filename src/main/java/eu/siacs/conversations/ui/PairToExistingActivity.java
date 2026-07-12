@@ -74,6 +74,12 @@ public class PairToExistingActivity extends XmppActivity {
                             () -> {
                                 if (result != null) {
                                     installPairingResult(result);
+                                    // Trust Manifest Phase 2 (§D3): fetch + verify + fold the
+                                    // account manifest so this newcomer sees itself + siblings
+                                    // once the confirmer's ADD lands.
+                                    if (mAccount != null && mAccount.getX3dhpqService() != null) {
+                                        mAccount.getX3dhpqService().fetchAndAdoptManifest();
+                                    }
                                 }
                                 mStatusView.setText(R.string.x3dhpq_pair_status_done);
                                 mScanQrButton.setEnabled(false);
@@ -499,11 +505,14 @@ public class PairToExistingActivity extends XmppActivity {
                     final String fingerprint =
                             result.aikPub.fingerprint(
                                     im.conversations.x3dhpq.crypto.X3dhpqCrypto.BLAKE2B_160);
-                    final byte[] aikPrivBytes =
-                            result.aikPriv != null ? result.aikPriv.marshal() : new byte[0];
+                    // Trust Manifest Phase 2 (contract §E): the account AIK *pub* is adopted
+                    // (needed to verify the manifest genesis + pin the account root), but
+                    // AIK_priv NO LONGER travels and is never adopted here — a newcomer
+                    // manages the account by appearing in the manifest fold and signing
+                    // under its own DIK, not by holding AIK_priv.
                     dao.putX3dhpqAccountIdentity(
                             mAccountUuid,
-                            aikPrivBytes,
+                            new byte[0],
                             result.aikPub.marshal(),
                             fingerprint);
                 }

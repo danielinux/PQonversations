@@ -212,6 +212,35 @@ public class IqGenerator extends AbstractGenerator {
     }
 
     /**
+     * Fetches the account's own (or a contact's) Trust Manifest Phase 2 item
+     * ({@code urn:xmppqr:x3dhpq:trustmanifest:0}, item "current"). Response is
+     * processed by X3dhpqService#handleInboundTrustManifest.
+     */
+    public Iq generateX3dhpqRequestTrustManifest(final Jid ownerBareJid) {
+        final var packet = retrieve(Namespace.X3DHPQ_TRUSTMANIFEST, null);
+        packet.setTo(ownerBareJid);
+        return packet;
+    }
+
+    /**
+     * Publishes the Trust Manifest to PEP node {@code urn:xmppqr:x3dhpq:trustmanifest:0}
+     * (contract §A). Item id is always "current"; open access, persist, max_items=1 —
+     * identical publish options to the devicelist node.
+     */
+    public Iq generateX3dhpqPublishTrustManifest(
+            final im.conversations.android.xmpp.model.x3dhpq.trustmanifest.TrustManifestItem
+                    manifest,
+            final String itemId) {
+        final Element item = new Element("item");
+        item.setAttribute("id", itemId);
+        item.addChild(manifest); // TrustManifestItem extends Extension/Element
+        final Bundle options = PublishOptions.openAccess();
+        options.putString("pubsub#persist_items", "true");
+        options.putString("pubsub#max_items", "1");
+        return publish(Namespace.X3DHPQ_TRUSTMANIFEST, item, options);
+    }
+
+    /**
      * Publishes the x3dhpq bundle to PEP node urn:xmppqr:x3dhpq:bundle:0.
      * Item id is the decimal device-id.
      */

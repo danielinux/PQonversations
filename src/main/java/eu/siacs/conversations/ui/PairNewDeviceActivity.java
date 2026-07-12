@@ -95,15 +95,15 @@ public class PairNewDeviceActivity extends XmppActivity {
                                     issuedCert.marshal(),
                                     issuedCert.getCreatedAt(),
                                     issuedCert.getFlags() & 0xff);
+                            // Trust Manifest Phase 2 (§D2): the confirmer appends a
+                            // DIK-signed ADD of the newly-issued device to the account
+                            // manifest and publishes it — the manifest is now the LIVE
+                            // trust source (replaces the old audit-entry publish, §F). This
+                            // is what puts the newcomer into every device's fold.
+                            mAccount.getX3dhpqService().confirmerAppendDevice(issuedCert);
+                            // Keep the devicelist as a derived cache (= fold output) so
+                            // bundles/groups/UI keep working (§F).
                             mAccount.getX3dhpqService().publishDeviceList();
-                            // §10.6.3: append + publish the AddDevice audit entry so this
-                            // sibling passes the audit-chain trust gate on every device
-                            // (including this one) that later observes the account's own
-                            // devicelist — without this, X3dhpqService#verifiedAddDeviceIds
-                            // would refuse to trust the very device we just confirmed.
-                            mAccount.getX3dhpqService()
-                                    .publishAddDeviceAuditEntry(
-                                            (int) issuedCert.getDeviceId(), issuedCert);
                             // §11.8: this confirmation resolves any queued enrollment
                             // request banner for the account (whichever device it came
                             // from — at most one is normally pending at a time).
@@ -276,21 +276,16 @@ public class PairNewDeviceActivity extends XmppActivity {
             // TODO: render QR — BarcodeProvider failed
         }
 
-        // Build FSM options: fresh random uint32 device-id, sharePrimary=true.
+        // Build FSM options: fresh random uint32 device-id, sharePrimary=false.
         //
-        // §10.6.6: "Because share_primary gives every confirmed device AIK_priv, ANY
-        // authorized device ... may append [to the device-authorization ratchet]." A
-        // device confirmed WITHOUT share_primary never receives AIK_priv and so can
-        // never sign a devicelist/audit update — it would be stuck a permanent "confirmed
-        // but not authorized" second-class device, unable to manage the account despite
-        // §10.6.6's "no privileged primary" model. Sharing AIK_priv on every confirmation
-        // is what makes every device an equal manager, matching the multi-writer
-        // device-authorization DAG (§11.7) this client now folds against. This changes a
-        // wire VALUE (has_priv=1 instead of 0), not the wire FORMAT — §10.4's issuance
-        // payload already carries the has_priv flag and the (now always populated)
-        // AIK_priv field unconditionally.
+        // Trust Manifest Phase 2 (contract §E): AIK_priv NO LONGER travels. A confirmed
+        // device is authorized to manage the account by appearing in the account trust
+        // manifest fold and signing edits under its OWN DIK (delegation) — it does not
+        // need AIK_priv to append. The newcomer's DC is issued under the CONFIRMER's DIK
+        // (see PairingSessionService/PairingFsm), and the confirmer appends a DIK-signed
+        // ADD (§D2). Forcing sharePrimary=false makes the issuance payload carry has_priv=0.
         final long newDeviceId = Integer.toUnsignedLong(rng.nextInt());
-        mOpts = new PairingFsm.Options(newDeviceId, true, new byte[0], (byte) 0);
+        mOpts = new PairingFsm.Options(newDeviceId, false, new byte[0], (byte) 0);
 
         // Obtain (or lazily create) the PairingSessionService for this account.
         mPairingService = mAccount.getX3dhpqService().getPairingSessionService();
