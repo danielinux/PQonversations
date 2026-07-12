@@ -1220,7 +1220,7 @@
     <string name="x3dhpq_pair_status_code_retry">That code didn\'t match. Re-check the code and enter it again on the other device.</string>
     <string name="x3dhpq_pair_status_timeout">Pairing timed out. If you mistyped the code, start over and try again.</string>
     <string name="x3dhpq_pair_to_existing_title">Pair this device</string>
-    <string name="x3dhpq_pair_to_existing_help">Either scan the QR shown on the existing device, or type the 10-digit code below.</string>
+    <string name="x3dhpq_pair_to_existing_help">Show this device\'s code, then enter it on one of your existing devices (open its device list and choose “Confirm a waiting device”).</string>
     <string name="x3dhpq_scan_qr_button">Scan QR</string>
     <string name="x3dhpq_pairing_code_hint">Pairing code</string>
     <string name="x3dhpq_pair_button">Pair</string>
@@ -1230,7 +1230,7 @@
     <string name="x3dhpq_pair_request_text">%1$d existing device(s) detected. Tap to start pairing.</string>
     <string name="x3dhpq_secondary_device_detected_title">Sync with existing device</string>
     <string name="x3dhpq_secondary_device_detected_text">This account already has %1$d device(s). Enter the pairing code shown on your existing device to sync.</string>
-    <string name="x3dhpq_pair_show_my_code_button">Show my code instead (have the existing device scan/enter it)</string>
+    <string name="x3dhpq_pair_show_my_code_button">Show this device\'s code</string>
     <string name="x3dhpq_pair_confirm_pending_device_button">Confirm a device showing its own code</string>
     <string name="x3dhpq_pending_enrollment_title">Disabled — waiting for sync</string>
     <string name="x3dhpq_pending_enrollment_text">This device is disabled: it cannot send or receive messages for this account until an authorized device confirms it. This account already has an identity on another device — associate with it from any authorized device to confirm this one, or perform an account reset instead (this loses access to prior messages and groups).</string>

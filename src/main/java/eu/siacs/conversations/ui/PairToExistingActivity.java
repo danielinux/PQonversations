@@ -136,17 +136,18 @@ public class PairToExistingActivity extends XmppActivity {
         mMyCodeView = findViewById(R.id.my_pairing_code);
         mMyQrView = findViewById(R.id.my_pairing_qr);
 
-        // Buttons disabled until backend is connected.
-        mScanQrButton.setEnabled(false);
-        mPairButton.setEnabled(false);
+        // §10.6.2 single tested direction: this pending device PRESENTS its own
+        // code/QR; an existing authorized device enters it. The opposite direction
+        // (scan/type a code shown by the existing device) is intentionally not
+        // offered, so hide the scan button, the manual code field and its submit
+        // button — only "Show my code" remains.
+        mScanQrButton.setVisibility(android.view.View.GONE);
+        mCodeInput.setVisibility(android.view.View.GONE);
+        mPairButton.setVisibility(android.view.View.GONE);
+
+        // Button disabled until backend is connected.
         mShowMyCodeButton.setEnabled(false);
-
-        mScanQrButton.setOnClickListener(v -> launchQrScanner());
-        mPairButton.setOnClickListener(v -> onPairButtonClicked());
         mShowMyCodeButton.setOnClickListener(v -> onShowMyCodeClicked());
-
-        // Auto-format the manual code input as the user types.
-        mCodeInput.addTextChangedListener(new PairingCodeWatcher());
     }
 
     @Override

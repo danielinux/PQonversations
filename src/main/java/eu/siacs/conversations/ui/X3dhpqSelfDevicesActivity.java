@@ -103,10 +103,12 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mBlockedIdentitiesList.setOnItemClickListener(
                 (parent, view, position, id) -> showRetrustDialog(mBlockedPeers.get(position)));
 
-        // §10.6.2 "Link a new device": this device shows its own code/QR for a new device
-        // to scan (also listens passively for a self-PEP pair-hello, method B).
-        mAddDeviceButton.setOnClickListener(
-                v -> startActivity(PairNewDeviceActivity.makeIntent(this, mAccountUuid)));
+        // §10.6.2 single tested direction (the NEW device presents its code; this
+        // existing device enters it): the opposite direction — this device showing a
+        // code for a newcomer to enter — is intentionally not offered, so the old
+        // "Link a new device" (show-my-code) button is hidden. Use "Confirm a waiting
+        // device" below instead.
+        mAddDeviceButton.setVisibility(View.GONE);
         // §10.6.2 "Confirm a waiting device": jump straight to scanning the code/QR a
         // pending device is already showing (new-device-presents direction).
         mConfirmWaitingDeviceButton.setOnClickListener(
@@ -239,7 +241,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
             mPendingEnrollmentTextView.setText(R.string.x3dhpq_pending_enrollment_text);
         }
         mDeviceListView.setVisibility(pending ? View.GONE : View.VISIBLE);
-        mAddDeviceButton.setEnabled(!pending);
+        // mAddDeviceButton (show-my-code direction) is permanently hidden — see onCreate.
         mConfirmWaitingDeviceButton.setEnabled(!pending);
 
         // --- §11.8 queued enrollment request banner ---
