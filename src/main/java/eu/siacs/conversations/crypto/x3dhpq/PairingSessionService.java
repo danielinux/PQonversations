@@ -96,6 +96,12 @@ public final class PairingSessionService {
      */
     private final Map<ByteBuffer, String> newCodes = new HashMap<>();
 
+    // Last outbound stanza per session, so we can re-send it when the peer retransmits
+    // its previous step (their reply to us was lost on the intermittently-lossy same-account
+    // link). The peer's retransmit drives our re-send — we need no timer of our own.
+    private final Map<ByteBuffer, Jid> lastOutboundTo = new HashMap<>();
+    private final Map<ByteBuffer, PairingMsg> lastOutboundMsg = new HashMap<>();
+
     private final List<Listener> listeners = new ArrayList<>();
 
     private final ExecutorService executor =
@@ -249,7 +255,18 @@ public final class PairingSessionService {
         } else if (newFsm != null) {
             dispatchToNew(newFsm, key, sid, inMsg, packet.getFrom());
         } else {
-            Log.d(Config.LOGTAG, LOGTAG + ": no FSM registered for sid=" + hexSid(sid) + ", dropping");
+            // No live FSM for this sid. If we completed this session but still have our
+            // last outbound cached, the peer is retransmitting its previous step because
+            // OUR final message was lost — re-send it so they can finish too. Otherwise drop.
+            final boolean answered;
+            synchronized (lock) {
+                answered = lastOutboundMsg.containsKey(key);
+            }
+            if (answered) {
+                resendLastOutbound(key, sid);
+            } else {
+                Log.d(Config.LOGTAG, LOGTAG + ": no FSM registered for sid=" + hexSid(sid) + ", dropping");
+            }
         }
     }
 
@@ -310,8 +327,9 @@ public final class PairingSessionService {
                     // already consumed, or one for a different FSM step). The FSM checks the
                     // message type BEFORE mutating state, so nothing was corrupted — ignore
                     // it and keep the session alive.
-                    Log.w(Config.LOGTAG, "X3DHPQ-PAIR: EXISTING ignoring stray stanza type="
+                    Log.w(Config.LOGTAG, "X3DHPQ-PAIR: EXISTING stray stanza type="
                             + inMsg.getType() + " from " + from + ": " + e.getMessage());
+                    resendLastOutbound(key, sid);
                     return;
                 }
                 Log.w(Config.LOGTAG, LOGTAG + ": Existing FSM step failed for sid="
@@ -383,8 +401,9 @@ public final class PairingSessionService {
                 }
             } catch (PairingFsm.PairingException e) {
                 if (isStrayStanza(e)) {
-                    Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW ignoring stray stanza type="
+                    Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW stray stanza type="
                             + inMsg.getType() + " from " + from + ": " + e.getMessage());
+                    resendLastOutbound(key, sid);
                     return;
                 }
                 // Key-confirm failed for the peer we locked onto. On a polluted account this is
@@ -454,6 +473,27 @@ public final class PairingSessionService {
         return msg != null && msg.contains("protocol violation");
     }
 
+    /**
+     * Re-send our last outbound stanza for this session. Same-account resource-to-resource
+     * delivery is intermittently lossy; a stray/duplicate almost always means the peer never
+     * got our reply and retransmitted its previous step. Re-sending our last message here (the
+     * FSM state is unchanged — the stanza was a duplicate) lets the handshake finish without a
+     * timer on our side. The FSM safely ignores the eventual duplicate on the peer.
+     */
+    private void resendLastOutbound(final ByteBuffer key, final byte[] sid) {
+        final Jid to;
+        final PairingMsg msg;
+        synchronized (lock) {
+            to = lastOutboundTo.get(key);
+            msg = lastOutboundMsg.get(key);
+        }
+        if (to != null && msg != null) {
+            Log.d(Config.LOGTAG, LOGTAG + ": stray received — re-sending our last outbound (msgType="
+                    + msg.getType() + ") to " + to);
+            sendPairStanza(to, sid, msg, key);
+        }
+    }
+
     // ---- stanza building ----
 
     private void sendPairStanza(
@@ -466,6 +506,8 @@ public final class PairingSessionService {
             final Integer current = outboundStepCounters.getOrDefault(key, 0);
             step = current;
             outboundStepCounters.put(key, current + 1);
+            lastOutboundTo.put(key, to);
+            lastOutboundMsg.put(key, pairingMsg);
         }
 
         final Message packet = new Message(Message.Type.CHAT);
@@ -498,6 +540,10 @@ public final class PairingSessionService {
             outboundStepCounters.remove(key);
             sessionPeers.remove(key);
             newCodes.remove(key);
+            // NB: keep lastOutboundTo/Msg after completion so we can still answer the
+            // peer's retransmit of the previous step if OUR final message was lost and
+            // the peer hasn't completed yet (see onIncoming's no-FSM branch). Swept by
+            // sweepExpired / overwritten by the next session's fresh sid.
         }
         try {
             dao.deleteX3dhpqPairingSession(sid);
