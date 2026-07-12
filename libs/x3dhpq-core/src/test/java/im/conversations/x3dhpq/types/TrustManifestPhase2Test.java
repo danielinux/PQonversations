@@ -250,4 +250,55 @@ class TrustManifestPhase2Test {
         for (final TrustEntry e : entries) list.add(e);
         return new TrustManifest(1L, new byte[32], aik.pub, list, new byte[0], new byte[0]);
     }
+
+    // ---- Account reset (task #55): fresh self-only genesis under a NEW AIK ------
+
+    /**
+     * The reset producer's output: a device keeps its DIK but mints a NEW AIK, self-issues
+     * a new genesis DC under it, and roots a SELF-ONLY manifest at version=1 / prev_hash=0,
+     * genesis AIK-signed, head signed under its DIK. It folds to exactly {self} and its AIK
+     * is a distinct lineage from any prior manifest — so a receiver treats it as a re-pin,
+     * NOT a rollback of the old-AIK lineage (that lineage branch is enforced in the app
+     * gate, which checks aik-mismatch BEFORE the version&lt;last_seen guard).
+     */
+    @Test
+    void resetFreshGenesisSelfOnlyUnderNewAik() {
+        // Old lineage (some prior manifest at a high version under the old AIK).
+        final Aik oldAik = new Aik();
+        final Dev oldSelf = issueDevice(7L, oldAik.edPriv, oldAik.mlPriv);
+        final TrustEntry oldGenesis = TrustEntry.signNew(TrustEntry.ACTION_ADD, oldSelf.id, oldSelf.dc,
+                0L, parents(), oldSelf.id, oldSelf.dcHash(), 0L, oldAik.edPriv, oldAik.mlPriv);
+        final TrustManifest oldManifest =
+                new TrustManifest(42L, new byte[32], oldAik.pub, java.util.List.of(oldGenesis),
+                        new byte[0], new byte[0]).signHead(oldSelf.edPriv, oldSelf.mlPriv);
+
+        // Reset: NEW AIK, SAME device keeps its DIK, new self-issued genesis DC under new AIK.
+        final Aik newAik = new Aik();
+        final DeviceCertificate newDc = reIssue(oldSelf, newAik.edPriv, newAik.mlPriv); // under new AIK
+        final Dev self = new Dev(oldSelf.id, oldSelf.edPriv, oldSelf.edPub,
+                oldSelf.mlPriv, oldSelf.mlPub, newDc);
+        final TrustEntry genesis = TrustEntry.signNew(TrustEntry.ACTION_ADD, self.id, self.dc,
+                0L, parents(), self.id, self.dcHash(), 0L, newAik.edPriv, newAik.mlPriv);
+        final TrustManifest fresh =
+                new TrustManifest(1L, new byte[32], newAik.pub, java.util.List.of(genesis),
+                        new byte[0], new byte[0]).signHead(self.edPriv, self.mlPriv);
+
+        // version=1, prev_hash all-zero, distinct AIK lineage.
+        assertEquals(1L, fresh.getVersion());
+        for (final byte b : fresh.getPrevHash()) assertEquals(0, b, "genesis prev_hash is 32 zero bytes");
+        assertFalse(java.util.Arrays.equals(oldAik.pub.marshal(), newAik.pub.marshal()),
+                "reset re-pins under a NEW AIK lineage");
+
+        // Fresh genesis folds to exactly {self} and its head verifies under the (kept) DIK.
+        final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(fresh);
+        assertEquals(1, trusted.size());
+        assertTrue(trusted.containsKey(self.id));
+        assertTrue(fresh.verifyHead(self.edPub, self.mlPub), "head verifies under the device's kept DIK");
+
+        // The old lineage still folds independently to its own self — the two are unrelated
+        // (a receiver must NOT judge the version=1 fresh genesis against the old lineage).
+        assertEquals(1, TrustManifest.fold(oldManifest).size());
+        assertTrue(oldManifest.getVersion() > fresh.getVersion(),
+                "old lineage is at a higher version, yet the reset's version=1 is a NEW lineage");
+    }
 }

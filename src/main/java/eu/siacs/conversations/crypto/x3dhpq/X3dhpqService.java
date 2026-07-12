@@ -611,7 +611,31 @@ public class X3dhpqService {
                     + " old AIK_priv is still held\")");
         }
 
+        // Trust Manifest model (task #55, RESET-ONLY / STRICT): mintFreshIdentity above
+        // deleted x3dhpq_account_identity, which cascades (ON DELETE CASCADE) to this
+        // account's manifest-state, devicelist-state, co-account and committed-device
+        // rows — so the manifest/devicelist state stores are already reset to a clean
+        // slate under the NEW AIK. Clear any remaining OWN-account trust cache
+        // (x3dhpq_remote_device rows keyed on our own bare JID) that is NOT FK-linked to
+        // the identity row, so no device from the OLD (dropped) lineage survives.
+        try {
+            final String ownBare = account.getJid().asBareJid().toString();
+            db.pruneX3dhpqRemoteDevicesNotIn(accountUuid, ownBare, java.util.Collections.emptySet());
+            db.deleteX3dhpqManifestState(accountUuid, ownBare);
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": account reset — own-account trust cache purge"
+                    + " failed (non-fatal): " + e.getMessage());
+        }
+
         if (!result.pendingEnrollment) {
+            // Root a FRESH genesis Trust Manifest: SELF-ONLY (the union after the mint is
+            // just this device), version=1 (devicelist-state was cascaded away), prev_hash
+            // = 32 zero bytes, genesis entry AIK-signed under the NEW AIK, head signed under
+            // this device's DIK. This becomes the live trust source under the new lineage.
+            maybePublishGenesisManifest();
+            // Republish the derived caches from genesis under the new AIK (§1338 node
+            // purge): devicelist:0 (self-only, new-AIK-signed) — this also re-seals and
+            // republishes the devtracker:0 node — and the bundle:0 item.
             publishDeviceList();
             publishOwnBundle();
         }
@@ -1336,13 +1360,39 @@ public class X3dhpqService {
             // inside fold() below, so this only defers the account-root swap check.
             pinned = m.getAik();
         }
+        // Task #55 STRICT AIK-lineage branch. This MUST come BEFORE the version/rollback
+        // guard below: an account reset roots a FRESH genesis at version=1 under a DIFFERENT
+        // AIK — that is a re-pin event, NOT a rollback of the old-AIK lineage, so it must
+        // never be judged against the old lineage's last-seen version. On an AIK mismatch we
+        // do NOT silently reject; we route to the same "same-JID-different-AIK / devicelist
+        // fork" re-verify UX and REFUSE traffic under the new AIK until the user manually
+        // re-verifies/re-pairs. Even a VALID RotationPointer would still require manual
+        // re-verify (STRICT / RESET-ONLY: no auto-adopt, incl. the user's own devices).
         if (!Arrays.equals(pinned.marshal(), m.getAik().marshal())) {
-            Log.w(Config.LOGTAG, LOGPREFIX + ": trustmanifest from " + owner
-                    + " has a DIFFERENT account AIK than pinned (root swap); rejecting");
+            if (isOwn) {
+                // Our OWN account manifest arrived under a different AIK than the one this
+                // device holds — i.e. another of our devices performed an account reset.
+                // STRICT: do NOT auto-adopt; this device stays on its current identity until
+                // the user re-pairs it (§10.6.6). Keep last good.
+                Log.w(Config.LOGTAG, LOGPREFIX + ": OWN trustmanifest arrived under a DIFFERENT"
+                        + " AIK (account reset on another device); NOT auto-adopting — re-pair"
+                        + " this device to join the new identity (STRICT)");
+            } else {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": trustmanifest from " + owner
+                        + " has a DIFFERENT account AIK than pinned (account reset / same-JID"
+                        + " different-AIK); pausing traffic until explicit re-verify (STRICT)");
+                try {
+                    flagIdentityReconstructionEvent(ownerBareJid);
+                } catch (final Exception ignored) {
+                    // best-effort UX signal; never let it change the refuse decision
+                }
+            }
             return;
         }
 
-        // §C.3 version / rollback / fork guard (mirror deviceListGate §8.5).
+        // §C.3 version / rollback / fork guard (mirror deviceListGate §8.5). Reached only
+        // WITHIN the same AIK lineage (the aik-mismatch branch above already handled a
+        // re-pin), so a legitimate reset's version=1 is never mistaken for a rollback.
         final DatabaseBackend.X3dhpqManifestStateRow state =
                 db.loadX3dhpqManifestState(accountUuid, owner);
         final long lastSeen = state != null ? state.version() : -1L;
@@ -3641,6 +3691,10 @@ public class X3dhpqService {
         // (whatever version it is) is accepted as a fresh baseline instead of being
         // compared against the pre-reconstruction version/content hash.
         db.putX3dhpqDeviceListState(accountUuid, peer, -1L, new byte[0], false, 0L);
+        // Task #55: drop the manifest-state row for this peer too, so their post-reset
+        // FRESH genesis (version=1 under the NEW AIK) is pinned + accepted as a new lineage
+        // baseline rather than being compared against the old lineage's last-seen version.
+        db.deleteX3dhpqManifestState(accountUuid, peer);
         Log.i(Config.LOGTAG, LOGPREFIX + ": " + peer
                 + " explicitly re-trusted (§10.6.5) — TOFU pin reset, requesting fresh devicelist");
         requestPeerDeviceList(peerBareJid);

@@ -3359,6 +3359,15 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 "x3dhpq_manifest_state", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    /** Drops the manifest-state row for an owner so the NEXT manifest is pinned fresh (re-trust / reset). */
+    public void deleteX3dhpqManifestState(String accountUuid, String ownerJid) {
+        final SQLiteDatabase db = getWritableDatabase();
+        db.delete(
+                "x3dhpq_manifest_state",
+                "account_uuid=? AND owner_jid=?",
+                new String[] {accountUuid, ownerJid});
+    }
+
     public X3dhpqManifestStateRow loadX3dhpqManifestState(String accountUuid, String ownerJid) {
         final SQLiteDatabase db = getReadableDatabase();
         final Cursor c =

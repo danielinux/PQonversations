@@ -26,6 +26,7 @@ public interface X3dhpqDao {
     void putX3dhpqManifestState(String accountUuid, String ownerJid, long version,
                                 byte[] blobHash, byte[] blob, long updatedAt);
     DatabaseBackend.X3dhpqManifestStateRow loadX3dhpqManifestState(String accountUuid, String ownerJid);
+    void deleteX3dhpqManifestState(String accountUuid, String ownerJid);
 
     // --- local device ---
     void putX3dhpqLocalDevice(String accountUuid, int deviceId, byte[] dikPriv, byte[] dc, long createdAt, int flags);
