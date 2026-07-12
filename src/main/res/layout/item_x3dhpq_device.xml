@@ -46,11 +46,26 @@
 
     </LinearLayout>
 
-    <Button
-        android:id="@+id/device_revoke_button"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:text="@string/x3dhpq_remove_device" />
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/device_rename_button"
+            style="?attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_rename_device" />
+
+        <Button
+            android:id="@+id/device_revoke_button"
+            style="?attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_remove_device" />
+
+    </LinearLayout>
 
 </LinearLayout>

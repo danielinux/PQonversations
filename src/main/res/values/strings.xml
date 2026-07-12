@@ -1211,6 +1211,9 @@
     <string name="x3dhpq_add_device">Add device</string>
     <string name="x3dhpq_aik_fp_label">AIK fingerprint</string>
     <string name="x3dhpq_remove_device">Remove</string>
+    <string name="x3dhpq_rename_device">Rename</string>
+    <string name="x3dhpq_rename_device_title">Rename device</string>
+    <string name="x3dhpq_rename_device_message">Set a local nickname for this device. It is stored only on this device and never shared.</string>
     <string name="x3dhpq_pair_new_device_title">Pair new device</string>
     <string name="x3dhpq_pair_show_code_help">Show this code on the new device</string>
     <string name="x3dhpq_pair_status_waiting">Waiting for new device…</string>

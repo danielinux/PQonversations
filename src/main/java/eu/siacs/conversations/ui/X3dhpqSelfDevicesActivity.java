@@ -2,12 +2,15 @@ package eu.siacs.conversations.ui;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -22,8 +25,11 @@ import eu.siacs.conversations.persistance.DatabaseBackend;
 import im.conversations.x3dhpq.crypto.X3dhpqCrypto;
 import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The device-management screen for an x3dhpq account (§8, §10.6, §11): the account's AIK
@@ -57,6 +63,11 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
 
     private DeviceAdapter mAdapter;
     private final List<X3dhpqService.AssociatedDevice> mDevices = new ArrayList<>();
+    // device_id → 1-based "Device N" ordinal, recomputed each refresh over the
+    // devices currently shown, so the default labels are deterministic and shared.
+    private final Map<Integer, Integer> mDeviceOrdinals = new HashMap<>();
+    // Purely-local, never-published device nicknames. §10.6 client-side label.
+    private static final String NICKNAME_PREFS = "x3dhpq_device_nicknames";
     private ArrayAdapter<String> mBlockedAdapter;
     private final List<String> mBlockedPeers = new ArrayList<>();
 
@@ -271,6 +282,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         if (!pending) {
             mDevices.addAll(service.listAssociatedDevices());
         }
+        recomputeDeviceOrdinals();
         mAdapter.notifyDataSetChanged();
 
         // --- §10.6.5 blocked/unconfirmed identities awaiting explicit re-trust ---
@@ -319,10 +331,11 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
             final TextView statusView = row.findViewById(R.id.device_status);
             final TextView fingerprintView = row.findViewById(R.id.device_fingerprint);
             final TextView addedAtView = row.findViewById(R.id.device_added_at);
+            final Button renameButton = row.findViewById(R.id.device_rename_button);
             final Button revokeButton = row.findViewById(R.id.device_revoke_button);
 
             final StringBuilder label = new StringBuilder();
-            label.append("Device ").append(Integer.toUnsignedString(device.deviceId));
+            label.append(deviceDisplayName(device.deviceId));
             if (device.thisDevice) {
                 label.append(" — ").append(getString(R.string.x3dhpq_device_this_device));
             }
@@ -338,7 +351,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
                             device.confirmed
                                     ? R.string.x3dhpq_device_status_confirmed
                                     : R.string.x3dhpq_device_status_pending);
-            statusView.setText(role + " · " + status);
+            statusView.setText(role + " · " + status + " · id " + Integer.toUnsignedString(device.deviceId));
 
             if (device.cert != null) {
                 fingerprintView.setText(device.cert.fingerprint(X3dhpqCrypto.BLAKE2B_160));
@@ -352,10 +365,85 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
                             .format(addedDate);
             addedAtView.setText(getString(R.string.x3dhpq_device_added_at, dateStr));
 
+            renameButton.setOnClickListener(v -> showRenameDeviceDialog(device.deviceId));
             revokeButton.setOnClickListener(v -> showRemoveDeviceDialog(device));
 
             return row;
         }
+    }
+
+    // Assign stable 1-based "Device N" ordinals over the devices currently shown,
+    // sorted ascending (unsigned) by id so the default label is deterministic.
+    private void recomputeDeviceOrdinals() {
+        mDeviceOrdinals.clear();
+        final List<Integer> ids = new ArrayList<>();
+        for (final X3dhpqService.AssociatedDevice d : mDevices) {
+            ids.add(d.deviceId);
+        }
+        Collections.sort(ids, Integer::compareUnsigned);
+        int n = 1;
+        for (final Integer id : ids) {
+            mDeviceOrdinals.put(id, n++);
+        }
+    }
+
+    /** The user's local nickname for a device, or null if none is set. */
+    private String deviceNickname(final int deviceId) {
+        final String n =
+                getSharedPreferences(NICKNAME_PREFS, MODE_PRIVATE)
+                        .getString(nicknameKey(deviceId), null);
+        return (n != null && !n.trim().isEmpty()) ? n : null;
+    }
+
+    /** Store (or, for a blank name, clear back to the default) a device's local nickname. */
+    private void setDeviceNickname(final int deviceId, final String name) {
+        final SharedPreferences prefs = getSharedPreferences(NICKNAME_PREFS, MODE_PRIVATE);
+        if (name == null || name.trim().isEmpty()) {
+            prefs.edit().remove(nicknameKey(deviceId)).apply();
+        } else {
+            prefs.edit().putString(nicknameKey(deviceId), name.trim()).apply();
+        }
+    }
+
+    private String nicknameKey(final int deviceId) {
+        return mAccountUuid + ":" + Integer.toUnsignedString(deviceId);
+    }
+
+    private String deviceDisplayName(final int deviceId) {
+        final String nick = deviceNickname(deviceId);
+        if (nick != null) {
+            return nick;
+        }
+        final Integer ord = mDeviceOrdinals.get(deviceId);
+        return "Device " + (ord != null ? ord : Integer.toUnsignedString(deviceId));
+    }
+
+    private void showRenameDeviceDialog(final int deviceId) {
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        final String current = deviceNickname(deviceId);
+        if (current != null) {
+            input.setText(current);
+            input.setSelection(current.length());
+        }
+        input.setHint(deviceDisplayName(deviceId));
+        final int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        final FrameLayout container = new FrameLayout(this);
+        container.setPadding(pad, pad / 2, pad, 0);
+        container.addView(input);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.x3dhpq_rename_device_title)
+                .setMessage(R.string.x3dhpq_rename_device_message)
+                .setView(container)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(
+                        R.string.save,
+                        (dialog, which) -> {
+                            setDeviceNickname(deviceId, input.getText().toString());
+                            refresh();
+                        })
+                .show();
     }
 
     private void showRemoveDeviceDialog(final X3dhpqService.AssociatedDevice device) {
