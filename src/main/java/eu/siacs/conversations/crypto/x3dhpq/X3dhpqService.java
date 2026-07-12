@@ -1502,9 +1502,10 @@ public class X3dhpqService {
     };
     // SignedPart header preceding the per-device records: prefix(21) + version(8)
     // + issued_at(8). Layout A has NO num_devices and NO version_marker — each
-    // device is self-delimiting via its cert_len — so this dedicated builder is
-    // used instead of the core DeviceList.signedPart() (which prepends a uint16
-    // num_devices field and would NOT cross-verify with the Dino fork).
+    // device is self-delimiting via its cert_len. This dedicated builder mirrors
+    // core DeviceList.signedPart() (which was fixed to drop the erroneous uint16
+    // num_devices field — see DeviceList.java §8.3 note); both now produce the
+    // identical Dino/Go-compatible bytes. Do NOT reintroduce num_devices here.
     private static final int DEVICELIST_SIGNED_HEADER_LEN = 21 + 8 + 8;
 
     /** The canonical devicelist SignedPart (layout A) over devices sorted by id asc. */
