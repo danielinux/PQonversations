@@ -12,8 +12,9 @@ import java.util.List;
  * Device list issued by an account identity, covering all devices and their certificates.
  *
  * SignedPart wire layout (mirrors Go devicelist.go SignedPart):
- *   "X3DHPQ-DeviceList-v1\x00" (21) | uint64 listVersion | int64 issuedAt | uint16 numDevices
+ *   "X3DHPQ-DeviceList-v1\x00" (21) | uint64 listVersion | int64 issuedAt
  *   | for each device: uint32 deviceId | int64 addedAt | uint8 flags | uint32 certLen | <cert.marshal()>
+ *   (NO num_devices in the SignedPart — each device is self-delimiting via certLen; §8.3)
  *
  * marshal() wire layout (no signing prefix — version marker replaces it):
  *   uint16(1) | uint64 listVersion | int64 issuedAt | uint16 numDevices
@@ -92,7 +93,15 @@ public final class DeviceList {
     public byte[] getSigEd25519()         { return Arrays.copyOf(sigEd25519, sigEd25519.length); }
     public byte[] getSigMLDSA()           { return Arrays.copyOf(sigMLDSA, sigMLDSA.length); }
 
-    /** Signed portion (includes prefix; excludes signatures). */
+    /**
+     * Signed portion (includes prefix; excludes signatures).
+     *
+     * <p>Per spec §8.3: the SignedPart is {@code "X3DHPQ-DeviceList-v1\0" || uint64 version ||
+     * int64 issued_at || (per-device …)} with NO version_marker and — crucially — NO num_devices
+     * count field (each device is self-delimiting via its cert_len). Including num_devices here
+     * (as this once did) made the signed bytes differ from Dino/Go by 2 bytes, so cross-client
+     * devicelist signature verification always failed (rc=-229) and multi-device never worked.
+     */
     public byte[] signedPart() {
         // compute per-device cert marshals up front to get sizes
         byte[][] certMarshals = new byte[devices.size()][];
@@ -101,12 +110,11 @@ public final class DeviceList {
             certMarshals[i] = devices.get(i).cert.marshal();
             totalDeviceBytes += 4 + 8 + 1 + 4 + certMarshals[i].length;
         }
-        int size = DEVICE_LIST_PREFIX.length + 8 + 8 + 2 + totalDeviceBytes;
+        int size = DEVICE_LIST_PREFIX.length + 8 + 8 + totalDeviceBytes;
         ByteBuffer buf = ByteBuffer.allocate(size).order(ByteOrder.BIG_ENDIAN);
         buf.put(DEVICE_LIST_PREFIX);
         buf.putLong(listVersion);
         buf.putLong(issuedAt);
-        buf.putShort((short) (devices.size() & 0xffff));
         for (int i = 0; i < devices.size(); i++) {
             DeviceListEntry e = devices.get(i);
             buf.putInt((int) (e.deviceId & 0xffffffffL));
