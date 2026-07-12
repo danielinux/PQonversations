@@ -94,6 +94,10 @@ public class Message extends AbstractEntity
     public static final String DELETED = "deleted";
     public static final String OCCUPANT_ID = "occupantId";
     public static final String REACTIONS = "reactions";
+    // x3dhpq: the source device-id (author's x3dhpq device) that produced this
+    // message. Used to attribute sibling-authored (own-carbon/MAM) messages with
+    // a "from Device N" label. Null for non-x3dhpq messages.
+    public static final String X3DHPQ_SOURCE_DEVICE = "x3dhpq_source_device";
     public static final String ME_COMMAND = "/me ";
 
     public static final String ERROR_MESSAGE_CANCELLED = "eu.siacs.conversations.cancelled";
@@ -122,6 +126,8 @@ public class Message extends AbstractEntity
     private Message mNextMessage = null;
     private Message mPreviousMessage = null;
     private String axolotlFingerprint = null;
+    // x3dhpq author device-id (null = unknown / not an x3dhpq message).
+    private Integer x3dhpqSourceDevice = null;
     private String errorMessage = null;
     private Set<ReadByMarker> readByMarkers = new CopyOnWriteArraySet<>();
     private String occupantId;
@@ -258,7 +264,7 @@ public class Message extends AbstractEntity
 
     public static Message fromCursor(
             final Context context, final Cursor cursor, final Conversation conversation) {
-        return new Message(
+        final Message message = new Message(
                 conversation,
                 cursor.getString(cursor.getColumnIndexOrThrow(UUID)),
                 cursor.getString(cursor.getColumnIndexOrThrow(CONVERSATION)),
@@ -285,6 +291,11 @@ public class Message extends AbstractEntity
                 cursor.getString(cursor.getColumnIndexOrThrow(BODY_LANGUAGE)),
                 cursor.getString(cursor.getColumnIndexOrThrow(OCCUPANT_ID)),
                 Reaction.fromString(cursor.getString(cursor.getColumnIndexOrThrow(REACTIONS))));
+        final int sourceDeviceColumn = cursor.getColumnIndex(X3DHPQ_SOURCE_DEVICE);
+        if (sourceDeviceColumn >= 0 && !cursor.isNull(sourceDeviceColumn)) {
+            message.x3dhpqSourceDevice = cursor.getInt(sourceDeviceColumn);
+        }
+        return message;
     }
 
     protected static StorageLocation storageLocationFromCursor(
@@ -375,6 +386,11 @@ public class Message extends AbstractEntity
         values.put(BODY_LANGUAGE, bodyLanguage);
         values.put(OCCUPANT_ID, occupantId);
         values.put(REACTIONS, Reaction.toString(this.reactions));
+        if (x3dhpqSourceDevice == null) {
+            values.putNull(X3DHPQ_SOURCE_DEVICE);
+        } else {
+            values.put(X3DHPQ_SOURCE_DEVICE, x3dhpqSourceDevice);
+        }
         return values;
     }
 
@@ -983,6 +999,15 @@ public class Message extends AbstractEntity
 
     public String getFingerprint() {
         return axolotlFingerprint;
+    }
+
+    /** The x3dhpq author device-id that produced this message, or null if unknown. */
+    public Integer getX3dhpqSourceDevice() {
+        return x3dhpqSourceDevice;
+    }
+
+    public void setX3dhpqSourceDevice(final Integer deviceId) {
+        this.x3dhpqSourceDevice = deviceId;
     }
 
     public boolean isTrusted() {

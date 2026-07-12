@@ -280,11 +280,15 @@ public class MessageParser extends AbstractParser
         // good (hard one-way upgrade, §15.4).
         conversation.markPqUpgraded();
 
-        return new Message(
+        final Message message = new Message(
                 conversation,
                 new String(plaintext, java.nio.charset.StandardCharsets.UTF_8),
                 Message.ENCRYPTION_X3DHPQ,
                 status);
+        // Record the author's x3dhpq device-id so the UI can attribute a message
+        // authored by another of our OWN devices (sibling carbon/MAM copy).
+        message.setX3dhpqSourceDevice(incoming.senderDeviceId);
+        return message;
     }
 
     /** Decrypt a group-encrypted message using the room's GroupCryptoService. */

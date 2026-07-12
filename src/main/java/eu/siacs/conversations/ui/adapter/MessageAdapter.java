@@ -289,6 +289,11 @@ public class MessageAdapter extends ArrayAdapter<Message> {
                 timeInfoBuilder.add(displayName);
             }
         }
+        final String siblingDeviceLabel = getX3dhpqSiblingDeviceLabel(message, sent);
+        if (siblingDeviceLabel != null) {
+            timeInfoBuilder.add(
+                    getContext().getString(R.string.x3dhpq_from_device, siblingDeviceLabel));
+        }
         if (fileSize != null) {
             timeInfoBuilder.add(fileSize);
         }
@@ -304,6 +309,46 @@ public class MessageAdapter extends ArrayAdapter<Message> {
         }
         final var timeInfo = timeInfoBuilder.build();
         viewHolder.time().setText(Joiner.on(" · ").join(timeInfo));
+    }
+
+    /**
+     * If {@code message} is a 1:1 x3dhpq message authored by ANOTHER of the user's OWN
+     * devices (a sibling carbon/MAM copy: same bare JID, different device id from this
+     * install's local device), returns the human-readable label for that source device
+     * (the local nickname from the devices screen, or the default "Device N"). Returns
+     * null for peer messages and for this device's own outgoing echoes.
+     */
+    private String getX3dhpqSiblingDeviceLabel(final Message message, final boolean sent) {
+        // Only own-side (sent) messages can be sibling-authored. Peer (received)
+        // messages carry the peer's device id and must never be labelled.
+        if (!sent) {
+            return null;
+        }
+        final Integer sourceDevice = message.getX3dhpqSourceDevice();
+        if (sourceDevice == null) {
+            return null;
+        }
+        if (!(message.getConversation() instanceof Conversation conversation)) {
+            return null;
+        }
+        final Account account = conversation.getAccount();
+        final eu.siacs.conversations.crypto.x3dhpq.X3dhpqService service =
+                account == null ? null : account.getX3dhpqService();
+        if (service == null) {
+            return null;
+        }
+        final Integer localDeviceId = service.getOwnDeviceIdOrNull();
+        // Suppress the label on this device's own echoes.
+        if (localDeviceId != null && localDeviceId.intValue() == sourceDevice.intValue()) {
+            return null;
+        }
+        final java.util.List<Integer> allDeviceIds = new java.util.ArrayList<>();
+        for (final eu.siacs.conversations.crypto.x3dhpq.X3dhpqService.AssociatedDevice d :
+                service.listAssociatedDevices()) {
+            allDeviceIds.add(d.deviceId);
+        }
+        return eu.siacs.conversations.crypto.x3dhpq.X3dhpqDeviceLabels.displayName(
+                getContext(), account.getUuid(), sourceDevice, allDeviceIds);
     }
 
     public static @DrawableRes Integer getMessageStatusAsDrawable(

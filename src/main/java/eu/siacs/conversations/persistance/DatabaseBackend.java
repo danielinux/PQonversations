@@ -73,7 +73,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 62;
+    private static final int DATABASE_VERSION = 63;
 
     // Column/table names for the legacy OMEMO tables, kept only so historical DB
     // migrations continue to work after the OMEMO code was removed.
@@ -756,6 +756,8 @@ public class DatabaseBackend extends SQLiteOpenHelper
                         + " TEXT,"
                         + Message.REACTIONS
                         + " TEXT,"
+                        + Message.X3DHPQ_SOURCE_DEVICE
+                        + " INTEGER,"
                         + Message.REMOTE_MSG_ID
                         + " TEXT, FOREIGN KEY("
                         + Message.CONVERSATION
@@ -1431,6 +1433,16 @@ public class DatabaseBackend extends SQLiteOpenHelper
         // x3dhpq_manifest_state table (Trust Manifest Phase 2, added in DATABASE_VERSION = 62).
         if (oldVersion < 62 && newVersion >= 62) {
             db.execSQL(CREATE_X3DHPQ_MANIFEST_STATE);
+        }
+        // messages.x3dhpq_source_device column: author device-id for x3dhpq
+        // messages, used to attribute sibling-authored copies (DATABASE_VERSION = 63).
+        if (oldVersion < 63 && newVersion >= 63) {
+            db.execSQL(
+                    "ALTER TABLE "
+                            + Message.TABLENAME
+                            + " ADD COLUMN "
+                            + Message.X3DHPQ_SOURCE_DEVICE
+                            + " INTEGER");
         }
     }
 

@@ -2,7 +2,6 @@ package eu.siacs.conversations.ui;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -19,6 +18,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import eu.siacs.conversations.R;
+import eu.siacs.conversations.crypto.x3dhpq.X3dhpqDeviceLabels;
 import eu.siacs.conversations.crypto.x3dhpq.X3dhpqService;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.persistance.DatabaseBackend;
@@ -66,8 +66,6 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     // device_id → 1-based "Device N" ordinal, recomputed each refresh over the
     // devices currently shown, so the default labels are deterministic and shared.
     private final Map<Integer, Integer> mDeviceOrdinals = new HashMap<>();
-    // Purely-local, never-published device nicknames. §10.6 client-side label.
-    private static final String NICKNAME_PREFS = "x3dhpq_device_nicknames";
     private ArrayAdapter<String> mBlockedAdapter;
     private final List<String> mBlockedPeers = new ArrayList<>();
 
@@ -389,24 +387,12 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
 
     /** The user's local nickname for a device, or null if none is set. */
     private String deviceNickname(final int deviceId) {
-        final String n =
-                getSharedPreferences(NICKNAME_PREFS, MODE_PRIVATE)
-                        .getString(nicknameKey(deviceId), null);
-        return (n != null && !n.trim().isEmpty()) ? n : null;
+        return X3dhpqDeviceLabels.getNickname(this, mAccountUuid, deviceId);
     }
 
     /** Store (or, for a blank name, clear back to the default) a device's local nickname. */
     private void setDeviceNickname(final int deviceId, final String name) {
-        final SharedPreferences prefs = getSharedPreferences(NICKNAME_PREFS, MODE_PRIVATE);
-        if (name == null || name.trim().isEmpty()) {
-            prefs.edit().remove(nicknameKey(deviceId)).apply();
-        } else {
-            prefs.edit().putString(nicknameKey(deviceId), name.trim()).apply();
-        }
-    }
-
-    private String nicknameKey(final int deviceId) {
-        return mAccountUuid + ":" + Integer.toUnsignedString(deviceId);
+        X3dhpqDeviceLabels.setNickname(this, mAccountUuid, deviceId, name);
     }
 
     private String deviceDisplayName(final int deviceId) {
