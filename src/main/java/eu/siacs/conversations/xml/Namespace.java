@@ -146,4 +146,7 @@ public final class Namespace {
     // §11.8: sealed device-state tracker (AIK-signed, payload sealed hybrid
     // X25519+ML-KEM-768 to each authorized device's published bundle key).
     public static final String X3DHPQ_DEVTRACKER = "urn:xmppqr:x3dhpq:devtracker:0";
+    // Trust Manifest: AIK-rooted delegation DAG of TrustEntry (add/remove device)
+    // folded to the authorized device set.
+    public static final String X3DHPQ_TRUSTMANIFEST = "urn:xmppqr:x3dhpq:trustmanifest:0";
 }
