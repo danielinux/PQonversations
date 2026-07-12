@@ -84,6 +84,14 @@ public class PairToExistingActivity extends XmppActivity {
                 }
 
                 @Override
+                public void onPairingRetryable(final byte[] sid, final String reason) {
+                    // Non-fatal: a device tried with the wrong code; we're still waiting for a
+                    // matching one. Tell the user why (they likely mistyped) without ending.
+                    mHandler.post(
+                            () -> mStatusView.setText(R.string.x3dhpq_pair_status_code_retry));
+                }
+
+                @Override
                 public void onPairingFailed(final byte[] sid, final Throwable error) {
                     final String reason = error != null ? error.getMessage() : "unknown";
                     mHandler.post(

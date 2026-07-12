@@ -1217,6 +1217,8 @@
     <string name="x3dhpq_pair_status_verifying">Verifying…</string>
     <string name="x3dhpq_pair_status_done">Pairing complete</string>
     <string name="x3dhpq_pair_status_failed">Pairing failed: %1$s</string>
+    <string name="x3dhpq_pair_status_code_retry">That code didn\'t match. Re-check the code and enter it again on the other device.</string>
+    <string name="x3dhpq_pair_status_timeout">Pairing timed out. If you mistyped the code, start over and try again.</string>
     <string name="x3dhpq_pair_to_existing_title">Pair this device</string>
     <string name="x3dhpq_pair_to_existing_help">Either scan the QR shown on the existing device, or type the 10-digit code below.</string>
     <string name="x3dhpq_scan_qr_button">Scan QR</string>
@@ -1243,7 +1245,8 @@
     <string name="x3dhpq_confirm_waiting_device_button">Confirm a waiting device</string>
     <string name="x3dhpq_identity_revoked_title">This device was disabled — removed from the account</string>
     <string name="x3dhpq_identity_revoked_text">Another authorized device revoked this device\'s access; it is now disabled and cannot send or receive messages for this account. Associate again with the account\'s existing identity from any authorized device, or perform an account reset instead (this loses access to prior messages and groups).</string>
-    <string name="x3dhpq_device_waiting_for_sync">This device is waiting for sync and cannot send messages for this account yet</string>
+    <string name="x3dhpq_device_waiting_for_sync">This device isn\'t paired yet — it can\'t send encrypted messages for this account until an existing device confirms it</string>
+    <string name="x3dhpq_pair_this_device_button">Pair this device</string>
     <string name="x3dhpq_join_request_title">A new device wants to join your account</string>
     <string name="x3dhpq_join_request_text">%1$s asked to join this account. Review it and complete the pairing code/QR exchange to confirm.</string>
     <string name="x3dhpq_review_join_request_button">Review request</string>

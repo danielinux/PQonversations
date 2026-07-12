@@ -80,6 +80,7 @@ public class PairNewDeviceActivity extends XmppActivity {
                         final byte[] sid,
                         final PairingFsm.Result result,
                         final DeviceCertificate issuedCert) {
+                    cancelPairingTimeout();
                     // Existing/primary side: issuedCert is the DC we just minted (under
                     // our own AIK) for the newly enrolled device. Persist it into the
                     // account-wide co-device store and republish the signed devicelist
@@ -128,6 +129,7 @@ public class PairNewDeviceActivity extends XmppActivity {
 
                 @Override
                 public void onPairingFailed(final byte[] sid, final Throwable error) {
+                    cancelPairingTimeout();
                     final String reason = error != null ? error.getMessage() : "unknown";
                     mHandler.post(
                             () -> {
@@ -137,6 +139,29 @@ public class PairNewDeviceActivity extends XmppActivity {
                             });
                 }
             };
+
+    /**
+     * The CPace handshake normally completes in well under a second. If nothing has completed
+     * within this window the other device almost certainly received a wrong code (the responder
+     * silently re-arms), so surface a clear timeout instead of leaving the user on "Verifying…".
+     */
+    private static final long PAIRING_TIMEOUT_MS = 15_000L;
+
+    private final Runnable mPairingTimeoutRunnable =
+            () -> {
+                mStartedFsm = false;
+                mStatusView.setText(R.string.x3dhpq_pair_status_timeout);
+                mCancelButton.setEnabled(true);
+            };
+
+    private void armPairingTimeout() {
+        mHandler.removeCallbacks(mPairingTimeoutRunnable);
+        mHandler.postDelayed(mPairingTimeoutRunnable, PAIRING_TIMEOUT_MS);
+    }
+
+    private void cancelPairingTimeout() {
+        mHandler.removeCallbacks(mPairingTimeoutRunnable);
+    }
 
     // ---- Factory ----
 
@@ -357,6 +382,7 @@ public class PairNewDeviceActivity extends XmppActivity {
 
                         try {
                             mPairingService.startAsExisting(sessionId, mRawCode, peerJid, mOpts);
+                            armPairingTimeout();
                         } catch (final Exception e) {
                             Log.e(Config.LOGTAG, LOGTAG + ": startAsExisting failed", e);
                             final String reason = e.getMessage();
@@ -457,6 +483,7 @@ public class PairNewDeviceActivity extends XmppActivity {
         mStatusView.setText(R.string.x3dhpq_pair_status_verifying);
         try {
             mPairingService.startAsExisting(sid, validatedCode, pendingFullJid, mOpts);
+            armPairingTimeout();
         } catch (final Exception e) {
             Log.e(Config.LOGTAG, LOGTAG + ": startAsExisting (confirm pending device) failed", e);
             mStartedFsm = false;
@@ -475,6 +502,7 @@ public class PairNewDeviceActivity extends XmppActivity {
 
     @Override
     protected void onDestroy() {
+        cancelPairingTimeout();
         if (mPairReceiver != null) {
             try {
                 unregisterReceiver(mPairReceiver);

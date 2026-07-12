@@ -2947,9 +2947,9 @@ public class ConversationFragment extends XmppFragment
             // banner there also offers.
             showSnackbar(
                     R.string.x3dhpq_device_waiting_for_sync,
-                    R.string.x3dhpq_manage_devices_button,
+                    R.string.x3dhpq_pair_this_device_button,
                     v -> startActivity(
-                            eu.siacs.conversations.ui.X3dhpqSelfDevicesActivity.makeIntent(
+                            eu.siacs.conversations.ui.PairToExistingActivity.makeIntent(
                                     requireContext(), account.getUuid())));
         } else if (conversation.isBlocked()) {
             showSnackbar(R.string.contact_blocked, R.string.unblock, this.mUnblockClickListener);
@@ -3141,11 +3141,27 @@ public class ConversationFragment extends XmppFragment
         return httpUploadService.getMaxFileSize();
     }
 
+    /**
+     * §10.6.6: this device is pending-enrollment (holds no account AIK) and cannot send x3dhpq
+     * for this account. Scoped to conversations that actually use x3dhpq (secret groups always do;
+     * a 1:1 latched via ATTRIBUTE_PQ_UPGRADED does too) so unrelated OMEMO/plaintext conversations
+     * are unaffected. Matches the pending-enrollment snackbar in {@link #updateSnackBar}.
+     */
+    private boolean x3dhpqPendingBlocksSend() {
+        final var svc = this.conversation.getAccount().getX3dhpqService();
+        return svc != null
+                && svc.isPendingEnrollment()
+                && (this.conversation.isX3dhpqSecretGroup() || this.conversation.isPqUpgraded());
+    }
+
     private void updateEditablity() {
         boolean canWrite =
-                this.conversation.getMode() == Conversation.MODE_SINGLE
-                        || this.conversation.getMucOptions().participating()
-                        || this.conversation.getNextCounterpart() != null;
+                (this.conversation.getMode() == Conversation.MODE_SINGLE
+                                || this.conversation.getMucOptions().participating()
+                                || this.conversation.getNextCounterpart() != null)
+                        // Grey out the composer while unpaired instead of letting the send
+                        // silently no-op; the snackbar explains why and links to pairing.
+                        && !x3dhpqPendingBlocksSend();
         this.binding.textinput.setFocusable(canWrite);
         this.binding.textinput.setFocusableInTouchMode(canWrite);
         this.binding.textSendButton.setEnabled(canWrite);

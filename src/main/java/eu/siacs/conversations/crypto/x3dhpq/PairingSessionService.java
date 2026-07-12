@@ -49,6 +49,12 @@ public final class PairingSessionService {
                 byte[] sid, PairingFsm.Result result, DeviceCertificate issuedCert);
 
         void onPairingFailed(byte[] sid, Throwable error);
+
+        /**
+         * A pairing attempt failed key-confirmation (wrong code) but the session is still alive and
+         * re-armed for another try. Non-fatal — surface a hint and keep waiting.
+         */
+        default void onPairingRetryable(byte[] sid, String reason) {}
     }
 
     private final Account account;
@@ -425,8 +431,10 @@ public final class PairingSessionService {
                 outboundStepCounters.put(key, 0);
                 sessionPeers.remove(key);
             }
-            Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW re-armed after auth-fail from stray " + failedPeer
-                    + " (sid=" + hexSid(sid) + "); still waiting for the genuine device");
+            Log.w(Config.LOGTAG, "X3DHPQ-PAIR: NEW re-armed after auth-fail from " + failedPeer
+                    + " (sid=" + hexSid(sid) + "); still waiting for a matching code");
+            // Surface a non-fatal hint: usually the code was simply mistyped on the other device.
+            notifyRetryable(sid, "code");
             return true;
         } catch (final Exception rebuild) {
             Log.w(Config.LOGTAG, LOGTAG + ": failed to re-arm New FSM for sid=" + hexSid(sid)
@@ -511,6 +519,20 @@ public final class PairingSessionService {
                 l.onPairingComplete(sid, result, issuedCert);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, LOGTAG + ": listener threw in onPairingComplete: " + e.getMessage());
+            }
+        }
+    }
+
+    private void notifyRetryable(final byte[] sid, final String reason) {
+        final List<Listener> snapshot;
+        synchronized (lock) {
+            snapshot = new ArrayList<>(listeners);
+        }
+        for (final Listener l : snapshot) {
+            try {
+                l.onPairingRetryable(sid, reason);
+            } catch (Exception e) {
+                Log.w(Config.LOGTAG, LOGTAG + ": listener threw in onPairingRetryable: " + e.getMessage());
             }
         }
     }
