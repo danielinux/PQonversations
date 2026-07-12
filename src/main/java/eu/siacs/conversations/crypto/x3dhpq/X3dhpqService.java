@@ -1614,6 +1614,88 @@ public class X3dhpqService {
     }
 
     /**
+     * §D4 revoke: this (trusted, non-genesis is fine — delegation) device appends a
+     * DIK-signed REMOVE of {@code targetDeviceId} to the account manifest, bumps the
+     * version, publishes, and applies the new fold locally. Removal-wins is enforced by
+     * {@link TrustManifest#fold} (a later non-descendant re-ADD loses). Mirrors {@link
+     * #confirmerAppendDevice}. Returns true if a REMOVE was published.
+     *
+     * <p>The Phase-0 self-revoke guard lives at the {@link #revokeOwnDevice} call site
+     * (refuses {@code targetDeviceId == getOwnDeviceIdOrNull()}). This helper additionally
+     * treats a target that is not currently in the fold as an idempotent no-op.
+     */
+    public boolean confirmerRemoveDevice(final int targetDeviceId) {
+        try {
+            if (db == null || account == null || mXmppConnectionService == null) {
+                return false;
+            }
+            final String accountUuid = account.getUuid();
+            final String ownBare = account.getJid().asBareJid().toString();
+            TrustManifest m = loadCurrentOwnManifest(accountUuid, ownBare);
+            if (m == null) {
+                // No manifest yet: build genesis first (idempotent), then re-load.
+                maybePublishGenesisManifest();
+                m = loadCurrentOwnManifest(accountUuid, ownBare);
+                if (m == null) return false;
+            }
+            final long targetId = targetDeviceId & 0xffffffffL;
+            final java.util.Map<Long, DeviceCertificate> fold = TrustManifest.fold(m);
+            final DeviceCertificate targetDc = fold.get(targetId);
+            if (targetDc == null) {
+                Log.d(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice — target "
+                        + Integer.toUnsignedString(targetDeviceId)
+                        + " is not in the current fold; nothing to revoke");
+                return false;
+            }
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
+                    db.listX3dhpqLocalDevices(accountUuid);
+            if (localRows.isEmpty()) return false;
+            final DatabaseBackend.X3dhpqLocalDeviceRow selfRow = localRows.get(0);
+            final long selfId = selfRow.deviceId() & 0xffffffffL;
+            final DeviceIdentityKey selfDik = DeviceIdentityKey.unmarshal(selfRow.dikPriv());
+
+            final DeviceCertificate selfDc = fold.get(selfId);
+            if (selfDc == null) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice — self (" + selfId
+                        + ") not in the current manifest fold; cannot author a REMOVE");
+                return false;
+            }
+            final byte[] selfDcHash = X3dhpqCrypto.sha256(selfDc.marshal());
+            final long lam = m.nextLamport();
+            final List<byte[]> heads = m.currentHeads();
+            final long ts = System.currentTimeMillis() / 1000L;
+            // Removal carries the TARGET's current DC (from the fold), authored by self,
+            // signed under THIS device's DIK.
+            final TrustEntry remove = TrustEntry.signNew(
+                    TrustEntry.ACTION_REMOVE, targetId, targetDc, lam, heads,
+                    selfId, selfDcHash, ts,
+                    selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
+
+            final List<TrustEntry> entries = new ArrayList<>(m.getEntries());
+            entries.add(remove);
+            final long version = m.getVersion() + 1L;
+            final byte[] prevHash = m.computeHash();
+            final TrustManifest next =
+                    new TrustManifest(version, prevHash, m.getAik(), entries, new byte[0], new byte[0])
+                            .signHead(selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
+            publishTrustManifest(next);
+            db.putX3dhpqManifestState(accountUuid, ownBare, version, next.computeHash(),
+                    next.marshal(), ts);
+            // Apply the new fold locally (the removed device is now pruned from the trust
+            // tables the fanout reads).
+            writeFoldedTrustSet(accountUuid, account.getJid().asBareJid(), true,
+                    TrustManifest.fold(next), ts);
+            Log.d(Config.LOGTAG, LOGPREFIX + ": authored REMOVE(device="
+                    + Integer.toUnsignedString(targetDeviceId) + ") → manifest version="
+                    + Long.toUnsignedString(version));
+            return true;
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * §D3 newcomer adopt: fetch the account's own trustmanifest, verify+fold, and populate
      * the trust tables. The newcomer sees itself + siblings via the fold once the
      * confirmer's ADD lands; until then it simply has no manifest and stays on the
@@ -3090,30 +3172,31 @@ public class X3dhpqService {
             return;
         }
         final String accountUuid = account.getUuid();
-        final String ownerJid = account.getJid().asBareJid().toString();
 
-        // 1. Drop the device so it is omitted from the republished list — from both
-        //    the local table (device whose key lives on this install) and the
-        //    co-account table (device certified here but keyed elsewhere), since
-        //    publishDeviceList() unions both (§8.2).
+        // Trust Manifest Phase 2 (§D4): the manifest is the LIVE trust source, so a revoke
+        // MUST be a DIK-signed REMOVE TrustEntry — otherwise the revoked device stays in
+        // the fold and keeps receiving messages. Author + publish the REMOVE (it also
+        // applies the new fold locally, pruning the device from the trust tables the
+        // fanout reads). Removal-wins is enforced by TrustManifest.fold().
+        final boolean removed = confirmerRemoveDevice(deviceId);
+
+        // 1. Drop this install's own key material for the device (if any lived here) and
+        //    its co-account row — the manifest REMOVE handles trust, but the local key
+        //    row must go too. The REMOVE fold above already pruned remote/co-account, so
+        //    these deletes are belt-and-suspenders for the local-key case.
         db.deleteX3dhpqLocalDevice(accountUuid, deviceId);
         db.deleteX3dhpqCoAccountDevice(accountUuid, deviceId);
 
-        // 2. Republish the signed devicelist, naming deviceId as an explicitly
-        //    allowed removal so the shrink guard permits dropping exactly this id.
-        //    Because the content changed, the monotonic version strictly increases,
-        //    making the removal authoritative for contacts and co-account devices
-        //    (§8.6 step 1).
+        // 2. Keep the devicelist as a derived cache (= fold output) so bundles/groups/UI
+        //    keep working (§F). Name deviceId as an explicitly allowed removal so the
+        //    shrink guard permits dropping exactly this id.
         publishDeviceList(java.util.Set.of(deviceId));
 
-        // 3. Append + publish the RemoveDevice audit entry (§8.6 step 2). Best-effort:
-        //    the removal is already authoritative via the signed list above.
-        try {
-            publishRemoveDeviceAuditEntry(accountUuid, ownerJid, deviceId);
-        } catch (final Exception e) {
-            Log.w(Config.LOGTAG, LOGPREFIX + ": RemoveDevice audit entry publish failed for "
-                    + deviceId + " (removal still authoritative via signed devicelist): "
-                    + e.getMessage());
+        if (!removed) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": revokeOwnDevice("
+                    + Integer.toUnsignedString(deviceId)
+                    + ") published no manifest REMOVE (no manifest / target not in fold);"
+                    + " derived devicelist cache still republished");
         }
     }
 

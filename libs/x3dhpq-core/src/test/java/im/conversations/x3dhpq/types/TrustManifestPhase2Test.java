@@ -195,4 +195,59 @@ class TrustManifestPhase2Test {
         // Head signer (d2) is a folded device.
         assertTrue(m2.verifyHead(trusted.get(2L).getDikPubEd25519(), trusted.get(2L).getDikPubMLDSA()));
     }
+
+    // ---- §D4: revoke via DIK-signed REMOVE by a trusted (non-genesis) device ----
+
+    /**
+     * Genesis d1 adds d2 (the revoker A) and d3 (the target B). A trusted NON-genesis
+     * device (d2) authors a DIK-signed REMOVE of d3 → fold excludes d3. A concurrent
+     * (non-descendant) re-ADD of d3 by d1 loses (removal-wins in TrustManifest.fold).
+     */
+    @Test
+    void revokeByTrustedDeviceExcludesTarget() {
+        final Aik aik = new Aik();
+        final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);          // genesis / primary
+        final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);            // A: the revoker
+        final Dev d3 = issueDevice(3L, d1.edPriv, d1.mlPriv);            // B: the target
+        final Dev d3b = issueDevice(3L, d1.edPriv, d1.mlPriv);          // fresh cert, same id, for re-add
+
+        final TrustEntry g = TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc, 0L, parents(),
+                d1.id, d1.dcHash(), 0L, aik.edPriv, aik.mlPriv);
+        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
+                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
+        final TrustEntry addD3 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3.id, d3.dc, 2L,
+                parents(addD2.computeHash()), d1.id, d1.dcHash(), 2L, d1.edPriv, d1.mlPriv);
+        final byte[] head = addD3.computeHash();
+
+        // Sanity: all three trusted before the revoke.
+        final Map<Long, DeviceCertificate> before =
+                TrustManifest.fold(manifest(aik, g, addD2, addD3));
+        assertEquals(3, before.size());
+
+        // d2 (trusted non-genesis) REMOVEs d3, carrying d3's current DC, signed under d2's DIK.
+        final TrustEntry removeD3 = TrustEntry.signNew(TrustEntry.ACTION_REMOVE, d3.id, d3.dc, 3L,
+                parents(head), d2.id, d2.dcHash(), 3L, d2.edPriv, d2.mlPriv);
+
+        final Map<Long, DeviceCertificate> afterRevoke =
+                TrustManifest.fold(manifest(aik, g, addD2, addD3, removeD3));
+        assertEquals(2, afterRevoke.size(), "revoke excludes the target from the fold");
+        assertTrue(afterRevoke.containsKey(1L));
+        assertTrue(afterRevoke.containsKey(2L));
+        assertFalse(afterRevoke.containsKey(3L), "revoked device B is no longer trusted");
+
+        // Concurrent (non-descendant sibling of the REMOVE) re-ADD of d3 by d1 must lose.
+        final TrustEntry reAddD3 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3b.id, d3b.dc, 3L,
+                parents(head), d1.id, d1.dcHash(), 4L, d1.edPriv, d1.mlPriv);
+        final Map<Long, DeviceCertificate> afterConcurrentReadd =
+                TrustManifest.fold(manifest(aik, g, addD2, addD3, removeD3, reAddD3));
+        assertFalse(afterConcurrentReadd.containsKey(3L),
+                "removal wins over a concurrent (non-descendant) re-add");
+        assertEquals(2, afterConcurrentReadd.size());
+    }
+
+    private static TrustManifest manifest(Aik aik, TrustEntry... entries) {
+        final List<TrustEntry> list = new ArrayList<>();
+        for (final TrustEntry e : entries) list.add(e);
+        return new TrustManifest(1L, new byte[32], aik.pub, list, new byte[0], new byte[0]);
+    }
 }
