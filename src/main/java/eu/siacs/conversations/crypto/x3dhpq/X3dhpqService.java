@@ -845,12 +845,22 @@ public class X3dhpqService {
                 localIds.add(row.deviceId());
             }
         }
-        // §10.6.3 trust gating: a sibling appearing in our own devicelist is only
-        // auto-trusted as a co-account device if it is covered by a valid, AIK-signed
-        // AddDevice audit entry (§11.4) — never by devicelist presence alone (that
-        // would let a rogue self-addition go silently trusted).
-        final java.util.Set<Integer> chainConfirmedIds =
-                isOwnList ? verifiedAddDeviceIds(accountUuid, peer) : java.util.Collections.emptySet();
+        // §10.6.3 (trust-manifest model): trust = AIK-ATTESTED MEMBERSHIP. A sibling
+        // in our own devicelist is trusted iff its embedded DC verifies (both hybrid
+        // sigs) under the CURRENT account AIK — not a genesis-rooted audit chain, no
+        // fail-closed on a missing genesis. Load the account AIK pub once for the walk.
+        AccountIdentityPub ownAikPub = null;
+        if (isOwnList) {
+            final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                    db.loadX3dhpqAccountIdentity(accountUuid);
+            if (aikRow != null && aikRow.aikPub() != null && aikRow.aikPub().length > 0) {
+                try {
+                    ownAikPub = AccountIdentityPub.unmarshal(aikRow.aikPub());
+                } catch (final Exception ignore) {
+                    ownAikPub = null;
+                }
+            }
+        }
 
         final Collection<Device> devices = list.getDevices();
         Log.d(Config.LOGTAG,
@@ -880,14 +890,27 @@ public class X3dhpqService {
 
             try {
                 // parse DC to validate it is well-formed before persisting
-                DeviceCertificate.unmarshal(dcBytes);
+                final DeviceCertificate dc = DeviceCertificate.unmarshal(dcBytes);
                 db.putX3dhpqRemoteDevice(accountUuid, peer, id, dcBytes, now);
                 liveIds.add(id);
                 Log.d(Config.LOGTAG,
                         "x3dhpq: stored remote_device for " + peer + "/" + id);
 
                 if (isOwnList && !localIds.contains(id)) {
-                    if (chainConfirmedIds.contains(id)) {
+                    // trust = the sibling's DC verifies under the CURRENT account AIK
+                    // (AIK-attested membership). No genesis-rooted audit chain.
+                    boolean attested = false;
+                    if (ownAikPub != null) {
+                        try {
+                            attested = X3dhpqCrypto.ed25519Verify(
+                                            ownAikPub.getPubEd25519(), dc.signedPart(), dc.getSigEd25519())
+                                    && X3dhpqCrypto.mldsa65Verify(
+                                            ownAikPub.getPubMLDSA(), dc.signedPart(), dc.getSigMLDSA());
+                        } catch (final Exception verr) {
+                            attested = false;
+                        }
+                    }
+                    if (attested) {
                         final long deviceAddedAt = addedAt != null ? addedAt : now;
                         int flags;
                         try {
@@ -901,18 +924,13 @@ public class X3dhpqService {
                         coAccountLiveIds.add(id);
                         Log.d(Config.LOGTAG,
                                 "x3dhpq: stored co_account_device for " + peer + "/" + id
-                                        + " (self-heal, audit-chain confirmed)");
+                                        + " (AIK-attested member)");
                     } else {
-                        // §10.6.3: NOT covered by a valid AddDevice audit entry — do not
-                        // silently trust. Leaving it out of coAccountLiveIds also means the
-                        // pruneX3dhpqCoAccountDevicesNotIn call below will drop it if it was
-                        // (wrongly) trusted before this check existed.
+                        // DC not attested by the current AIK → not a member. Drop it
+                        // (phantom/old-AIK); leaving it out of coAccountLiveIds prunes it.
                         Log.w(Config.LOGTAG,
-                                "x3dhpq: sibling device " + id + " appears in own devicelist"
-                                        + " but has NO valid AddDevice audit entry —"
-                                        + " NOT auto-trusting (§10.6.3); surfacing as a"
-                                        + " pending/unconfirmed security event");
-                        surfaceUnconfirmedSiblingEvent(id);
+                                "x3dhpq: dropping sibling device " + id + " from own devicelist"
+                                        + " — DC not attested by the current AIK (not a member)");
                     }
                 }
             } catch (Exception e) {
@@ -1045,6 +1063,14 @@ public class X3dhpqService {
             final boolean dcMl = X3dhpqCrypto.mldsa65Verify(
                     peerAik.getPubMLDSA(), dcSigned, e.getCert().getSigMLDSA());
             if (!dcEd || !dcMl) {
+                if (isOwnList) {
+                    // trust-manifest model: a phantom/old-AIK DC in our OWN list is
+                    // simply not a member — skip that one device rather than reject
+                    // the whole list (one-bad-entry tolerance).
+                    Log.w(Config.LOGTAG, "x3dhpq: own devicelist has a DC not attested by the"
+                            + " current AIK; skipping that device (not rejecting the list)");
+                    continue;
+                }
                 Log.w(Config.LOGTAG, "x3dhpq: devicelist from " + peer
                         + " embeds a DC not signed by the peer AIK; rejecting");
                 return false;
@@ -2594,6 +2620,15 @@ public class X3dhpqService {
     public void revokeOwnDevice(final int deviceId) {
         if (db == null || account == null || mXmppConnectionService == null) {
             Log.w(Config.LOGTAG, LOGPREFIX + ": revokeOwnDevice ignored — no db/account/service");
+            return;
+        }
+        // HARD GUARD: never revoke the device we are running on — self-revoke
+        // tombstones the account's own root and orphans the identity. Removing
+        // THIS device is what "Account reset" (generate new identity) is for.
+        final Integer ownId = getOwnDeviceIdOrNull();
+        if (ownId != null && ownId == deviceId) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": REFUSING to revoke this device (" + Integer.toUnsignedString(deviceId)
+                    + ") — self-revoke orphans the account; use Account reset instead");
             return;
         }
         final String accountUuid = account.getUuid();
