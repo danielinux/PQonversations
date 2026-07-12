@@ -486,17 +486,25 @@ public class PairToExistingActivity extends XmppActivity {
         try {
             dao.beginTransaction();
             try {
-                // Persist the AIK (full private key so this device can act as primary later).
-                if (result.aikPriv != null) {
+                // Embrace the account membership: adopt the account AIK, dropping
+                // this device's own provisional one. The PUBLIC part is adopted
+                // unconditionally so this device shows the account fingerprint and
+                // can verify/anchor the account audit chain; the PRIVATE part is
+                // adopted only when the confirmer shared it (share_primary), making
+                // this device a full authorized manager. Mirrors Dino's
+                // apply_paired_identity. Without adopting the pub, a device kept its
+                // own AIK and stayed fail-closed (wrong fingerprint, chain can't
+                // anchor) — the bug seen when share_primary was false.
+                if (result.aikPub != null) {
                     final String fingerprint =
-                            result.aikPub != null
-                                    ? result.aikPub.fingerprint(
-                                            im.conversations.x3dhpq.crypto.X3dhpqCrypto.BLAKE2B_160)
-                                    : "";
+                            result.aikPub.fingerprint(
+                                    im.conversations.x3dhpq.crypto.X3dhpqCrypto.BLAKE2B_160);
+                    final byte[] aikPrivBytes =
+                            result.aikPriv != null ? result.aikPriv.marshal() : new byte[0];
                     dao.putX3dhpqAccountIdentity(
                             mAccountUuid,
-                            result.aikPriv.marshal(),
-                            result.aikPub != null ? result.aikPub.marshal() : new byte[0],
+                            aikPrivBytes,
+                            result.aikPub.marshal(),
                             fingerprint);
                 }
 
