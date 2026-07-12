@@ -401,8 +401,91 @@ public class X3dhpqService {
                     + " §11.8/§10.1a): " + e.getMessage());
         }
 
-        publishDeviceList();
-        publishOwnBundle();
+        // Catch up the authoritative account-audit chain (live +notify only ever
+        // carries the newest item) and, if we're the genesis primary, record our own
+        // self-genesis AddDevice — BEFORE republishing our devicelist. Otherwise the
+        // trust gate wouldn't yet cover the primary and a secondary would republish a
+        // self-only list, clobbering the primary out of it (§11, multi-device sync).
+        fetchAuditHistoryOnConnect(() -> {
+            ensureAccountAuditGenesis();
+            publishDeviceList();
+            publishOwnBundle();
+        });
+    }
+
+    /**
+     * Fetch the FULL history of the account's own audit:0 node and feed each item through the same
+     * verify/store path as a live +notify, then run {@code then}. Live +notify only carries the
+     * newest item, so a device that was offline when earlier AddDevice / self-genesis entries were
+     * published would otherwise never trust those siblings (§11).
+     */
+    private void fetchAuditHistoryOnConnect(final Runnable then) {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            if (then != null) then.run();
+            return;
+        }
+        final Jid ownBareJid = account.getJid().asBareJid();
+        final Iq iq = mXmppConnectionService.getIqGenerator().generateX3dhpqRequestAuditHistory(ownBareJid);
+        mXmppConnectionService.sendIqPacket(account, iq, response -> {
+            try {
+                if (response.getType() == Iq.Type.RESULT) {
+                    final PubSub pubsub = response.getExtension(PubSub.class);
+                    final im.conversations.android.xmpp.model.pubsub.Items items =
+                            pubsub != null ? pubsub.getItems() : null;
+                    if (items != null) {
+                        for (final im.conversations.android.xmpp.model.pubsub.Item item : items.getItems()) {
+                            final var entry = item.getExtension(
+                                    im.conversations.android.xmpp.model.x3dhpq.audit.AuditEntry.class);
+                            if (entry != null) {
+                                // Same verify/store path as a live +notify; the last item
+                                // (once all are persisted) verifies the whole chain.
+                                handleInboundAuditEntry(ownBareJid, item.getId(), entry);
+                            }
+                        }
+                    }
+                }
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": fetchAuditHistoryOnConnect processing failed"
+                        + " (non-fatal, §11): " + e.getMessage());
+            } finally {
+                if (then != null) then.run();
+            }
+        });
+    }
+
+    /**
+     * §11 self-genesis: the account's PRIMARY records ITSELF as {@code AddDevice(self)@0} so every
+     * future sibling audit-trusts it (the primary is never the subject of an AddDevice entry
+     * otherwise). Only acts when the authoritative chain is still empty — which, after
+     * {@link #fetchAuditHistoryOnConnect}, is true only for the genuine first device (a share_primary
+     * secondary sees the primary's genesis already present and does nothing).
+     */
+    private void ensureAccountAuditGenesis() {
+        if (db == null || account == null || mXmppConnectionService == null) return;
+        if (isPendingEnrollment()) return;   // no AIK held → cannot sign
+        final String accountUuid = account.getUuid();
+        final String ownBareJid = account.getJid().asBareJid().toString();
+        final List<im.conversations.x3dhpq.types.AuditEntry> chain =
+                coreAuditChain(mXmppConnectionService.databaseBackend, accountUuid, ownBareJid);
+        if (chain != null && !chain.isEmpty()) return;   // chain already established
+        final Integer ownDeviceId = getOwnDeviceIdOrNull();
+        if (ownDeviceId == null) return;
+        DeviceCertificate ownDc = null;
+        for (final DatabaseBackend.X3dhpqLocalDeviceRow row : db.listX3dhpqLocalDevices(accountUuid)) {
+            if ((row.deviceId() & 0xffffffffL) == (ownDeviceId & 0xffffffffL)) {
+                try {
+                    ownDc = DeviceCertificate.unmarshal(row.dc());
+                } catch (final Exception e) {
+                    Log.w(Config.LOGTAG, LOGPREFIX + ": ensureAccountAuditGenesis: own DC unparseable: "
+                            + e.getMessage());
+                }
+                break;
+            }
+        }
+        if (ownDc == null) return;
+        Log.i(Config.LOGTAG, LOGPREFIX + ": recording account-audit self-genesis AddDevice for primary device "
+                + Integer.toUnsignedString(ownDeviceId));
+        publishAddDeviceAuditEntry(ownDeviceId, ownDc);
     }
 
     /**

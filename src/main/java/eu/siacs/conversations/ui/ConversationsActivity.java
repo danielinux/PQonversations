@@ -252,7 +252,10 @@ public class ConversationsActivity extends QrCodeProcessingActivity
             if (!navigated) {
                 editor.putBoolean(prefKey, true);
                 changed = true;
-                startActivity(PairToExistingActivity.makeIntent(this, account.getUuid()));
+                // Land on the device-management screen (which shows the "Disabled — waiting
+                // for sync" state and offers the pairing choices) rather than jumping the
+                // user straight into the Pair dialog — let them see the state and decide.
+                startActivity(X3dhpqSelfDevicesActivity.makeIntent(this, account.getUuid()));
                 navigated = true;
             }
         }
