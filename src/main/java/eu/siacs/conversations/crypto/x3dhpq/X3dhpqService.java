@@ -438,6 +438,10 @@ public class X3dhpqService {
             // and adopts the account's own manifest as the LIVE trust source. A device
             // with no manifest yet simply stays on the devicelist fallback.
             maybePublishGenesisManifest();
+            // Task #65: reconcile the local manifest with the server (source of truth) —
+            // auto-compact a bloated manifest, adopt a newer server version, or (re)publish
+            // ours if the server is behind (a lost publish ACK). Then adopt for a newcomer.
+            reconcileOwnManifestOnConnect();
             fetchAndAdoptManifest();
         });
     }
@@ -1345,31 +1349,135 @@ public class X3dhpqService {
                 });
     }
 
+    // ---- Publish robustness (task #65, mirrors Dino publish_manifest_with_retry) --------
+    // The manifest is a large PEP item and the server is the AUTHORITATIVE shared copy, so
+    // we publish with a per-attempt TIMEOUT and RETRY until confirmed. SINGLE-FLIGHT +
+    // LATEST-ONLY: only one publish loop ever runs and it always targets the newest version;
+    // a newer edit/compaction/reconcile SUPERSEDES an in-flight attempt (updating the shared
+    // slot) instead of spawning a second competing loop. If a round fails after all retries
+    // we drop it and let the next connect's reconcile retry — we never accumulate loops.
+    private final Object manifestPublishLock = new Object();
+    private TrustManifest pendingPublishManifest;      // shared latest-only slot
+    private boolean manifestPublishLoopRunning;
+    private java.util.concurrent.ScheduledExecutorService manifestPublishExecutor;
+    // Backoff before attempt i (attempt 0 fires immediately); giving up once i reaches len.
+    private static final long[] MANIFEST_PUBLISH_DELAYS_MS = {0L, 5000L, 10000L, 20000L, 40000L};
+    private static final long MANIFEST_PUBLISH_TIMEOUT_MS = 45000L;
+
+    private synchronized java.util.concurrent.ScheduledExecutorService manifestPublishExecutor() {
+        if (manifestPublishExecutor == null) {
+            manifestPublishExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+                    r -> {
+                        final Thread t = new Thread(r, "X3dhpqManifestPublish");
+                        t.setDaemon(true);
+                        return t;
+                    });
+        }
+        return manifestPublishExecutor;
+    }
+
     /**
-     * Publishes a signed {@link TrustManifest} to the trustmanifest:0 node (contract §A):
-     * the whole {@code marshal()} blob is the base64 text of the single {@code
-     * <trustmanifest>} element. The caller must have already called {@code signHead(...)}.
+     * Publishes a signed {@link TrustManifest} to the trustmanifest:0 node (contract §A): the
+     * whole {@code marshal()} blob is the base64 text of the single {@code <trustmanifest>}
+     * element. The caller must have already called {@code signHead(...)}. Single-flight +
+     * latest-only + retry-until-confirmed (task #65); returns immediately.
      */
     public void publishTrustManifest(final TrustManifest manifest) {
         if (mXmppConnectionService == null || manifest == null) return;
+        synchronized (manifestPublishLock) {
+            if (pendingPublishManifest == null
+                    || Long.compareUnsigned(manifest.getVersion(), pendingPublishManifest.getVersion()) > 0) {
+                pendingPublishManifest = manifest;
+            }
+            if (manifestPublishLoopRunning) return; // the running loop picks up the newest
+            manifestPublishLoopRunning = true;
+        }
+        manifestPublishExecutor().execute(() -> runManifestPublishAttempt(0));
+    }
+
+    private void runManifestPublishAttempt(final int attempt) {
+        final TrustManifest target;
+        synchronized (manifestPublishLock) {
+            target = pendingPublishManifest;
+            if (target == null) {
+                manifestPublishLoopRunning = false;
+                return;
+            }
+        }
+        if (mXmppConnectionService == null) {
+            synchronized (manifestPublishLock) { manifestPublishLoopRunning = false; }
+            return;
+        }
         final im.conversations.android.xmpp.model.x3dhpq.trustmanifest.TrustManifestItem item =
                 new im.conversations.android.xmpp.model.x3dhpq.trustmanifest.TrustManifestItem();
-        item.setContent(manifest.marshal());
+        item.setContent(target.marshal());
         final Iq iq =
                 mXmppConnectionService
                         .getIqGenerator()
                         .generateX3dhpqPublishTrustManifest(item, "current");
+        // sendIqPacket only calls back on a response or on disconnect (Iq.Type.TIMEOUT); a
+        // lost response while still connected would hang forever, so we arm our OWN timeout.
+        final java.util.concurrent.atomic.AtomicBoolean settled =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        final java.util.concurrent.ScheduledFuture<?> timeout =
+                manifestPublishExecutor().schedule(
+                        () -> {
+                            if (settled.compareAndSet(false, true)) {
+                                onManifestPublishResult(target, attempt, false);
+                            }
+                        },
+                        MANIFEST_PUBLISH_TIMEOUT_MS,
+                        java.util.concurrent.TimeUnit.MILLISECONDS);
         mXmppConnectionService.sendIqPacket(
                 account,
                 iq,
                 response -> {
-                    if (response.getType() == Iq.Type.ERROR) {
-                        Log.w(Config.LOGTAG, LOGPREFIX + ": trustmanifest publish failed: " + response);
-                    } else {
-                        Log.d(Config.LOGTAG, LOGPREFIX + ": trustmanifest published (version="
-                                + Long.toUnsignedString(manifest.getVersion()) + ")");
-                    }
+                    if (!settled.compareAndSet(false, true)) return;
+                    timeout.cancel(false);
+                    final boolean ok = response.getType() == Iq.Type.RESULT;
+                    manifestPublishExecutor().execute(
+                            () -> onManifestPublishResult(target, attempt, ok));
                 });
+    }
+
+    private void onManifestPublishResult(
+            final TrustManifest target, final int attempt, final boolean ok) {
+        synchronized (manifestPublishLock) {
+            // Superseded by a newer version while we were publishing → restart on the newest.
+            if (pendingPublishManifest != null
+                    && Long.compareUnsigned(pendingPublishManifest.getVersion(), target.getVersion()) > 0) {
+                manifestPublishExecutor().execute(() -> runManifestPublishAttempt(0));
+                return;
+            }
+            if (ok) {
+                if (pendingPublishManifest != null
+                        && pendingPublishManifest.getVersion() == target.getVersion()) {
+                    pendingPublishManifest = null; // latest confirmed → loop exits
+                    manifestPublishLoopRunning = false;
+                    Log.d(Config.LOGTAG, LOGPREFIX + ": trustmanifest published + confirmed (version="
+                            + Long.toUnsignedString(target.getVersion()) + ")");
+                    return;
+                }
+                manifestPublishExecutor().execute(() -> runManifestPublishAttempt(0));
+                return;
+            }
+            final int next = attempt + 1;
+            if (next >= MANIFEST_PUBLISH_DELAYS_MS.length) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": trustmanifest version "
+                        + Long.toUnsignedString(target.getVersion())
+                        + " NOT confirmed after retries; will reconcile on next connect");
+                pendingPublishManifest = null; // drop; reconcile handles it later
+                manifestPublishLoopRunning = false;
+                return;
+            }
+            Log.w(Config.LOGTAG, LOGPREFIX + ": trustmanifest version "
+                    + Long.toUnsignedString(target.getVersion())
+                    + " not confirmed (attempt " + next + ") — retrying");
+            manifestPublishExecutor().schedule(
+                    () -> runManifestPublishAttempt(next),
+                    MANIFEST_PUBLISH_DELAYS_MS[next],
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
     }
 
     /**
@@ -1554,11 +1662,116 @@ public class X3dhpqService {
         return TrustManifest.unmarshal(state.blob());
     }
 
+    /** True iff this device holds the account AIK private key (the primary). */
+    private boolean holdsAikPriv() {
+        if (db == null || account == null) return false;
+        final DatabaseBackend.X3dhpqAccountIdentityRow row =
+                db.loadX3dhpqAccountIdentity(account.getUuid());
+        return row != null && row.aikPriv() != null && row.aikPriv().length > 0;
+    }
+
     /**
-     * §D1 migration / genesis: on login, if the own trustmanifest node has NO accepted
-     * manifest AND this device holds AIK_priv (primary), build the genesis manifest from
-     * today's authorized device set and publish it. Idempotent — a no-op once a manifest
-     * exists. Never throws to the caller.
+     * Task #65 (mirrors Dino {@code build_snapshot_manifest}): build a COMPACT, AIK-anchored
+     * snapshot manifest asserting exactly the CURRENT {@code members} (device_id → DC). We do
+     * NOT track history — each published manifest is a fresh snapshot of the current
+     * membership (size bounded by the number of devices, NOT by how many pair/revoke
+     * operations happened), chained to the previous version only by {@code prevHash}. The
+     * genesis edge (THIS device) is AIK-signed and every OTHER member is a DIK-signed ADD
+     * (DC re-issued under this device's DIK) authored by THIS device, so the whole set is
+     * verifiably derived from the account AIK. The head is signed under this device's DIK.
+     * Requires AIK_priv (the primary maintains the snapshot); returns {@code null} otherwise.
+     * {@code members} need not contain self (this device is always the genesis).
+     */
+    private TrustManifest buildSnapshotManifest(
+            final java.util.Map<Long, DeviceCertificate> members,
+            final long version,
+            final byte[] prevHash) {
+        final String accountUuid = account.getUuid();
+        final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
+                db.loadX3dhpqAccountIdentity(accountUuid);
+        if (aikRow == null || aikRow.aikPriv() == null || aikRow.aikPriv().length == 0) {
+            return null; // not the primary → cannot root an AIK-signed genesis
+        }
+        final AccountIdentityKey aik;
+        final AccountIdentityPub aikPub;
+        try {
+            aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
+            aikPub = AccountIdentityPub.unmarshal(aikRow.aikPub());
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": buildSnapshotManifest — bad AIK material: "
+                    + e.getMessage());
+            return null;
+        }
+        final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
+                db.listX3dhpqLocalDevices(accountUuid);
+        if (localRows.isEmpty()) return null;
+        final DatabaseBackend.X3dhpqLocalDeviceRow selfRow = localRows.get(0);
+        final long selfId = selfRow.deviceId() & 0xffffffffL;
+        final DeviceIdentityKey selfDik;
+        final DeviceCertificate selfDc;
+        try {
+            selfDik = DeviceIdentityKey.unmarshal(selfRow.dikPriv());
+            selfDc = DeviceCertificate.unmarshal(selfRow.dc());
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": buildSnapshotManifest — bad self device material: "
+                    + e.getMessage());
+            return null;
+        }
+        final long ts = System.currentTimeMillis() / 1000L;
+        final byte[] selfDcHash = X3dhpqCrypto.sha256(selfDc.marshal());
+
+        // Genesis entry (AIK-signed): this device roots the snapshot.
+        final TrustEntry genesis = TrustEntry.signNew(
+                TrustEntry.ACTION_ADD, selfId, selfDc, 0L, new ArrayList<>(),
+                selfId, selfDcHash, ts, aik.getPrivEd25519(), aik.getPrivMLDSA());
+        final List<TrustEntry> entries = new ArrayList<>();
+        entries.add(genesis);
+
+        // One DIK-signed ADD per OTHER current member (DC re-issued under this device's DIK).
+        // Sorted by id for determinism; fold() is order-independent so this stays Dino-compatible.
+        final List<Long> otherIds = new ArrayList<>(members.keySet());
+        otherIds.sort(java.util.Comparator.naturalOrder());
+        long lamport = 1L;
+        List<byte[]> heads = new ArrayList<>();
+        heads.add(genesis.computeHash());
+        for (final Long idL : otherIds) {
+            if (idL == selfId) continue;
+            final DeviceCertificate subjectDc = members.get(idL);
+            if (subjectDc == null) continue;
+            final DeviceCertificate reissued = reissueDcUnderDik(subjectDc, selfDik);
+            final TrustEntry add = TrustEntry.signNew(
+                    TrustEntry.ACTION_ADD, idL, reissued, lamport, heads,
+                    selfId, selfDcHash, ts,
+                    selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
+            entries.add(add);
+            heads = new ArrayList<>();
+            heads.add(add.computeHash());
+            lamport++;
+        }
+
+        return new TrustManifest(version, prevHash, aikPub, entries, new byte[0], new byte[0])
+                .signHead(selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
+    }
+
+    /**
+     * Persist a freshly-built OWN snapshot as the accepted local state, write the folded
+     * device set into the trust tables the fanout reads, and (single-flight) publish it.
+     */
+    private void applyAndPublishOwnSnapshot(
+            final String accountUuid, final String ownBare, final TrustManifest snap) {
+        final long ts = System.currentTimeMillis() / 1000L;
+        db.putX3dhpqManifestState(accountUuid, ownBare, snap.getVersion(), snap.computeHash(),
+                snap.marshal(), ts);
+        writeFoldedTrustSet(accountUuid, account.getJid().asBareJid(), true,
+                TrustManifest.fold(snap), ts);
+        publishTrustManifest(snap);
+    }
+
+    /**
+     * §D1 migration / genesis (snapshot model, task #65): on login, if the own trustmanifest
+     * node has NO accepted manifest AND this device holds AIK_priv (primary), build a compact
+     * snapshot of today's authorized device set (self + devicelist/co-account siblings) and
+     * publish it. Idempotent — a no-op once a manifest exists. Never throws to the caller.
      */
     public void maybePublishGenesisManifest() {
         try {
@@ -1569,84 +1782,21 @@ public class X3dhpqService {
             if (db.loadX3dhpqManifestState(accountUuid, ownBare) != null) {
                 return; // already have a manifest → adopt/extend, do not rebuild genesis
             }
-            final DatabaseBackend.X3dhpqAccountIdentityRow aikRow =
-                    db.loadX3dhpqAccountIdentity(accountUuid);
-            if (aikRow == null || aikRow.aikPriv() == null || aikRow.aikPriv().length == 0) {
-                return; // not the primary (no AIK_priv) → cannot build the AIK-signed genesis
+            // Members = today's authorized union (self + co-account siblings). buildSnapshot
+            // makes self the genesis and re-issues the others under this device's DIK.
+            final java.util.Map<Long, DeviceCertificate> members = new java.util.HashMap<>();
+            for (final java.util.Map.Entry<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> e :
+                    computeUnionDeviceEntries(accountUuid).entrySet()) {
+                members.put(e.getKey(), e.getValue().getCert());
             }
-            final AccountIdentityKey aik;
-            final AccountIdentityPub aikPub;
-            try {
-                aik = AccountIdentityKey.unmarshal(aikRow.aikPriv());
-                aikPub = AccountIdentityPub.unmarshal(aikRow.aikPub());
-            } catch (final Exception e) {
-                Log.w(Config.LOGTAG, LOGPREFIX + ": genesis manifest — bad AIK material: "
-                        + e.getMessage());
-                return;
-            }
-            final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
-                    db.listX3dhpqLocalDevices(accountUuid);
-            if (localRows.isEmpty()) return;
-            final DatabaseBackend.X3dhpqLocalDeviceRow selfRow = localRows.get(0);
-            final long selfId = selfRow.deviceId() & 0xffffffffL;
-            final DeviceIdentityKey selfDik;
-            final DeviceCertificate selfDc;
-            try {
-                selfDik = DeviceIdentityKey.unmarshal(selfRow.dikPriv());
-                selfDc = DeviceCertificate.unmarshal(selfRow.dc());
-            } catch (final Exception e) {
-                Log.w(Config.LOGTAG, LOGPREFIX + ": genesis manifest — bad self device material: "
-                        + e.getMessage());
-                return;
-            }
-            final long ts = System.currentTimeMillis() / 1000L;
-            final byte[] selfDcHash = X3dhpqCrypto.sha256(selfDc.marshal());
-
-            // Genesis: self-authored, AIK-signed (the only AIK-signed edge).
-            final TrustEntry genesis = TrustEntry.signNew(
-                    TrustEntry.ACTION_ADD, selfId, selfDc, 0L, new ArrayList<>(),
-                    selfId, selfDcHash, ts, aik.getPrivEd25519(), aik.getPrivMLDSA());
-            final List<TrustEntry> entries = new ArrayList<>();
-            entries.add(genesis);
-
-            // Re-issue each OTHER authorized device under the primary's DIK, append a
-            // DIK-signed ADD chained onto the current head.
-            final java.util.Map<Long, im.conversations.x3dhpq.types.DeviceList.DeviceListEntry> union =
-                    computeUnionDeviceEntries(accountUuid);
-            final List<Long> otherIds = new ArrayList<>(union.keySet());
-            otherIds.sort(java.util.Comparator.naturalOrder());
-            long lamport = 1L;
-            List<byte[]> heads = new ArrayList<>();
-            heads.add(genesis.computeHash());
-            for (final Long idL : otherIds) {
-                if (idL == selfId) continue;
-                final DeviceCertificate subjectDc = union.get(idL).getCert();
-                final DeviceCertificate reissued = reissueDcUnderDik(subjectDc, selfDik);
-                final TrustEntry add = TrustEntry.signNew(
-                        TrustEntry.ACTION_ADD, idL, reissued, lamport, heads,
-                        selfId, selfDcHash, ts,
-                        selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
-                entries.add(add);
-                heads = new ArrayList<>();
-                heads.add(add.computeHash());
-                lamport++;
-            }
-
             final DatabaseBackend.X3dhpqDeviceListStateRow dlState =
                     db.loadX3dhpqDeviceListState(accountUuid, ownBare);
             final long version = (dlState != null ? dlState.version() : 0L) + 1L;
-
-            final TrustManifest unsigned =
-                    new TrustManifest(version, new byte[32], aikPub, entries, new byte[0], new byte[0]);
-            final TrustManifest signed =
-                    unsigned.signHead(selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
-            publishTrustManifest(signed);
-            // Persist our own publish as the accepted state so we don't re-genesis, and so
-            // subsequent appends chain from it.
-            db.putX3dhpqManifestState(accountUuid, ownBare, version, signed.computeHash(),
-                    signed.marshal(), ts);
-            Log.d(Config.LOGTAG, LOGPREFIX + ": published GENESIS trustmanifest version="
-                    + Long.toUnsignedString(version) + " with " + entries.size() + " entr(ies)");
+            final TrustManifest snap = buildSnapshotManifest(members, version, new byte[32]);
+            if (snap == null) return; // not the primary (no AIK_priv)
+            applyAndPublishOwnSnapshot(accountUuid, ownBare, snap);
+            Log.d(Config.LOGTAG, LOGPREFIX + ": published GENESIS snapshot trustmanifest version="
+                    + Long.toUnsignedString(version) + " with " + snap.getEntries().size() + " entr(ies)");
         } catch (final Exception e) {
             Log.w(Config.LOGTAG, LOGPREFIX + ": maybePublishGenesisManifest failed (non-fatal): "
                     + e.getMessage());
@@ -1654,15 +1804,20 @@ public class X3dhpqService {
     }
 
     /**
-     * §D2 confirmer append: the EXISTING/confirming device appends a DIK-signed ADD of the
-     * newly-issued device to the current manifest, bumps the version, and publishes. Falls
-     * back to genesis if we somehow have no manifest yet (a confirmer must be authorized,
-     * hence already in a manifest, but be defensive). Returns true if an append was
-     * published.
+     * §D2 confirmer append (snapshot model, task #65): at pairing confirmation, rebuild a
+     * fresh COMPACT snapshot asserting {@code fold(current) ∪ {newcomer}} at version+1 and
+     * publish it — NOT an append to an ever-growing log. Requires AIK_priv (the primary
+     * maintains the AIK-rooted snapshot; a non-primary edit is deferred to the primary's next
+     * publish/reconcile). Returns true if a snapshot was built + published.
      */
     public boolean confirmerAppendDevice(final DeviceCertificate newcomerDc) {
         try {
             if (db == null || account == null || mXmppConnectionService == null || newcomerDc == null) {
+                return false;
+            }
+            if (!holdsAikPriv()) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerAppendDevice — no AIK_priv; the"
+                        + " primary maintains the snapshot manifest (deferred)");
                 return false;
             }
             final String accountUuid = account.getUuid();
@@ -1672,47 +1827,20 @@ public class X3dhpqService {
                 // No manifest yet: build genesis first (idempotent), then re-load.
                 maybePublishGenesisManifest();
                 m = loadCurrentOwnManifest(accountUuid, ownBare);
-                if (m == null) return false;
             }
-            final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
-                    db.listX3dhpqLocalDevices(accountUuid);
-            if (localRows.isEmpty()) return false;
-            final DatabaseBackend.X3dhpqLocalDeviceRow selfRow = localRows.get(0);
-            final long selfId = selfRow.deviceId() & 0xffffffffL;
-            final DeviceIdentityKey selfDik = DeviceIdentityKey.unmarshal(selfRow.dikPriv());
+            // Current members = the fold of the latest manifest (∅ if we still have none).
+            final java.util.Map<Long, DeviceCertificate> members =
+                    m != null ? TrustManifest.fold(m) : new java.util.HashMap<>();
+            final long baseVer = m != null ? m.getVersion() : 0L;
+            final byte[] prevHash = m != null ? m.computeHash() : new byte[32];
+            members.put(newcomerDc.getDeviceId() & 0xffffffffL, newcomerDc);
 
-            final java.util.Map<Long, DeviceCertificate> fold = TrustManifest.fold(m);
-            final DeviceCertificate selfDc = fold.get(selfId);
-            if (selfDc == null) {
-                Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerAppendDevice — self (" + selfId
-                        + ") not in the current manifest fold; cannot author an ADD");
-                return false;
-            }
-            final byte[] selfDcHash = X3dhpqCrypto.sha256(selfDc.marshal());
-            final long lam = m.nextLamport();
-            final List<byte[]> heads = m.currentHeads();
-            final long ts = System.currentTimeMillis() / 1000L;
-            final TrustEntry add = TrustEntry.signNew(
-                    TrustEntry.ACTION_ADD, newcomerDc.getDeviceId(), newcomerDc, lam, heads,
-                    selfId, selfDcHash, ts,
-                    selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
-
-            final List<TrustEntry> entries = new ArrayList<>(m.getEntries());
-            entries.add(add);
-            final long version = m.getVersion() + 1L;
-            final byte[] prevHash = m.computeHash();
-            final TrustManifest next =
-                    new TrustManifest(version, prevHash, m.getAik(), entries, new byte[0], new byte[0])
-                            .signHead(selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
-            publishTrustManifest(next);
-            db.putX3dhpqManifestState(accountUuid, ownBare, version, next.computeHash(),
-                    next.marshal(), ts);
-            // Update the derived trust tables immediately from the new fold.
-            writeFoldedTrustSet(accountUuid, account.getJid().asBareJid(), true,
-                    TrustManifest.fold(next), ts);
-            Log.d(Config.LOGTAG, LOGPREFIX + ": confirmer appended ADD(device="
-                    + newcomerDc.getDeviceId() + ") → manifest version="
-                    + Long.toUnsignedString(version));
+            final TrustManifest snap = buildSnapshotManifest(members, baseVer + 1L, prevHash);
+            if (snap == null) return false;
+            applyAndPublishOwnSnapshot(accountUuid, ownBare, snap);
+            Log.d(Config.LOGTAG, LOGPREFIX + ": confirmer republished snapshot ADD(device="
+                    + newcomerDc.getDeviceId() + ") → version=" + Long.toUnsignedString(snap.getVersion())
+                    + " members=" + members.size());
             return true;
         } catch (final Exception e) {
             Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerAppendDevice failed: " + e.getMessage());
@@ -1721,85 +1849,132 @@ public class X3dhpqService {
     }
 
     /**
-     * §D4 revoke: this (trusted, non-genesis is fine — delegation) device appends a
-     * DIK-signed REMOVE of {@code targetDeviceId} to the account manifest, bumps the
-     * version, publishes, and applies the new fold locally. Removal-wins is enforced by
-     * {@link TrustManifest#fold} (a later non-descendant re-ADD loses). Mirrors {@link
-     * #confirmerAppendDevice}. Returns true if a REMOVE was published.
+     * §D4 revoke (snapshot model, task #65): rebuild a fresh COMPACT snapshot asserting
+     * {@code fold(current) \ {target}} at version+1 and publish it. Removal is expressed by
+     * the target's ABSENCE from the new snapshot (not a REMOVE edge on a growing log).
+     * Requires AIK_priv (the primary maintains the snapshot). A target not currently in the
+     * fold is an idempotent no-op. Returns true if a snapshot was built + published.
      *
-     * <p>The Phase-0 self-revoke guard lives at the {@link #revokeOwnDevice} call site
-     * (refuses {@code targetDeviceId == getOwnDeviceIdOrNull()}). This helper additionally
-     * treats a target that is not currently in the fold as an idempotent no-op.
+     * <p>The Phase-0 self-revoke guard lives at the {@link #revokeOwnDevice} call site.
      */
     public boolean confirmerRemoveDevice(final int targetDeviceId) {
         try {
             if (db == null || account == null || mXmppConnectionService == null) {
                 return false;
             }
+            if (!holdsAikPriv()) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice — no AIK_priv; the"
+                        + " primary maintains the snapshot manifest (deferred)");
+                return false;
+            }
             final String accountUuid = account.getUuid();
             final String ownBare = account.getJid().asBareJid().toString();
             TrustManifest m = loadCurrentOwnManifest(accountUuid, ownBare);
             if (m == null) {
-                // No manifest yet: build genesis first (idempotent), then re-load.
                 maybePublishGenesisManifest();
                 m = loadCurrentOwnManifest(accountUuid, ownBare);
                 if (m == null) return false;
             }
             final long targetId = targetDeviceId & 0xffffffffL;
-            final java.util.Map<Long, DeviceCertificate> fold = TrustManifest.fold(m);
-            final DeviceCertificate targetDc = fold.get(targetId);
-            if (targetDc == null) {
+            final java.util.Map<Long, DeviceCertificate> members = TrustManifest.fold(m);
+            if (!members.containsKey(targetId)) {
                 Log.d(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice — target "
                         + Integer.toUnsignedString(targetDeviceId)
                         + " is not in the current fold; nothing to revoke");
                 return false;
             }
-            final List<DatabaseBackend.X3dhpqLocalDeviceRow> localRows =
-                    db.listX3dhpqLocalDevices(accountUuid);
-            if (localRows.isEmpty()) return false;
-            final DatabaseBackend.X3dhpqLocalDeviceRow selfRow = localRows.get(0);
-            final long selfId = selfRow.deviceId() & 0xffffffffL;
-            final DeviceIdentityKey selfDik = DeviceIdentityKey.unmarshal(selfRow.dikPriv());
-
-            final DeviceCertificate selfDc = fold.get(selfId);
-            if (selfDc == null) {
-                Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice — self (" + selfId
-                        + ") not in the current manifest fold; cannot author a REMOVE");
-                return false;
-            }
-            final byte[] selfDcHash = X3dhpqCrypto.sha256(selfDc.marshal());
-            final long lam = m.nextLamport();
-            final List<byte[]> heads = m.currentHeads();
-            final long ts = System.currentTimeMillis() / 1000L;
-            // Removal carries the TARGET's current DC (from the fold), authored by self,
-            // signed under THIS device's DIK.
-            final TrustEntry remove = TrustEntry.signNew(
-                    TrustEntry.ACTION_REMOVE, targetId, targetDc, lam, heads,
-                    selfId, selfDcHash, ts,
-                    selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
-
-            final List<TrustEntry> entries = new ArrayList<>(m.getEntries());
-            entries.add(remove);
-            final long version = m.getVersion() + 1L;
+            members.remove(targetId);
             final byte[] prevHash = m.computeHash();
-            final TrustManifest next =
-                    new TrustManifest(version, prevHash, m.getAik(), entries, new byte[0], new byte[0])
-                            .signHead(selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
-            publishTrustManifest(next);
-            db.putX3dhpqManifestState(accountUuid, ownBare, version, next.computeHash(),
-                    next.marshal(), ts);
-            // Apply the new fold locally (the removed device is now pruned from the trust
-            // tables the fanout reads).
-            writeFoldedTrustSet(accountUuid, account.getJid().asBareJid(), true,
-                    TrustManifest.fold(next), ts);
-            Log.d(Config.LOGTAG, LOGPREFIX + ": authored REMOVE(device="
-                    + Integer.toUnsignedString(targetDeviceId) + ") → manifest version="
-                    + Long.toUnsignedString(version));
+            final TrustManifest snap = buildSnapshotManifest(members, m.getVersion() + 1L, prevHash);
+            if (snap == null) return false;
+            applyAndPublishOwnSnapshot(accountUuid, ownBare, snap);
+            Log.d(Config.LOGTAG, LOGPREFIX + ": revoke " + Integer.toUnsignedString(targetDeviceId)
+                    + " — republished snapshot version=" + Long.toUnsignedString(snap.getVersion())
+                    + " members=" + members.size());
             return true;
         } catch (final Exception e) {
             Log.w(Config.LOGTAG, LOGPREFIX + ": confirmerRemoveDevice failed: " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Connect-time reconcile + AUTO-COMPACTION (task #65, mirrors Dino ensure_trust_manifest).
+     * The server is the authoritative shared copy, so on every connect: (1) if we hold a local
+     * manifest with MORE entries than fold members and we hold AIK_priv, rebuild a compact
+     * snapshot of the current fold and publish it (version+1) — self-heals a manifest bloated
+     * by the append-only era; (2) otherwise fetch the server copy and adopt a newer version,
+     * or (re)publish ours when the server is missing it / behind (our last publish's ACK may
+     * have been lost). Never throws to the caller.
+     */
+    public void reconcileOwnManifestOnConnect() {
+        try {
+            if (db == null || account == null || mXmppConnectionService == null) return;
+            if (isPendingEnrollment()) return;
+            final String accountUuid = account.getUuid();
+            final String ownBare = account.getJid().asBareJid().toString();
+            final TrustManifest local = loadCurrentOwnManifest(accountUuid, ownBare);
+            if (local == null) return; // no local manifest → genesis/adopt handled elsewhere
+
+            // (1) AUTO-COMPACT a bloated manifest (more entries than current members).
+            if (holdsAikPriv()) {
+                final java.util.Map<Long, DeviceCertificate> members = TrustManifest.fold(local);
+                if (!members.isEmpty() && local.getEntries().size() > members.size()) {
+                    final TrustManifest snap =
+                            buildSnapshotManifest(members, local.getVersion() + 1L, local.computeHash());
+                    if (snap != null) {
+                        applyAndPublishOwnSnapshot(accountUuid, ownBare, snap);
+                        Log.d(Config.LOGTAG, LOGPREFIX + ": compacted manifest "
+                                + local.getEntries().size() + " entries → " + members.size()
+                                + " members (version " + Long.toUnsignedString(snap.getVersion()) + ")");
+                        return;
+                    }
+                }
+            }
+
+            // (2) RECONCILE with the server: adopt newer, (re)publish if server behind/absent.
+            reconcileServerManifest(ownBare, local);
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": reconcileOwnManifestOnConnect failed (non-fatal): "
+                    + e.getMessage());
+        }
+    }
+
+    /** Fetch the server's own-account manifest and adopt-if-ahead / republish-if-behind. */
+    private void reconcileServerManifest(final String ownBare, final TrustManifest local) {
+        final Jid ownJid = account.getJid().asBareJid();
+        final Iq iq =
+                mXmppConnectionService.getIqGenerator().generateX3dhpqRequestTrustManifest(ownJid);
+        mXmppConnectionService.sendIqPacket(
+                account,
+                iq,
+                response -> {
+                    TrustManifest server = null;
+                    if (response.getType() == Iq.Type.RESULT) {
+                        final Extension payload =
+                                extractPubsubPayload(
+                                        response,
+                                        im.conversations.android.xmpp.model.x3dhpq.trustmanifest
+                                                .TrustManifestItem.class);
+                        if (payload
+                                instanceof
+                                im.conversations.android.xmpp.model.x3dhpq.trustmanifest
+                                        .TrustManifestItem) {
+                            server = TrustManifest.unmarshal(
+                                    ((im.conversations.android.xmpp.model.x3dhpq.trustmanifest
+                                                    .TrustManifestItem)
+                                                    payload)
+                                            .asBytes());
+                        }
+                    }
+                    if (server != null
+                            && Long.compareUnsigned(server.getVersion(), local.getVersion()) > 0) {
+                        handleInboundTrustManifest(ownJid, server.marshal()); // server ahead → adopt
+                    } else if (server == null
+                            || Long.compareUnsigned(local.getVersion(), server.getVersion()) > 0) {
+                        publishTrustManifest(local); // server behind/absent → (re)push ours
+                    }
+                });
     }
 
     /**
