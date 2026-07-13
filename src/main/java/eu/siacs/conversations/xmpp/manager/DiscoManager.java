@@ -345,7 +345,6 @@ public class DiscoManager extends AbstractManager {
         // x3dhpq caps-based PEP subscriptions (XEP §8, §9, §11, §12)
         features.add(notify(Namespace.X3DHPQ_DEVICELIST));
         features.add(notify(Namespace.X3DHPQ_BUNDLE));
-        features.add(notify(Namespace.X3DHPQ_AUDIT));
         features.add(notify(Namespace.X3DHPQ_RECOVERY));
         // Serverless pairing rendezvous (§10.1a): subscribe to our own pair node so a
         // new device's <pair-hello> reaches existing primary resources via self-PEP.

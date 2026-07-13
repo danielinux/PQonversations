@@ -363,12 +363,6 @@ public class LocalKeyBootstrapTest {
         }
 
         @Override
-        public byte[] getAuditTailHash(long accountId) { return null; }
-
-        @Override
-        public void setAuditTailHash(long accountId, byte[] tailHash) {}
-
-        @Override
         public void putX3dhpqPairingSession(
                 String accountUuid,
                 byte[] sid,

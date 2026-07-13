@@ -268,15 +268,6 @@ public class IqGenerator extends AbstractGenerator {
         return packet;
     }
 
-    // Fetch ALL items of the account's own audit:0 node (full history), so a device
-    // that was offline when earlier AddDevice/self-genesis entries were published can
-    // still catch up — live +notify only ever carries the newest item (§11).
-    public Iq generateX3dhpqRequestAuditHistory(final Jid ownBareJid) {
-        final var packet = retrieve(Namespace.X3DHPQ_AUDIT, null);
-        packet.setTo(ownBareJid);
-        return packet;
-    }
-
     /**
      * Fetches the account's own §11.8 sealed device-state tracker item. Always sent to
      * the account's own bare JID — the tracker is account-internal state, never

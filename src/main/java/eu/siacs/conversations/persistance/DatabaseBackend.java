@@ -3180,17 +3180,6 @@ public class DatabaseBackend extends SQLiteOpenHelper
             byte[] stateBlob,
             long updatedAt) {}
 
-    public record X3dhpqAuditEntryRow(
-            String accountUuid,
-            String ownerJid,
-            long seq,
-            byte[] prevHash,
-            int action,
-            byte[] payload,
-            long timestamp,
-            byte[] sigEd25519,
-            byte[] sigMldsa) {}
-
     public record X3dhpqGroupSessionRow(
             String accountUuid,
             String roomJid,
@@ -4133,67 +4122,6 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 c.getLong(c.getColumnIndexOrThrow("updated_at")));
     }
 
-    // ---- x3dhpq DAO: audit_entry ----
-
-    public void putX3dhpqAuditEntry(
-            String accountUuid,
-            String ownerJid,
-            long seq,
-            byte[] prevHash,
-            int action,
-            byte[] payload,
-            long ts,
-            byte[] sigEd,
-            byte[] sigMldsa) {
-        final SQLiteDatabase db = getWritableDatabase();
-        final ContentValues v = new ContentValues();
-        v.put("account_uuid", accountUuid);
-        v.put("owner_jid", ownerJid);
-        v.put("seq", seq);
-        v.put("prev_hash", prevHash);
-        v.put("action", action);
-        v.put("payload", payload);
-        v.put("timestamp", ts);
-        v.put("sig_ed25519", sigEd);
-        v.put("sig_mldsa", sigMldsa);
-        db.insertWithOnConflict(
-                "x3dhpq_audit_entry", null, v, SQLiteDatabase.CONFLICT_IGNORE);
-    }
-
-    public List<X3dhpqAuditEntryRow> loadX3dhpqAuditChain(
-            String accountUuid, String ownerJid) {
-        // ordered by seq ASC for chain replay; uses x3dhpq_audit_owner_seq index
-        final SQLiteDatabase db = getReadableDatabase();
-        final Cursor c =
-                db.query(
-                        "x3dhpq_audit_entry",
-                        null,
-                        "account_uuid=? AND owner_jid=?",
-                        new String[] {accountUuid, ownerJid},
-                        null,
-                        null,
-                        "seq ASC");
-        final List<X3dhpqAuditEntryRow> result = new ArrayList<>();
-        try {
-            while (c.moveToNext()) {
-                result.add(
-                        new X3dhpqAuditEntryRow(
-                                c.getString(c.getColumnIndexOrThrow("account_uuid")),
-                                c.getString(c.getColumnIndexOrThrow("owner_jid")),
-                                c.getLong(c.getColumnIndexOrThrow("seq")),
-                                c.getBlob(c.getColumnIndexOrThrow("prev_hash")),
-                                c.getInt(c.getColumnIndexOrThrow("action")),
-                                c.getBlob(c.getColumnIndexOrThrow("payload")),
-                                c.getLong(c.getColumnIndexOrThrow("timestamp")),
-                                c.getBlob(c.getColumnIndexOrThrow("sig_ed25519")),
-                                c.getBlob(c.getColumnIndexOrThrow("sig_mldsa"))));
-            }
-        } finally {
-            c.close();
-        }
-        return result;
-    }
-
     // ---- x3dhpq DAO: group_session ----
 
     public void putX3dhpqGroupSession(
@@ -4366,17 +4294,4 @@ public class DatabaseBackend extends SQLiteOpenHelper
                 c.getLong(c.getColumnIndexOrThrow("expires_at")));
     }
 
-    // ---- x3dhpq DAO: audit chain tail hash ----
-    // TODO: implement backing table in a separate migration task.
-
-    @Override
-    public byte[] getAuditTailHash(final long accountId) {
-        // Stub — full implementation (separate task) will query x3dhpq_audit_tail table.
-        return null;
-    }
-
-    @Override
-    public void setAuditTailHash(final long accountId, final byte[] tailHash) {
-        // Stub — full implementation (separate task) will upsert x3dhpq_audit_tail table.
-    }
 }
