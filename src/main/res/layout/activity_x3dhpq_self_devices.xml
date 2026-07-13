@@ -163,4 +163,16 @@
 
     </LinearLayout>
 
+    <!-- Task #58 recovery: a device that holds its own account identity (not pending, e.g.
+         one that wrongly self-promoted after a fork) can discard that identity and re-pair
+         as a secondary of the account's existing identity. Only shown when NOT pending
+         (a pending device already has "Associate with existing identity" in the banner). -->
+    <Button
+        android:id="@+id/join_existing_identity_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:visibility="gone"
+        android:text="@string/x3dhpq_join_existing_identity_button" />
+
 </LinearLayout>

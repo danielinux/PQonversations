@@ -52,6 +52,9 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
     private TextView mPendingEnrollmentTextView;
     private Button mAssociateExistingIdentityButton;
     private Button mGenerateNewIdentityButton;
+    // Task #58: reachable when NOT pending — discards this device's own account identity and
+    // re-joins the account's existing identity as a secondary.
+    private Button mJoinExistingIdentityButton;
     private View mBlockedIdentitiesContainer;
     private ListView mBlockedIdentitiesList;
     private View mJoinRequestBanner;
@@ -101,6 +104,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mPendingEnrollmentTextView = findViewById(R.id.pending_enrollment_text);
         mAssociateExistingIdentityButton = findViewById(R.id.associate_existing_identity_button);
         mGenerateNewIdentityButton = findViewById(R.id.generate_new_identity_button);
+        mJoinExistingIdentityButton = findViewById(R.id.join_existing_identity_button);
         mBlockedIdentitiesContainer = findViewById(R.id.blocked_identities_container);
         mBlockedIdentitiesList = findViewById(R.id.blocked_identities_list);
         mJoinRequestBanner = findViewById(R.id.join_request_banner);
@@ -131,6 +135,9 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mAssociateExistingIdentityButton.setOnClickListener(
                 v -> startActivity(PairToExistingActivity.makeIntent(this, mAccountUuid)));
         mGenerateNewIdentityButton.setOnClickListener(v -> showGenerateNewIdentityDialog());
+        // Task #58 recovery: discard THIS device's own identity and re-join the account's
+        // existing identity as a secondary.
+        mJoinExistingIdentityButton.setOnClickListener(v -> showJoinExistingIdentityDialog());
         // §11.8 queued enrollment request: jump straight to the "confirm a waiting
         // device" scan flow, same entry point as the manual button, and clear the
         // banner state now that a human is acting on it.
@@ -185,6 +192,36 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
                     }
                 });
         dialog.show();
+    }
+
+    /**
+     * Task #58 recovery: confirm discarding THIS device's own account identity so it can
+     * re-pair as a secondary of the account's existing identity. Safe-defaulted like the
+     * account-reset dialog — the positive/default button is Cancel; the (less destructive
+     * than a reset, but still identity-changing) "Discard and join" action is the negative
+     * button. Only reachable when this device is NOT pending (it holds its own AIK).
+     */
+    private void showJoinExistingIdentityDialog() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.x3dhpq_join_existing_identity_confirm_title)
+                .setMessage(R.string.x3dhpq_join_existing_identity_confirm)
+                // Positive = safe default: Cancel.
+                .setPositiveButton(R.string.cancel, null)
+                // Negative = the deliberate identity-changing action.
+                .setNegativeButton(
+                        R.string.x3dhpq_join_existing_identity_confirm_action,
+                        (d, which) -> {
+                            if (mAccount != null && xmppConnectionServiceBound) {
+                                mAccount.getX3dhpqService().discardIdentityAndRejoin();
+                                Toast.makeText(
+                                                this,
+                                                R.string.x3dhpq_pair_status_done,
+                                                Toast.LENGTH_LONG)
+                                        .show();
+                                refresh();
+                            }
+                        })
+                .show();
     }
 
     /** §10.6.5: explicit re-trust confirmation for a peer whose identity was reconstructed. */
@@ -256,6 +293,10 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         mDeviceListView.setVisibility(pending ? View.GONE : View.VISIBLE);
         // mAddDeviceButton (show-my-code direction) is permanently hidden — see onCreate.
         mConfirmWaitingDeviceButton.setEnabled(!pending);
+        // Task #58: the "Join an existing identity" recovery action is only reachable when
+        // this device is NOT pending (it currently holds its own account AIK). A pending
+        // device already has "Associate with existing identity" in the banner above.
+        mJoinExistingIdentityButton.setVisibility(pending ? View.GONE : View.VISIBLE);
 
         // --- §11.8 queued enrollment request banner ---
         final String joinRequestFullJid = eu.siacs.conversations.xmpp.manager.VerifyDeviceManager

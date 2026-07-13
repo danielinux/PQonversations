@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package eu.siacs.conversations.crypto.x3dhpq;
 
+import android.util.Log;
+import eu.siacs.conversations.Config;
 import eu.siacs.conversations.entities.Account;
 import eu.siacs.conversations.persistance.DatabaseBackend;
 import im.conversations.x3dhpq.crypto.KemKeyPair;
@@ -306,6 +308,43 @@ public final class LocalKeyBootstrap {
                         : -1,
                 db.listX3dhpqKemPreKeyIds(uuid).size(),
                 db.listX3dhpqUnusedOneTimePreKeyIds(uuid).size());
+    }
+
+    /**
+     * Recovery / task #58 "join an existing identity": demote a device that currently holds
+     * its own account AIK (thinks it is primary — possibly after a wrong self-promotion on a
+     * fork) BACK to pending-enrollment, WITHOUT touching its device key. Re-flags the local
+     * device row as {@link #FLAG_PENDING_ENROLLMENT} (keeping its DIK, device_id, DC and
+     * created_at) so it stops acting as primary and re-detects the account's existing
+     * identity on the next {@code publishLocalState()} → {@code resolvePendingEnrollment()}.
+     *
+     * <p>The {@code x3dhpq_account_identity} row is intentionally NOT deleted here: {@code
+     * x3dhpq_local_device} has an {@code ON DELETE CASCADE} FK to it, so dropping the identity
+     * row would also destroy this device's DIK. Keeping the tentative AIK row is exactly the
+     * shape {@link #ensureBootstrapped} leaves a genuine pending device in; the stale AIK is
+     * overwritten when the device pairs as a secondary (adopting the account AIK pub) or is
+     * re-confirmed as primary via {@link #promoteToPrimary} (which reuses the row) if no other
+     * identity is found. Caller (X3dhpqService) is responsible for clearing the derived trust
+     * caches and re-running the pending-enrollment resolution.
+     */
+    public void demoteToPending(final String uuid) {
+        final var devices = db.listX3dhpqLocalDevices(uuid);
+        if (devices.isEmpty()) {
+            Log.w(Config.LOGTAG, "x3dhpq: demoteToPending called for " + uuid
+                    + " but no local device row exists — nothing to demote");
+            return;
+        }
+        final DatabaseBackend.X3dhpqLocalDeviceRow row = devices.get(0);
+        if (isPending(row)) {
+            Log.d(Config.LOGTAG, "x3dhpq: demoteToPending — device " + row.deviceId()
+                    + " is already pending; no-op");
+            return;
+        }
+        db.putX3dhpqLocalDevice(
+                uuid, row.deviceId(), row.dikPriv(), row.dc(), row.createdAt(),
+                DeviceCertificate.FLAG_PRIMARY | FLAG_PENDING_ENROLLMENT);
+        Log.i(Config.LOGTAG, "x3dhpq: demoteToPending — device " + row.deviceId()
+                + " re-flagged PENDING (DIK kept); will re-detect the account identity on next login");
     }
 
     /**

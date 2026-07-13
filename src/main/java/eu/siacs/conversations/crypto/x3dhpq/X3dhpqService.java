@@ -642,6 +642,63 @@ public class X3dhpqService {
     }
 
     /**
+     * Task #58 recovery: "Join an existing identity". A device that holds its OWN account
+     * AIK (thinks it is primary — including one that wrongly self-promoted after a fork) has
+     * no way, once it is no longer pending, to discard that identity and re-join the
+     * account's existing manifest. This discards THIS device's account-root identity while
+     * KEEPING its device key (DIK + device_id), marks it pending, clears the derived trust
+     * caches for the discarded identity, and re-runs pending-enrollment resolution:
+     * <ul>
+     *   <li>if the account already has an identity (another primary) → this device stays
+     *       pending and the UI offers "Associate with existing identity" (pair as secondary);</li>
+     *   <li>if no other identity is found → {@code resolvePendingEnrollment()} self-corrects
+     *       by re-promoting this device to primary (reusing its existing AIK row).</li>
+     * </ul>
+     * The device publishes NOTHING as primary during this (the pending gate in {@link
+     * #publishLocalState()} short-circuits before any primary publish).
+     */
+    public void discardIdentityAndRejoin() {
+        if (db == null || account == null || mXmppConnectionService == null) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": discardIdentityAndRejoin ignored — no db/account/service");
+            return;
+        }
+        if (isPendingEnrollment()) {
+            Log.d(Config.LOGTAG, LOGPREFIX + ": discardIdentityAndRejoin — already pending; re-running"
+                    + " enrollment resolution only");
+            publishLocalState();
+            return;
+        }
+        final String accountUuid = account.getUuid();
+        final String ownBare = account.getJid().asBareJid().toString();
+
+        // 1. Demote to pending: keep DIK + device_id, drop the "primary" status. (The
+        //    account_identity row is intentionally kept — x3dhpq_local_device cascades from
+        //    it — and is overwritten when this device pairs as a secondary or self-corrects.)
+        new LocalKeyBootstrap(mXmppConnectionService.databaseBackend).demoteToPending(accountUuid);
+
+        // 2. Clear every derived trust cache tied to the discarded identity so nothing from
+        //    it survives the rejoin: manifest state, devicelist version/fork state, the
+        //    co-account + committed device sets, and our own remote-device cache.
+        try {
+            db.deleteX3dhpqManifestState(accountUuid, ownBare);
+            db.putX3dhpqDeviceListState(accountUuid, ownBare, -1L, new byte[0], false, 0L);
+            db.pruneX3dhpqCoAccountDevicesNotIn(accountUuid, java.util.Collections.emptySet());
+            db.putX3dhpqCommittedDevices(accountUuid, java.util.Collections.emptySet());
+            db.pruneX3dhpqRemoteDevicesNotIn(accountUuid, ownBare, java.util.Collections.emptySet());
+        } catch (final Exception e) {
+            Log.w(Config.LOGTAG, LOGPREFIX + ": discardIdentityAndRejoin — trust-cache clear failed"
+                    + " (non-fatal): " + e.getMessage());
+        }
+
+        Log.i(Config.LOGTAG, LOGPREFIX + ": " + ownBare + " discarded its local account identity"
+                + " (task #58) — now PENDING; re-detecting the account's existing identity");
+
+        // 3. Re-run pending-enrollment resolution. publishLocalState() sees isPendingEnrollment()
+        //    == true and routes to resolvePendingEnrollment() — it publishes NOTHING as primary.
+        publishLocalState();
+    }
+
+    /**
      * §12.1 step 3 / §12.4: builds, signs with the OLD AIK, and locally appends a {@code
      * RotateAIK} (action=3) device-audit-DAG entry (§11.7) to the OLD chain for {@code
      * accountUuid} — payload {@code uint16(new_aik_len) | AccountIdentityPub.marshal()}
