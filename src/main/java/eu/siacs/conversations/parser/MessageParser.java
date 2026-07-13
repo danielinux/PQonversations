@@ -306,9 +306,9 @@ public class MessageParser extends AbstractParser
             Log.d(Config.LOGTAG, "x3dhpq group: GroupCryptoService is null");
             return null;
         }
-        final byte[] plaintext;
+        final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupDecryptResult result;
         try {
-            plaintext = gcs.decryptGroupMessage(conversation.getAddress().asBareJid(), groupEnv);
+            result = gcs.decryptGroupMessage(conversation.getAddress().asBareJid(), groupEnv);
         } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
             Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
                     + ": x3dhpq group not enabled for " + conversation.getAddress()
@@ -319,15 +319,26 @@ public class MessageParser extends AbstractParser
                     + ": x3dhpq group decrypt failed: " + e.getMessage());
             return null;
         }
-        if (plaintext == null) {
-            // Deferred — announcement not yet received
+        if (result == null || result.plaintext == null) {
+            // Deferred — announcement not yet received, or this device's own echo
             return null;
         }
-        return new Message(
+        // A group message authored by ANOTHER of our own devices (same account
+        // AIK, different device id — a sibling) must render as our OWN outgoing
+        // message received from that device, and carry the "from Device N" label.
+        int effectiveStatus = status;
+        if (result.fromOwnAccount) {
+            effectiveStatus = Message.STATUS_SEND_RECEIVED;
+        }
+        final Message message = new Message(
                 conversation,
-                new String(plaintext, java.nio.charset.StandardCharsets.UTF_8),
+                new String(result.plaintext, java.nio.charset.StandardCharsets.UTF_8),
                 Message.ENCRYPTION_X3DHPQ,
-                status);
+                effectiveStatus);
+        if (result.fromOwnAccount) {
+            message.setX3dhpqSourceDevice(result.senderDeviceId);
+        }
+        return message;
     }
 
     /**

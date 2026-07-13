@@ -615,14 +615,36 @@ public class GroupCryptoService {
     }
 
     /**
+     * Result of a successful group decrypt: the plaintext plus the sender
+     * attribution needed by the parser to render direction and the
+     * "from Device N" label for own-account sibling messages.
+     */
+    public static final class GroupDecryptResult {
+        public final byte[] plaintext;
+        public final String senderAikFp;
+        public final int senderDeviceId;
+        /** True when senderAikFp equals this account's own AIK fingerprint. */
+        public final boolean fromOwnAccount;
+
+        public GroupDecryptResult(final byte[] plaintext, final String senderAikFp,
+                                  final int senderDeviceId, final boolean fromOwnAccount) {
+            this.plaintext = plaintext;
+            this.senderAikFp = senderAikFp;
+            this.senderDeviceId = senderDeviceId;
+            this.fromOwnAccount = fromOwnAccount;
+        }
+    }
+
+    /**
      * Decrypt an inbound group message.
      *
-     * @return the plaintext bytes, or null if decryption cannot proceed yet
-     *         (announcement pending).
+     * @return a {@link GroupDecryptResult} carrying the plaintext and sender
+     *         attribution, or null if decryption cannot proceed yet
+     *         (announcement pending) or the message is this device's own echo.
      * @throws GroupNotEnabledException if the room has no journal.
      * @throws Exception                on AEAD failure or malformed envelope.
      */
-    public byte[] decryptGroupMessage(final Jid roomJid, final EnvelopeGroup envelope)
+    public GroupDecryptResult decryptGroupMessage(final Jid roomJid, final EnvelopeGroup envelope)
             throws GroupNotEnabledException, Exception {
         final Jid roomBare = roomJid.asBareJid();
         final String roomStr = roomBare.toString();
@@ -653,19 +675,32 @@ public class GroupCryptoService {
                 throw new IllegalArgumentException("GroupMessage: missing sender-aik-fp");
             }
 
-            // The MUC reflects our own groupchat back to us. We have no recv
-            // chain for ourselves (we have a send chain instead), so decrypt
-            // would log a confusing "no recv chain" miss every time we send.
-            // Skip silently — the local UI already shows our outgoing copy.
+            // Compute this device's own AIK fingerprint + local device id so we
+            // can tell a true self-echo (THIS device's own MUC reflection) apart
+            // from a sibling copy (same account AIK, different device id).
+            String myFp = null;
             final DatabaseBackend.X3dhpqAccountIdentityRow myAikRow =
                     db.loadX3dhpqAccountIdentity(account.getUuid());
             if (myAikRow != null) {
                 try {
                     final AccountIdentityPub myAik = AccountIdentityPub.unmarshal(myAikRow.aikPub());
-                    if (senderAikFp.equals(myAik.fingerprint(X3dhpqCrypto.BLAKE2B_160))) {
-                        return null;
-                    }
+                    myFp = myAik.fingerprint(X3dhpqCrypto.BLAKE2B_160);
                 } catch (Exception ignored) {}
+            }
+            final boolean fromOwnAccount = myFp != null && senderAikFp.equals(myFp);
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> myLocalRows =
+                    db.listX3dhpqLocalDevices(account.getUuid());
+            final int myDeviceId = myLocalRows.isEmpty() ? -1 : myLocalRows.get(0).deviceId();
+
+            // The MUC reflects our own groupchat back to us. Suppress ONLY this
+            // device's own reflection (same AIK AND same device id): we have a
+            // send chain, not a recv chain, for ourselves, so decrypting would
+            // log a confusing "no recv chain" miss and double-show the message.
+            // A message from a SIBLING device (own AIK, different device id) must
+            // fall through and be decrypted so it can be shown as our own
+            // outgoing copy received from that other device.
+            if (fromOwnAccount && hdr.senderDeviceId == myDeviceId) {
+                return null;
             }
 
             // Check not removed
@@ -694,7 +729,9 @@ public class GroupCryptoService {
             final byte[] nonce = GroupMessageHeader.aeadNonce(hdr.epoch, hdr.chainIndex);
             final byte[] aad   = hdr.aad(roomStr);
 
-            return X3dhpqCrypto.aes256gcmDecrypt(mk, nonce, ct, aad);
+            final byte[] plaintext = X3dhpqCrypto.aes256gcmDecrypt(mk, nonce, ct, aad);
+            return new GroupDecryptResult(
+                    plaintext, senderAikFp, (int) hdr.senderDeviceId, fromOwnAccount);
         }
     }
 
@@ -722,7 +759,9 @@ public class GroupCryptoService {
             // epoch rotation already performs — no dependency on MUC MAM.
             final byte[] groupSyncBytes = buildGroupSyncBytes(ann.marshal(), state);
 
-            // Resolve own AIK once for the self-skip check.
+            // Resolve own AIK once so own-account sibling devices can be
+            // detected. We must still announce to those siblings so they install
+            // our group recv chain; only THIS device is skipped below.
             AccountIdentityPub ownAik = null;
             final DatabaseBackend.X3dhpqAccountIdentityRow ownAikRow =
                     db.loadX3dhpqAccountIdentity(account.getUuid());
@@ -730,6 +769,11 @@ public class GroupCryptoService {
                 try { ownAik = AccountIdentityPub.unmarshal(ownAikRow.aikPub()); }
                 catch (Exception ignored) {}
             }
+            // This device's local device id — the one member device we never
+            // announce to (we'd be talking to ourselves).
+            final List<DatabaseBackend.X3dhpqLocalDeviceRow> ownLocalRows =
+                    db.listX3dhpqLocalDevices(account.getUuid());
+            final int ownDeviceId = ownLocalRows.isEmpty() ? -1 : ownLocalRows.get(0).deviceId();
 
             int sent = 0;
             for (GroupMember m : state.session.members) {
@@ -737,16 +781,19 @@ public class GroupCryptoService {
                 if (memberAik == null) {
                     continue;
                 }
-                if (ownAik != null && memberAik.equals(ownAik)) {
-                    continue;
-                }
+                final boolean isOwnAccount = ownAik != null && memberAik.equals(ownAik);
                 final String memberAikFp = memberAik.fingerprint(X3dhpqCrypto.BLAKE2B_160);
 
                 // GroupSession.members is built with empty deviceIds — the
                 // journal entry doesn't carry device lists. Resolve the
                 // member's JID and then enumerate their devices from the
-                // x3dhpq_remote_device table.
-                final Jid memberJid = findJidByAikFp(memberAikFp);
+                // x3dhpq_remote_device table. For our OWN account the member JID
+                // is our own bare JID; if the AIK->JID lookup misses (no self
+                // bundle recorded), fall back to the account's bare JID.
+                Jid memberJid = findJidByAikFp(memberAikFp);
+                if (memberJid == null && isOwnAccount) {
+                    memberJid = account.getJid().asBareJid();
+                }
                 if (memberJid == null) {
                     continue;
                 }
@@ -757,6 +804,12 @@ public class GroupCryptoService {
                     continue;
                 }
                 for (DatabaseBackend.X3dhpqRemoteDeviceRow rd : peerDevices) {
+                    // Never announce to THIS device (our own reflection); own
+                    // sibling devices (same AIK, different device id) still get
+                    // the announcement so they can install our recv chain.
+                    if (isOwnAccount && rd.deviceId() == ownDeviceId) {
+                        continue;
+                    }
                     final String key = memberAikFp + "/" + rd.deviceId();
                     // Re-broadcast on every encrypt. Without re-announcement
                     // a lost first-message means the recv chain is never
