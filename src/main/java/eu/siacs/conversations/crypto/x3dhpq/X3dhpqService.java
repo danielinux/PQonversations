@@ -4080,10 +4080,11 @@ public class X3dhpqService {
         public final boolean primary;
         public final boolean thisDevice;
         /**
-         * True if this device is the account's primary (the genesis root of trust, which by
-         * construction predates the audit chain and so never has its own AddDevice entry) or
-         * is covered by a verified §11.4 AddDevice entry. False means §10.6.3 "pending/
-         * unconfirmed" — present on the devicelist but NOT trust-gate confirmed.
+         * True if this device is TRUSTED per the account Trust Manifest — i.e. it is the
+         * account's primary (the genesis root of trust) or its device id is present in the
+         * current manifest FOLD. False means it is present locally/on the devicelist but is
+         * NOT (yet) in the account's trust manifest (e.g. a just-appeared device not yet
+         * folded). This is derived from the fold, NOT the retired §11.4 audit chain.
          */
         public final boolean confirmed;
 
@@ -4112,13 +4113,43 @@ public class X3dhpqService {
      * {@link #isPendingEnrollment()} is true (no AIK yet — nothing to list; the caller should
      * show the pending-enrollment banner instead).
      */
+    /**
+     * Task #67: the set of device ids currently TRUSTED for the own account per the Trust
+     * Manifest — i.e. the manifest FOLD membership. Uses the live fold of the current own
+     * manifest when present; falls back to the committed device-id set (which {@code
+     * writeFoldedTrustSet}/{@code publishDeviceList} persist = the fold/union output) for a
+     * pre-migration account that has no manifest yet. Cosmetic read only — this does not
+     * change trust, which is already driven by the fold.
+     */
+    private java.util.Set<Integer> foldedTrustedDeviceIds(
+            final String accountUuid, final String ownBare) {
+        final TrustManifest m = loadCurrentOwnManifest(accountUuid, ownBare);
+        if (m != null) {
+            try {
+                final java.util.Set<Integer> ids = new java.util.HashSet<>();
+                for (final Long id : TrustManifest.fold(m).keySet()) {
+                    ids.add((int) (long) id);
+                }
+                return ids;
+            } catch (final Exception e) {
+                Log.w(Config.LOGTAG, LOGPREFIX + ": foldedTrustedDeviceIds fold failed, using"
+                        + " committed set: " + e.getMessage());
+            }
+        }
+        return db.loadX3dhpqCommittedDeviceIds(accountUuid);
+    }
+
     public List<AssociatedDevice> listAssociatedDevices() {
         final List<AssociatedDevice> result = new ArrayList<>();
         if (db == null || account == null || isPendingEnrollment()) {
             return result;
         }
         final Integer ownDeviceId = getOwnDeviceIdOrNull();
-        final java.util.Set<Integer> verified = getVerifiedAddDeviceIds();
+        // Trust Manifest Phase 2 (task #67): a device is Confirmed iff it is in the current
+        // manifest FOLD — NOT the retired audit chain (getVerifiedAddDeviceIds, now always
+        // empty). Reading the fold is cosmetic only; trust itself is already the fold.
+        final java.util.Set<Integer> folded =
+                foldedTrustedDeviceIds(account.getUuid(), account.getJid().asBareJid().toString());
         final java.util.LinkedHashMap<Integer, AssociatedDevice> byId = new java.util.LinkedHashMap<>();
 
         for (final DatabaseBackend.X3dhpqLocalDeviceRow row :
@@ -4132,7 +4163,7 @@ public class X3dhpqService {
             }
             final boolean primary = (row.flags() & DeviceCertificate.FLAG_PRIMARY) != 0;
             final boolean thisDevice = ownDeviceId != null && ownDeviceId == row.deviceId();
-            final boolean confirmed = primary || verified.contains(row.deviceId());
+            final boolean confirmed = primary || folded.contains(row.deviceId());
             byId.put(
                     row.deviceId(),
                     new AssociatedDevice(
@@ -4150,7 +4181,7 @@ public class X3dhpqService {
                 // as above
             }
             final boolean primary = (row.flags() & DeviceCertificate.FLAG_PRIMARY) != 0;
-            final boolean confirmed = primary || verified.contains(row.deviceId());
+            final boolean confirmed = primary || folded.contains(row.deviceId());
             byId.put(
                     row.deviceId(),
                     new AssociatedDevice(row.deviceId(), cert, row.addedAt(), primary, false, confirmed));

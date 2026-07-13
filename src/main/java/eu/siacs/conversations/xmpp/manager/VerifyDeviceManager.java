@@ -138,6 +138,17 @@ public class VerifyDeviceManager extends AbstractManager {
         return prefs.getString(PREF_PENDING_FULL_JID_PREFIX + accountBareJid, null);
     }
 
+    /**
+     * Task #67: the device id of the queued enrollment request for {@code accountBareJid},
+     * or {@code 0} if none is stored. Lets the device-management UI auto-dismiss the banner
+     * once that device is already covered by the account's trust manifest fold.
+     */
+    public static int getPendingJoinRequestDeviceId(
+            final Context context, final String accountBareJid) {
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getInt(PREF_PENDING_DEVICE_ID_PREFIX + accountBareJid, 0);
+    }
+
     /** Clears the queued-enrollment-request banner state; call once a human acts on it. */
     public static void clearPendingJoinRequest(final Context context, final String accountBareJid) {
         final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);

@@ -298,10 +298,36 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         // device already has "Associate with existing identity" in the banner above.
         mJoinExistingIdentityButton.setVisibility(pending ? View.GONE : View.VISIBLE);
 
+        // Build the associated-devices list once (empty while pending) — reused by both the
+        // §11.8 join-request banner auto-dismiss (task #67) and the list adapter below.
+        final List<X3dhpqService.AssociatedDevice> associated =
+                pending ? java.util.Collections.emptyList() : service.listAssociatedDevices();
+
         // --- §11.8 queued enrollment request banner ---
+        final String accountBareJid = mAccount.getJid().asBareJid().toString();
         final String joinRequestFullJid = eu.siacs.conversations.xmpp.manager.VerifyDeviceManager
-                .getPendingJoinRequestFullJid(this, mAccount.getJid().asBareJid().toString());
+                .getPendingJoinRequestFullJid(this, accountBareJid);
+        // Task #67: auto-dismiss a lingering "Review request" banner once the requesting
+        // device is already covered by the account's trust manifest fold (Confirmed) — the
+        // request was resolved (paired/confirmed elsewhere) and the banner is now stale.
+        boolean joinRequestFolded = false;
         if (joinRequestFullJid != null && !pending) {
+            final int reqDeviceId = eu.siacs.conversations.xmpp.manager.VerifyDeviceManager
+                    .getPendingJoinRequestDeviceId(this, accountBareJid);
+            if (reqDeviceId != 0) {
+                for (final X3dhpqService.AssociatedDevice d : associated) {
+                    if (d.deviceId == reqDeviceId && d.confirmed) {
+                        joinRequestFolded = true;
+                        break;
+                    }
+                }
+            }
+            if (joinRequestFolded) {
+                eu.siacs.conversations.xmpp.manager.VerifyDeviceManager.clearPendingJoinRequest(
+                        this, accountBareJid);
+            }
+        }
+        if (joinRequestFullJid != null && !pending && !joinRequestFolded) {
             mJoinRequestBanner.setVisibility(View.VISIBLE);
             mJoinRequestTextView.setText(
                     getString(R.string.x3dhpq_join_request_text, joinRequestFullJid));
@@ -322,9 +348,7 @@ public class X3dhpqSelfDevicesActivity extends XmppActivity {
         }
 
         mDevices.clear();
-        if (!pending) {
-            mDevices.addAll(service.listAssociatedDevices());
-        }
+        mDevices.addAll(associated);
         // Task #54: enable the Revoke action for ANY trusted (folded) device, not only the
         // AIK_priv holder — a folded device authors a DIK-signed REMOVE.
         mLocalDeviceCanRevoke = !pending && service.localDeviceCanAuthorTrust();
