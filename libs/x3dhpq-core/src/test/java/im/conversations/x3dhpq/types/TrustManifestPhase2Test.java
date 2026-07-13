@@ -13,14 +13,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Trust Manifest Phase 2 — head sign/verify round-trip, migration/genesis round-trip
- * (build a genesis manifest from a 2-device set → fold yields the same 2), and a
- * confirmer-append (a trusted non-genesis device appends an ADD → the new device shows
- * up in the fold). Behaviour MUST match the Vala client's Phase-2 tests.
+ * Trust Manifest v2 — head sign/verify round-trip and SNAPSHOT lifecycle (genesis /
+ * confirmer append / revoke-by-rebuild). Behaviour MUST match the Vala client's v2 tests.
  */
 class TrustManifestPhase2Test {
-
-    // ---- helpers (mirror TrustManifestFoldTest) ----------------------------
 
     private static final class Aik {
         final byte[] edPriv, edPub, mlPriv, mlPub;
@@ -42,7 +38,7 @@ class TrustManifestPhase2Test {
             this.id = id; this.edPriv = edPriv; this.edPub = edPub;
             this.mlPriv = mlPriv; this.mlPub = mlPub; this.dc = dc;
         }
-        byte[] dcHash() { return X3dhpqCrypto.sha256(dc.marshal()); }
+        byte[] dcHash() { return X3dhpqCrypto.sha512(dc.marshal()); } // v2: SHA-512
     }
 
     /** Fresh DIK keys; DC signed by the issuer's ed/ml priv keys (issuer = AIK or a device DIK). */
@@ -60,7 +56,7 @@ class TrustManifestPhase2Test {
         return new Dev(id, ed.priv, ed.pub, ml.priv, ml.pub, dc);
     }
 
-    /** Re-issue a subject device's DC under a new issuer DIK, keeping the same DIK pubs. */
+    /** Re-issue a subject device's DC under a new issuer DIK, keeping the subject DIK pubs. */
     private static DeviceCertificate reIssue(Dev subject, byte[] issuerEdPriv, byte[] issuerMlPriv) {
         final DeviceCertificate unsigned = new DeviceCertificate(
                 1, subject.id, subject.dc.getDikPubEd25519(), subject.dc.getDikPubX25519(),
@@ -72,10 +68,30 @@ class TrustManifestPhase2Test {
                 subject.dc.getDikPubX25519(), subject.dc.getDikPubMLDSA(), 2000L, (byte) 0, sigEd, sigMl);
     }
 
-    private static List<byte[]> parents(byte[]... hs) {
-        final List<byte[]> l = new ArrayList<>();
-        for (final byte[] h : hs) if (h != null) l.add(h);
-        return l;
+    /** Genesis entry: self-authored, AIK-signed. */
+    private static TrustEntry genesis(Aik aik, Dev self) {
+        return TrustEntry.signNew(TrustEntry.ACTION_ADD, self.id, self.dc,
+                self.id, self.dcHash(), 0L, aik.edPriv, aik.mlPriv);
+    }
+
+    /** A member ADD authored by the genesis/publisher device (DC re-issued under its DIK). */
+    private static TrustEntry memberAdd(Dev genesisDev, Dev member) {
+        final DeviceCertificate reissued = reIssue(member, genesisDev.edPriv, genesisDev.mlPriv);
+        member.dc = reissued; // reflect the DC as it appears in the snapshot
+        return TrustEntry.signNew(TrustEntry.ACTION_ADD, member.id, reissued,
+                genesisDev.id, genesisDev.dcHash(), 1L, genesisDev.edPriv, genesisDev.mlPriv);
+    }
+
+    /** Build a signed snapshot: genesis(self) + one member ADD per other dev, head under self DIK. */
+    private static TrustManifest snapshot(Aik aik, Dev self, long version, byte[] prevHash, Dev... members) {
+        final List<TrustEntry> es = new ArrayList<>();
+        es.add(genesis(aik, self));
+        for (final Dev mDev : members) {
+            if (mDev.id == self.id) continue;
+            es.add(memberAdd(self, mDev));
+        }
+        return new TrustManifest(version, prevHash, aik.pub, es, new byte[0], new byte[0])
+                .signHead(self.edPriv, self.mlPriv);
     }
 
     // ---- §B: head sign/verify round-trip -----------------------------------
@@ -84,57 +100,32 @@ class TrustManifestPhase2Test {
     void headSignVerifyRoundTrip() {
         final Aik aik = new Aik();
         final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
-        final TrustEntry g = TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc, 0L, parents(),
-                d1.id, d1.dcHash(), 0L, aik.edPriv, aik.mlPriv);
-
         final List<TrustEntry> es = new ArrayList<>();
-        es.add(g);
-        final TrustManifest unsigned = new TrustManifest(1L, new byte[32], aik.pub, es, new byte[0], new byte[0]);
+        es.add(genesis(aik, d1));
+        final TrustManifest unsigned = new TrustManifest(1L, new byte[64], aik.pub, es, new byte[0], new byte[0]);
 
         final TrustManifest signed = unsigned.signHead(d1.edPriv, d1.mlPriv);
         assertTrue(signed.verifyHead(d1.edPub, d1.mlPub), "head verifies under the signer's DIK");
 
-        // Wrong device DIK must fail.
         final Dev other = issueDevice(9L, aik.edPriv, aik.mlPriv);
         assertFalse(signed.verifyHead(other.edPub, other.mlPub), "head fails under a different DIK");
 
-        // Marshal round-trip preserves the head signature.
         final TrustManifest re = TrustManifest.unmarshal(signed.marshal());
         assertNotNull(re);
         assertArrayEquals(signed.marshal(), re.marshal());
         assertTrue(re.verifyHead(d1.edPub, d1.mlPub));
     }
 
-    // ---- §D1: migration / genesis round-trip -------------------------------
+    // ---- §D1: migration / genesis snapshot round-trip ----------------------
 
-    /**
-     * Primary (d1, holds AIK) builds a genesis manifest from a 2-device authorized set
-     * {d1, d2}: genesis ADD(d1) AIK-signed; ADD(d2) with d2's DC re-issued under d1's DIK,
-     * entry signed under d1's DIK; head signed under d1's DIK. Fold → {d1, d2}.
-     */
     @Test
     void migrationGenesisRoundTrip() {
         final Aik aik = new Aik();
-        final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);          // self DC under AIK
+        final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);          // self / genesis
         final Dev d2 = issueDevice(2L, aik.edPriv, aik.mlPriv);          // originally under AIK
 
-        // Genesis: self-authored, AIK-signed.
-        final TrustEntry g = TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc, 0L, parents(),
-                d1.id, d1.dcHash(), 0L, aik.edPriv, aik.mlPriv);
+        final TrustManifest m = snapshot(aik, d1, 5L, new byte[64], d2); // d2 re-issued under d1 DIK
 
-        // Re-issue d2's DC under the primary's (d1's) DIK, then append a DIK-signed ADD.
-        d2.dc = reIssue(d2, d1.edPriv, d1.mlPriv);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
-
-        final List<TrustEntry> es = new ArrayList<>();
-        es.add(g);
-        es.add(addD2);
-        final TrustManifest m =
-                new TrustManifest(5L, new byte[32], aik.pub, es, new byte[0], new byte[0])
-                        .signHead(d1.edPriv, d1.mlPriv);
-
-        // Head is signed by d1, which is in the fold.
         final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(m);
         assertEquals(2, trusted.size());
         assertTrue(trusted.containsKey(1L));
@@ -142,163 +133,51 @@ class TrustManifestPhase2Test {
         assertTrue(m.verifyHead(trusted.get(1L).getDikPubEd25519(), trusted.get(1L).getDikPubMLDSA()),
                 "head signer d1 is a folded device");
 
-        // Marshal/unmarshal round-trip preserves fold.
         final TrustManifest re = TrustManifest.unmarshal(m.marshal());
         assertNotNull(re);
         assertEquals(2, TrustManifest.fold(re).size());
     }
 
-    // ---- §D2: confirmer-append ---------------------------------------------
+    // ---- §D2: confirmer (primary) rebuilds the snapshot with the newcomer --
 
-    /**
-     * From a migrated {d1,d2} manifest, a trusted non-genesis device (d2) confirms a new
-     * device d3: d3's DC issued under d2's (confirmer's) DIK, entry signed under d2's DIK,
-     * appended at the current heads. Fold → {d1, d2, d3}.
-     */
     @Test
     void confirmerAppendsAdd() {
         final Aik aik = new Aik();
         final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
         final Dev d2 = issueDevice(2L, aik.edPriv, aik.mlPriv);
+        final TrustManifest m1 = snapshot(aik, d1, 5L, new byte[64], d2);
+        assertEquals(2, TrustManifest.fold(m1).size());
 
-        final TrustEntry g = TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc, 0L, parents(),
-                d1.id, d1.dcHash(), 0L, aik.edPriv, aik.mlPriv);
-        d2.dc = reIssue(d2, d1.edPriv, d1.mlPriv);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
-
-        final List<TrustEntry> es = new ArrayList<>();
-        es.add(g);
-        es.add(addD2);
-        TrustManifest m = new TrustManifest(5L, new byte[32], aik.pub, es, new byte[0], new byte[0])
-                .signHead(d1.edPriv, d1.mlPriv);
-
-        // Confirmer = d2 (non-genesis, trusted). New device d3, DC under d2's DIK.
-        final Dev d3 = issueDevice(3L, d2.edPriv, d2.mlPriv);
-        final List<byte[]> heads = m.currentHeads();
-        final long lam = m.nextLamport();
-        final TrustEntry addD3 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3.id, d3.dc, lam,
-                heads, d2.id, d2.dcHash(), 2L, d2.edPriv, d2.mlPriv);
-
-        final List<TrustEntry> es2 = new ArrayList<>(m.getEntries());
-        es2.add(addD3);
-        final byte[] prevHash = m.computeHash();
-        final TrustManifest m2 =
-                new TrustManifest(m.getVersion() + 1, prevHash, aik.pub, es2, new byte[0], new byte[0])
-                        .signHead(d2.edPriv, d2.mlPriv); // confirmer (d2) publishes → signs head
+        // Newcomer d3: the primary (d1) republishes a fresh snapshot {d1, d2, d3} at version+1.
+        final Dev d3 = issueDevice(3L, d1.edPriv, d1.mlPriv);
+        final TrustManifest m2 = snapshot(aik, d1, m1.getVersion() + 1L, m1.computeHash(), d2, d3);
 
         final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(m2);
         assertEquals(3, trusted.size());
         assertTrue(trusted.containsKey(1L));
         assertTrue(trusted.containsKey(2L));
         assertTrue(trusted.containsKey(3L));
-        // Head signer (d2) is a folded device.
-        assertTrue(m2.verifyHead(trusted.get(2L).getDikPubEd25519(), trusted.get(2L).getDikPubMLDSA()));
+        assertTrue(m2.verifyHead(trusted.get(1L).getDikPubEd25519(), trusted.get(1L).getDikPubMLDSA()));
+        assertArrayEquals(m1.computeHash(), m2.getPrevHash(), "prev_hash chains to the previous snapshot");
     }
 
-    // ---- §D4: revoke via DIK-signed REMOVE by a trusted (non-genesis) device ----
+    // ---- §D4: revoke = rebuild the snapshot WITHOUT the target -------------
 
-    /**
-     * Genesis d1 adds d2 (the revoker A) and d3 (the target B). A trusted NON-genesis
-     * device (d2) authors a DIK-signed REMOVE of d3 → fold excludes d3. A concurrent
-     * (non-descendant) re-ADD of d3 by d1 loses (removal-wins in TrustManifest.fold).
-     */
     @Test
-    void revokeByTrustedDeviceExcludesTarget() {
+    void revokeRebuildsSnapshotWithoutTarget() {
         final Aik aik = new Aik();
-        final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);          // genesis / primary
-        final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);            // A: the revoker
-        final Dev d3 = issueDevice(3L, d1.edPriv, d1.mlPriv);            // B: the target
-        final Dev d3b = issueDevice(3L, d1.edPriv, d1.mlPriv);          // fresh cert, same id, for re-add
+        final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
+        final Dev d2 = issueDevice(2L, aik.edPriv, aik.mlPriv);
+        final Dev d3 = issueDevice(3L, aik.edPriv, aik.mlPriv);
+        final TrustManifest m1 = snapshot(aik, d1, 5L, new byte[64], d2, d3);
+        assertEquals(3, TrustManifest.fold(m1).size());
 
-        final TrustEntry g = TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc, 0L, parents(),
-                d1.id, d1.dcHash(), 0L, aik.edPriv, aik.mlPriv);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
-        final TrustEntry addD3 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3.id, d3.dc, 2L,
-                parents(addD2.computeHash()), d1.id, d1.dcHash(), 2L, d1.edPriv, d1.mlPriv);
-        final byte[] head = addD3.computeHash();
-
-        // Sanity: all three trusted before the revoke.
-        final Map<Long, DeviceCertificate> before =
-                TrustManifest.fold(manifest(aik, g, addD2, addD3));
-        assertEquals(3, before.size());
-
-        // d2 (trusted non-genesis) REMOVEs d3, carrying d3's current DC, signed under d2's DIK.
-        final TrustEntry removeD3 = TrustEntry.signNew(TrustEntry.ACTION_REMOVE, d3.id, d3.dc, 3L,
-                parents(head), d2.id, d2.dcHash(), 3L, d2.edPriv, d2.mlPriv);
-
-        final Map<Long, DeviceCertificate> afterRevoke =
-                TrustManifest.fold(manifest(aik, g, addD2, addD3, removeD3));
-        assertEquals(2, afterRevoke.size(), "revoke excludes the target from the fold");
-        assertTrue(afterRevoke.containsKey(1L));
-        assertTrue(afterRevoke.containsKey(2L));
-        assertFalse(afterRevoke.containsKey(3L), "revoked device B is no longer trusted");
-
-        // Concurrent (non-descendant sibling of the REMOVE) re-ADD of d3 by d1 must lose.
-        final TrustEntry reAddD3 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3b.id, d3b.dc, 3L,
-                parents(head), d1.id, d1.dcHash(), 4L, d1.edPriv, d1.mlPriv);
-        final Map<Long, DeviceCertificate> afterConcurrentReadd =
-                TrustManifest.fold(manifest(aik, g, addD2, addD3, removeD3, reAddD3));
-        assertFalse(afterConcurrentReadd.containsKey(3L),
-                "removal wins over a concurrent (non-descendant) re-add");
-        assertEquals(2, afterConcurrentReadd.size());
-    }
-
-    private static TrustManifest manifest(Aik aik, TrustEntry... entries) {
-        final List<TrustEntry> list = new ArrayList<>();
-        for (final TrustEntry e : entries) list.add(e);
-        return new TrustManifest(1L, new byte[32], aik.pub, list, new byte[0], new byte[0]);
-    }
-
-    // ---- Account reset (task #55): fresh self-only genesis under a NEW AIK ------
-
-    /**
-     * The reset producer's output: a device keeps its DIK but mints a NEW AIK, self-issues
-     * a new genesis DC under it, and roots a SELF-ONLY manifest at version=1 / prev_hash=0,
-     * genesis AIK-signed, head signed under its DIK. It folds to exactly {self} and its AIK
-     * is a distinct lineage from any prior manifest — so a receiver treats it as a re-pin,
-     * NOT a rollback of the old-AIK lineage (that lineage branch is enforced in the app
-     * gate, which checks aik-mismatch BEFORE the version&lt;last_seen guard).
-     */
-    @Test
-    void resetFreshGenesisSelfOnlyUnderNewAik() {
-        // Old lineage (some prior manifest at a high version under the old AIK).
-        final Aik oldAik = new Aik();
-        final Dev oldSelf = issueDevice(7L, oldAik.edPriv, oldAik.mlPriv);
-        final TrustEntry oldGenesis = TrustEntry.signNew(TrustEntry.ACTION_ADD, oldSelf.id, oldSelf.dc,
-                0L, parents(), oldSelf.id, oldSelf.dcHash(), 0L, oldAik.edPriv, oldAik.mlPriv);
-        final TrustManifest oldManifest =
-                new TrustManifest(42L, new byte[32], oldAik.pub, java.util.List.of(oldGenesis),
-                        new byte[0], new byte[0]).signHead(oldSelf.edPriv, oldSelf.mlPriv);
-
-        // Reset: NEW AIK, SAME device keeps its DIK, new self-issued genesis DC under new AIK.
-        final Aik newAik = new Aik();
-        final DeviceCertificate newDc = reIssue(oldSelf, newAik.edPriv, newAik.mlPriv); // under new AIK
-        final Dev self = new Dev(oldSelf.id, oldSelf.edPriv, oldSelf.edPub,
-                oldSelf.mlPriv, oldSelf.mlPub, newDc);
-        final TrustEntry genesis = TrustEntry.signNew(TrustEntry.ACTION_ADD, self.id, self.dc,
-                0L, parents(), self.id, self.dcHash(), 0L, newAik.edPriv, newAik.mlPriv);
-        final TrustManifest fresh =
-                new TrustManifest(1L, new byte[32], newAik.pub, java.util.List.of(genesis),
-                        new byte[0], new byte[0]).signHead(self.edPriv, self.mlPriv);
-
-        // version=1, prev_hash all-zero, distinct AIK lineage.
-        assertEquals(1L, fresh.getVersion());
-        for (final byte b : fresh.getPrevHash()) assertEquals(0, b, "genesis prev_hash is 32 zero bytes");
-        assertFalse(java.util.Arrays.equals(oldAik.pub.marshal(), newAik.pub.marshal()),
-                "reset re-pins under a NEW AIK lineage");
-
-        // Fresh genesis folds to exactly {self} and its head verifies under the (kept) DIK.
-        final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(fresh);
-        assertEquals(1, trusted.size());
-        assertTrue(trusted.containsKey(self.id));
-        assertTrue(fresh.verifyHead(self.edPub, self.mlPub), "head verifies under the device's kept DIK");
-
-        // The old lineage still folds independently to its own self — the two are unrelated
-        // (a receiver must NOT judge the version=1 fresh genesis against the old lineage).
-        assertEquals(1, TrustManifest.fold(oldManifest).size());
-        assertTrue(oldManifest.getVersion() > fresh.getVersion(),
-                "old lineage is at a higher version, yet the reset's version=1 is a NEW lineage");
+        // Revoke d2: republish a fresh snapshot asserting {d1, d3} only at version+1.
+        final TrustManifest m2 = snapshot(aik, d1, m1.getVersion() + 1L, m1.computeHash(), d3);
+        final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(m2);
+        assertEquals(2, trusted.size());
+        assertTrue(trusted.containsKey(1L));
+        assertTrue(trusted.containsKey(3L));
+        assertFalse(trusted.containsKey(2L), "a revoked device is simply absent from the new snapshot");
     }
 }

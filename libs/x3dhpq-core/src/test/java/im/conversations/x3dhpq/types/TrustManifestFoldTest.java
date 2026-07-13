@@ -13,9 +13,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Trust Manifest Phase 1 — functional fold tests with REAL generated keys (actually sign
- * &amp; verify). Mirrors {@link DeviceDagTest}'s discipline; behaviour MUST match the Vala
- * client's tests/trust_manifest.vala.
+ * Trust Manifest v2 — functional SNAPSHOT fold tests with REAL generated keys (actually
+ * sign &amp; verify). Behaviour MUST match the Vala client's tests/trust_manifest.vala v2.
+ *
+ * <p>v2 fold: one genesis (self-authored, AIK-signed) + ADD entries authored by the genesis
+ * device, ordered by device_id. No lamport/parents/topo-sort, no REMOVE/removal-wins — a
+ * revoked device is simply absent from the snapshot.
  */
 class TrustManifestFoldTest {
 
@@ -41,7 +44,7 @@ class TrustManifestFoldTest {
             this.id = id; this.edPriv = edPriv; this.edPub = edPub;
             this.mlPriv = mlPriv; this.mlPub = mlPub; this.dc = dc;
         }
-        byte[] dcHash() { return X3dhpqCrypto.sha256(dc.marshal()); }
+        byte[] dcHash() { return X3dhpqCrypto.sha512(dc.marshal()); } // v2: SHA-512
     }
 
     // Issue a device: fresh DIK keys, DC signed by the issuer's ed/ml private keys.
@@ -59,33 +62,32 @@ class TrustManifestFoldTest {
         return new Dev(id, ed.priv, ed.pub, ml.priv, ml.pub, dc);
     }
 
-    private static List<byte[]> parents(byte[]... hs) {
-        final List<byte[]> l = new ArrayList<>();
-        for (final byte[] h : hs) if (h != null) l.add(h);
-        return l;
-    }
-
     private static TrustManifest manifest(Aik aik, TrustEntry... entries) {
         final List<TrustEntry> list = new ArrayList<>();
         for (final TrustEntry e : entries) list.add(e);
-        return new TrustManifest(1L, new byte[32], aik.pub, list, new byte[0], new byte[0]);
+        return new TrustManifest(1L, new byte[64], aik.pub, list, new byte[0], new byte[0]);
     }
 
     // Genesis entry: self-authored, AIK-signed.
     private static TrustEntry genesis(Aik aik, Dev d1) {
-        return TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc, 0L, parents(),
+        return TrustEntry.signNew(TrustEntry.ACTION_ADD, d1.id, d1.dc,
                 d1.id, d1.dcHash(), 0L, aik.edPriv, aik.mlPriv);
+    }
+
+    // A member ADD authored by the genesis device (signed under its DIK).
+    private static TrustEntry memberAdd(Dev genesisDev, Dev member) {
+        return TrustEntry.signNew(TrustEntry.ACTION_ADD, member.id, member.dc,
+                genesisDev.id, genesisDev.dcHash(), 1L, genesisDev.edPriv, genesisDev.mlPriv);
     }
 
     @Test
     void genesisPlusDelegatedAdd() {
         final Aik aik = new Aik();
         final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);           // DC under AIK
-        final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);             // DC under D1's DIK
+        final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);             // DC re-issued under D1's DIK
 
         final TrustEntry g = genesis(aik, d1);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
+        final TrustEntry addD2 = memberAdd(d1, d2);
 
         final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(manifest(aik, g, addD2));
         assertEquals(2, trusted.size());
@@ -98,45 +100,55 @@ class TrustManifestFoldTest {
         final Aik aik = new Aik();
         final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
         final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);
-        // A rogue device NOT authorized in the DAG, with its own random DIK.
+        // A rogue device NOT the genesis, with its own random DIK.
         final Dev rogue = issueDevice(99L, aik.edPriv, aik.mlPriv);
         final Dev d3 = issueDevice(3L, rogue.edPriv, rogue.mlPriv);
 
         final TrustEntry g = genesis(aik, d1);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
-        // Authored by rogue (99), which is not in trusted => must be dropped.
-        final TrustEntry badAdd = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3.id, d3.dc, 2L,
-                parents(addD2.computeHash()), rogue.id, rogue.dcHash(), 2L, rogue.edPriv, rogue.mlPriv);
+        final TrustEntry addD2 = memberAdd(d1, d2);
+        // Authored by rogue (99), which is NOT the genesis device => must be dropped.
+        final TrustEntry badAdd = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3.id, d3.dc,
+                rogue.id, rogue.dcHash(), 2L, rogue.edPriv, rogue.mlPriv);
 
         final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(manifest(aik, g, addD2, badAdd));
-        assertEquals(2, trusted.size(), "one bad entry is dropped, not fatal");
+        assertEquals(2, trusted.size(), "one bad (non-genesis-authored) entry is dropped, not fatal");
         assertTrue(trusted.containsKey(1L));
         assertTrue(trusted.containsKey(2L));
         assertFalse(trusted.containsKey(3L));
     }
 
     @Test
-    void removalWinsOverSiblingReAdd() {
+    void wrongAuthorDcHashDropped() {
         final Aik aik = new Aik();
         final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
         final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);
-        final Dev d2b = issueDevice(2L, d1.edPriv, d1.mlPriv); // fresh cert, same device id
 
         final TrustEntry g = genesis(aik, d1);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
-        final byte[] addD2h = addD2.computeHash();
-        // Concurrent siblings on addD2: remove D2 vs re-add D2 with a fresh cert.
-        final TrustEntry rem = TrustEntry.signNew(TrustEntry.ACTION_REMOVE, d2.id, d2.dc, 2L,
-                parents(addD2h), d1.id, d1.dcHash(), 2L, d1.edPriv, d1.mlPriv);
-        final TrustEntry readd = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2b.id, d2b.dc, 2L,
-                parents(addD2h), d1.id, d1.dcHash(), 3L, d1.edPriv, d1.mlPriv);
+        // Author is the genesis (d1) and the sig verifies, but author_dc_hash is wrong (64x0x00).
+        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc,
+                d1.id, new byte[64], 1L, d1.edPriv, d1.mlPriv);
 
-        final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(manifest(aik, g, addD2, rem, readd));
+        final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(manifest(aik, g, addD2));
+        assertEquals(1, trusted.size(), "author_dc_hash mismatch drops the entry");
         assertTrue(trusted.containsKey(1L));
-        assertFalse(trusted.containsKey(2L), "removal wins over a concurrent (non-descendant) re-add");
-        assertEquals(1, trusted.size());
+        assertFalse(trusted.containsKey(2L));
+    }
+
+    @Test
+    void revokedDeviceAbsentFromSnapshot() {
+        // v2 has no REMOVE — revoking d2 just means it is not in the republished snapshot.
+        final Aik aik = new Aik();
+        final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
+        final Dev d3 = issueDevice(3L, d1.edPriv, d1.mlPriv);
+
+        final TrustEntry g = genesis(aik, d1);
+        final TrustEntry addD3 = memberAdd(d1, d3); // d2 simply omitted
+
+        final Map<Long, DeviceCertificate> trusted = TrustManifest.fold(manifest(aik, g, addD3));
+        assertEquals(2, trusted.size());
+        assertTrue(trusted.containsKey(1L));
+        assertTrue(trusted.containsKey(3L));
+        assertFalse(trusted.containsKey(2L), "a revoked device is simply absent from the snapshot");
     }
 
     @Test
@@ -144,22 +156,17 @@ class TrustManifestFoldTest {
         final Aik aik = new Aik();
         final Dev d1 = issueDevice(1L, aik.edPriv, aik.mlPriv);
         final Dev d2 = issueDevice(2L, d1.edPriv, d1.mlPriv);
-        final Dev d3 = issueDevice(3L, d2.edPriv, d2.mlPriv); // added by D2
-        final Dev d4 = issueDevice(4L, d1.edPriv, d1.mlPriv); // added by D1
+        final Dev d3 = issueDevice(3L, d1.edPriv, d1.mlPriv);
+        final Dev d4 = issueDevice(4L, d1.edPriv, d1.mlPriv);
 
         final TrustEntry g = genesis(aik, d1);
-        final TrustEntry addD2 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d2.id, d2.dc, 1L,
-                parents(g.computeHash()), d1.id, d1.dcHash(), 1L, d1.edPriv, d1.mlPriv);
-        final byte[] head = addD2.computeHash();
-        // Two concurrent ADDs from the same head.
-        final TrustEntry d2addsD3 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d3.id, d3.dc, 2L,
-                parents(head), d2.id, d2.dcHash(), 2L, d2.edPriv, d2.mlPriv);
-        final TrustEntry d1addsD4 = TrustEntry.signNew(TrustEntry.ACTION_ADD, d4.id, d4.dc, 2L,
-                parents(head), d1.id, d1.dcHash(), 3L, d1.edPriv, d1.mlPriv);
+        final TrustEntry addD2 = memberAdd(d1, d2);
+        final TrustEntry addD3 = memberAdd(d1, d3);
+        final TrustEntry addD4 = memberAdd(d1, d4);
 
-        final Map<Long, DeviceCertificate> a = TrustManifest.fold(manifest(aik, g, addD2, d2addsD3, d1addsD4));
-        final Map<Long, DeviceCertificate> b = TrustManifest.fold(manifest(aik, d1addsD4, d2addsD3, addD2, g));
-        assertEquals(a.keySet(), b.keySet(), "fold converges regardless of input order");
+        final Map<Long, DeviceCertificate> a = TrustManifest.fold(manifest(aik, g, addD2, addD3, addD4));
+        final Map<Long, DeviceCertificate> b = TrustManifest.fold(manifest(aik, addD4, addD2, g, addD3));
+        assertEquals(a.keySet(), b.keySet(), "fold converges regardless of input order (sorted by device_id)");
         assertTrue(a.containsKey(1L) && a.containsKey(2L) && a.containsKey(3L) && a.containsKey(4L));
     }
 

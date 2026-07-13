@@ -5,34 +5,32 @@ import im.conversations.x3dhpq.crypto.X3dhpqCrypto;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
- * Trust Manifest — Phase 1: a single delegation entry in the account trust DAG.
- * Byte-compatible with the Dino (Vala) {@code trust_manifest.vala} implementation.
+ * Trust Manifest v2 — a single membership entry in the account trust SNAPSHOT.
+ * Byte-compatible with the Dino (Vala) {@code trust_manifest.vala} v2 implementation.
  *
- * <p>Unlike {@link DeviceAuditEntryV2} (single-AIK authority), a TrustEntry is authored
- * by ANY currently-trusted device (delegation): the entry is signed by the AUTHOR
- * device's DIK, except the genesis entry which is self-authored and signed by the
- * account AIK. Authorization is a fold over the DAG (see {@link TrustManifest#fold}).
+ * <p>v2 drops the v1 DAG fields ({@code lamport}, {@code parent_count}, {@code parents[]}):
+ * the manifest is a COMPACT SNAPSHOT of the current members (no history), so no DAG
+ * ordering is needed. All manifest hashing switches from SHA-256 to SHA-512.
+ *
+ * <p>Every entry is authored by the genesis/publisher device: the entry is signed by the
+ * AUTHOR device's DIK, except the genesis entry which is self-authored and signed by the
+ * account AIK. Authorization is a fold over the snapshot (see {@link TrustManifest#fold}).
  *
  * <p>signed_part layout (all integers big-endian):
  * <pre>
- *   "X3DHPQ-TrustEntry-v1\0" (21)
- *   action             uint8            1 = ADD, 2 = REMOVE
+ *   "X3DHPQ-TrustEntry-v2\0" (21)
+ *   action             uint8            1 = ADD (REMOVE is unused; value always 1)
  *   device_id          uint32           the SUBJECT device id
  *   dc_len             uint16           length of dc_bytes
  *   dc_bytes           dc_len bytes     DeviceCertificate.marshal() of the subject
- *   lamport            uint64
- *   parent_count       uint32
- *   parents[N]         32 bytes each    SHA-256(parent TrustEntry.marshal()), raw, no len prefix
- *   author_device_id   uint32           the EDITOR device id (== device_id for genesis)
- *   author_dc_hash     32 bytes         SHA-256(author's DeviceCertificate.marshal()), raw
+ *   author_device_id   uint32           the AUTHOR device id (== device_id for genesis)
+ *   author_dc_hash     64 bytes         SHA-512(author's DeviceCertificate.marshal()), raw
  *   timestamp          uint64           unix seconds (int64 cast to uint64)
  * </pre>
  * marshal = signed_part | uint16 sigEdLen | sigEd | uint16 sigMlLen | sigMl;
- * entry_hash = SHA-256(marshal).
+ * entry_hash = SHA-512(marshal).
  */
 public final class TrustEntry {
 
@@ -40,28 +38,24 @@ public final class TrustEntry {
     public static final int ACTION_REMOVE = 2;
 
     static final byte[] PREFIX = {
-        'X','3','D','H','P','Q','-','T','r','u','s','t','E','n','t','r','y','-','v','1', 0x00
+        'X','3','D','H','P','Q','-','T','r','u','s','t','E','n','t','r','y','-','v','2', 0x00
     };
 
     private final int action;               // uint8
     private final long deviceId;            // uint32, subject
     private final DeviceCertificate dc;     // subject device certificate
-    private final long lamport;             // uint64
-    private final List<byte[]> parents;     // each 32 bytes
-    private final long authorDeviceId;      // uint32, editor
-    private final byte[] authorDcHash;      // 32 bytes
+    private final long authorDeviceId;      // uint32, author
+    private final byte[] authorDcHash;      // 64 bytes (SHA-512)
     private final long timestamp;           // int64 as uint64
     private final byte[] sigEd;
     private final byte[] sigMl;
 
-    public TrustEntry(int action, long deviceId, DeviceCertificate dc, long lamport,
-                      List<byte[]> parents, long authorDeviceId, byte[] authorDcHash,
+    public TrustEntry(int action, long deviceId, DeviceCertificate dc,
+                      long authorDeviceId, byte[] authorDcHash,
                       long timestamp, byte[] sigEd, byte[] sigMl) {
         this.action = action;
         this.deviceId = deviceId;
         this.dc = dc;
-        this.lamport = lamport;
-        this.parents = parents == null ? new ArrayList<>() : parents;
         this.authorDeviceId = authorDeviceId;
         this.authorDcHash = authorDcHash;
         this.timestamp = timestamp;
@@ -72,8 +66,6 @@ public final class TrustEntry {
     public int getAction() { return action; }
     public long getDeviceId() { return deviceId; }
     public DeviceCertificate getDc() { return dc; }
-    public long getLamport() { return lamport; }
-    public List<byte[]> getParents() { return parents; }
     public long getAuthorDeviceId() { return authorDeviceId; }
     public byte[] getAuthorDcHash() { return authorDcHash; }
     public long getTimestamp() { return timestamp; }
@@ -83,18 +75,15 @@ public final class TrustEntry {
     public byte[] signedPart() {
         final byte[] dcBytes = dc.marshal();
         final int size = PREFIX.length + 1 + 4 + 2 + dcBytes.length
-                + 8 + 4 + parents.size() * 32 + 4 + 32 + 8;
+                + 4 + 64 + 8;
         final ByteBuffer buf = ByteBuffer.allocate(size).order(ByteOrder.BIG_ENDIAN);
         buf.put(PREFIX);
         buf.put((byte) action);
         buf.putInt((int) (deviceId & 0xFFFFFFFFL));
         buf.putShort((short) (dcBytes.length & 0xFFFF));
         buf.put(dcBytes);
-        buf.putLong(lamport);
-        buf.putInt(parents.size());
-        for (final byte[] p : parents) buf.put(p, 0, 32);
         buf.putInt((int) (authorDeviceId & 0xFFFFFFFFL));
-        buf.put(authorDcHash, 0, 32);
+        buf.put(authorDcHash, 0, 64);
         buf.putLong(timestamp);
         return buf.array();
     }
@@ -113,7 +102,7 @@ public final class TrustEntry {
     }
 
     public byte[] computeHash() {
-        return X3dhpqCrypto.sha256(marshal());
+        return X3dhpqCrypto.sha512(marshal());
     }
 
     /** Both hybrid signatures MUST verify under the given DIK/AIK pubs over signed_part. */
@@ -136,7 +125,7 @@ public final class TrustEntry {
 
     /** Parse from wire; returns null on any malformed input. */
     public static TrustEntry unmarshal(byte[] b) {
-        final int min = PREFIX.length + 1 + 4 + 2 + 8 + 4 + 4 + 32 + 8 + 2 + 2;
+        final int min = PREFIX.length + 1 + 4 + 2 + 4 + 64 + 8 + 2 + 2;
         if (b == null || b.length < min) return null;
         for (int i = 0; i < PREFIX.length; i++) if (b[i] != PREFIX[i]) return null;
         try {
@@ -154,20 +143,9 @@ public final class TrustEntry {
             } catch (final RuntimeException ex) {
                 return null;
             }
-            if (buf.remaining() < 8 + 4) return null;
-            final long lamport = buf.getLong();
-            final long pcLong = buf.getInt() & 0xFFFFFFFFL;
-            if (pcLong > 4096) return null;
-            final int pc = (int) pcLong;
-            if ((long) buf.position() + (long) pc * 32 + 4 + 32 + 8 + 2 + 2 > b.length) return null;
-            final List<byte[]> parents = new ArrayList<>(pc);
-            for (int i = 0; i < pc; i++) {
-                final byte[] p = new byte[32];
-                buf.get(p);
-                parents.add(p);
-            }
+            if (buf.remaining() < 4 + 64 + 8 + 2 + 2) return null;
             final long authorDeviceId = buf.getInt() & 0xFFFFFFFFL;
-            final byte[] authorDcHash = new byte[32];
+            final byte[] authorDcHash = new byte[64];
             buf.get(authorDcHash);
             final long timestamp = buf.getLong();
             final int sl = buf.getShort() & 0xFFFF;
@@ -178,7 +156,7 @@ public final class TrustEntry {
             if ((long) buf.position() + ml > b.length) return null;
             final byte[] sigMl = new byte[ml];
             buf.get(sigMl);
-            return new TrustEntry(action, deviceId, dc, lamport, parents, authorDeviceId,
+            return new TrustEntry(action, deviceId, dc, authorDeviceId,
                     authorDcHash, timestamp, sigEd, sigMl);
         } catch (final RuntimeException e) {
             return null;
@@ -192,20 +170,20 @@ public final class TrustEntry {
     }
 
     /**
-     * Build a fully signed TrustEntry. For the genesis entry pass the account AIK's
+     * Build a fully signed TrustEntry (v2). For the genesis entry pass the account AIK's
      * private keys (edPriv/mlPriv); for a delegated entry pass the author device DIK's
      * private keys. Mirrors the DeviceAuditEntryV2.signNew discipline so live-emitted
      * entries are byte-identical to unit-tested vectors.
      */
-    public static TrustEntry signNew(int action, long deviceId, DeviceCertificate dc, long lamport,
-                                     List<byte[]> parents, long authorDeviceId, byte[] authorDcHash,
+    public static TrustEntry signNew(int action, long deviceId, DeviceCertificate dc,
+                                     long authorDeviceId, byte[] authorDcHash,
                                      long timestamp, byte[] edPriv, byte[] mlPriv) {
-        final TrustEntry unsigned = new TrustEntry(action, deviceId, dc, lamport, parents,
+        final TrustEntry unsigned = new TrustEntry(action, deviceId, dc,
                 authorDeviceId, authorDcHash, timestamp, new byte[0], new byte[0]);
         final byte[] sp = unsigned.signedPart();
         final byte[] sigEd = X3dhpqCrypto.ed25519Sign(edPriv, sp);
         final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(mlPriv, sp);
-        return new TrustEntry(action, deviceId, dc, lamport, parents, authorDeviceId,
+        return new TrustEntry(action, deviceId, dc, authorDeviceId,
                 authorDcHash, timestamp, sigEd, sigMl);
     }
 }

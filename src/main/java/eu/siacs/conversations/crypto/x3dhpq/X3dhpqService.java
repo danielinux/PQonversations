@@ -1718,35 +1718,29 @@ public class X3dhpqService {
             return null;
         }
         final long ts = System.currentTimeMillis() / 1000L;
-        final byte[] selfDcHash = X3dhpqCrypto.sha256(selfDc.marshal());
+        final byte[] selfDcHash = X3dhpqCrypto.sha512(selfDc.marshal());
 
-        // Genesis entry (AIK-signed): this device roots the snapshot.
+        // Genesis entry (AIK-signed): this device roots the snapshot. v2 = no lamport/parents.
         final TrustEntry genesis = TrustEntry.signNew(
-                TrustEntry.ACTION_ADD, selfId, selfDc, 0L, new ArrayList<>(),
+                TrustEntry.ACTION_ADD, selfId, selfDc,
                 selfId, selfDcHash, ts, aik.getPrivEd25519(), aik.getPrivMLDSA());
         final List<TrustEntry> entries = new ArrayList<>();
         entries.add(genesis);
 
         // One DIK-signed ADD per OTHER current member (DC re-issued under this device's DIK).
-        // Sorted by id for determinism; fold() is order-independent so this stays Dino-compatible.
+        // Sorted by id for determinism; fold() orders by device_id so this stays Dino-compatible.
         final List<Long> otherIds = new ArrayList<>(members.keySet());
         otherIds.sort(java.util.Comparator.naturalOrder());
-        long lamport = 1L;
-        List<byte[]> heads = new ArrayList<>();
-        heads.add(genesis.computeHash());
         for (final Long idL : otherIds) {
             if (idL == selfId) continue;
             final DeviceCertificate subjectDc = members.get(idL);
             if (subjectDc == null) continue;
             final DeviceCertificate reissued = reissueDcUnderDik(subjectDc, selfDik);
             final TrustEntry add = TrustEntry.signNew(
-                    TrustEntry.ACTION_ADD, idL, reissued, lamport, heads,
+                    TrustEntry.ACTION_ADD, idL, reissued,
                     selfId, selfDcHash, ts,
                     selfDik.getPrivEd25519(), selfDik.getPrivMLDSA());
             entries.add(add);
-            heads = new ArrayList<>();
-            heads.add(add.computeHash());
-            lamport++;
         }
 
         return new TrustManifest(version, prevHash, aikPub, entries, new byte[0], new byte[0])
@@ -1792,7 +1786,7 @@ public class X3dhpqService {
             final DatabaseBackend.X3dhpqDeviceListStateRow dlState =
                     db.loadX3dhpqDeviceListState(accountUuid, ownBare);
             final long version = (dlState != null ? dlState.version() : 0L) + 1L;
-            final TrustManifest snap = buildSnapshotManifest(members, version, new byte[32]);
+            final TrustManifest snap = buildSnapshotManifest(members, version, new byte[64]);
             if (snap == null) return; // not the primary (no AIK_priv)
             applyAndPublishOwnSnapshot(accountUuid, ownBare, snap);
             Log.d(Config.LOGTAG, LOGPREFIX + ": published GENESIS snapshot trustmanifest version="
@@ -1832,7 +1826,7 @@ public class X3dhpqService {
             final java.util.Map<Long, DeviceCertificate> members =
                     m != null ? TrustManifest.fold(m) : new java.util.HashMap<>();
             final long baseVer = m != null ? m.getVersion() : 0L;
-            final byte[] prevHash = m != null ? m.computeHash() : new byte[32];
+            final byte[] prevHash = m != null ? m.computeHash() : new byte[64];
             members.put(newcomerDc.getDeviceId() & 0xffffffffL, newcomerDc);
 
             final TrustManifest snap = buildSnapshotManifest(members, baseVer + 1L, prevHash);

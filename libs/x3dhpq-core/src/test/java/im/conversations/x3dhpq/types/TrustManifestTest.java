@@ -12,8 +12,8 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Trust Manifest Phase 1 — layout KAT for {@link TrustManifest}. The asserted constant
- * is a regression lock and MUST match the Vala client byte-for-byte.
+ * Trust Manifest v2 — layout KAT for {@link TrustManifest}. The asserted constant is a
+ * regression lock and MUST match the Vala client byte-for-byte (SHA-512 over signed_part).
  */
 class TrustManifestTest {
 
@@ -24,28 +24,30 @@ class TrustManifestTest {
         return new AccountIdentityPub(ed, mldsa);
     }
 
-    // The TRUST_MANIFEST vector: version 7, zero prev_hash, aikVector, one entry with fixed dummy sigs.
+    // The TRUST_MANIFEST_V2 vector: version 7, 64-byte zero prev_hash, aikVector, one entry
+    // with fixed dummy sigs (sigEd = 21 22 23 24 25 26, sigMl = 31 32 33).
     static TrustManifest manifestVector() {
         final byte[] entrySigEd = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26};
         final byte[] entrySigMl = {0x31, 0x32, 0x33};
         final TrustEntry entry = TrustEntryTest.trustEntryVector(entrySigEd, entrySigMl);
         final List<TrustEntry> entries = new ArrayList<>();
         entries.add(entry);
-        final byte[] prevHash = new byte[32]; // 32 zero bytes
+        final byte[] prevHash = new byte[64]; // 64 zero bytes (SHA-512-sized)
         return new TrustManifest(7L, prevHash, aikVector(), entries, new byte[0], new byte[0]);
     }
 
-    // Computed value (locked): lowercase hex of SHA-256(signed_part).
-    static final String TRUST_MANIFEST_SHA256_SIGNED_PART =
-        "6385abed72f376d53951bde1aed581d4f272e7316bbd9b9e07cc0769c69282e7";
+    // Computed value (locked): lowercase hex of SHA-512(signed_part).
+    static final String TRUST_MANIFEST_V2_SHA512_SIGNED_PART =
+        "0ee896361a7af58c9524d86f380f382af5b6f0761322e4a9c9d6258c12bef7d7"
+      + "356d8f1d16e722a9db0aa8ad09e3eb747672b73b636aca5aa49549045f9f7c9a";
 
     @Test
-    void sha256SignedPartVector() {
+    void sha512SignedPartVector() {
         final TrustManifest m = manifestVector();
-        final String hex = TrustEntry.hex(X3dhpqCrypto.sha256(m.signedPart()));
-        System.out.println("TRUST_MANIFEST sha256(signed_part) = " + hex);
+        final String hex = TrustEntry.hex(X3dhpqCrypto.sha512(m.signedPart()));
+        System.out.println("TRUST_MANIFEST_V2 sha512(signed_part) = " + hex);
         System.out.println("DC_SUBJECT.marshal().length = " + TrustEntryTest.dcSubject().marshal().length);
-        assertEquals(TRUST_MANIFEST_SHA256_SIGNED_PART, hex);
+        assertEquals(TRUST_MANIFEST_V2_SHA512_SIGNED_PART, hex);
     }
 
     @Test
@@ -60,6 +62,7 @@ class TrustManifestTest {
         assertNotNull(m2);
         assertArrayEquals(wire, m2.marshal(), "marshal->unmarshal->marshal is byte-stable");
         assertEquals(7L, m2.getVersion());
+        assertEquals(64, m2.getPrevHash().length);
         assertEquals(1, m2.getEntries().size());
     }
 }
