@@ -1209,7 +1209,7 @@
     <string name="select_all">Select all</string>
     <string name="x3dhpq_self_devices_title">x3dhpq devices</string>
     <string name="x3dhpq_add_device">Add device</string>
-    <string name="x3dhpq_aik_fp_label">AIK fingerprint</string>
+    <string name="x3dhpq_aik_fp_label">Identity fingerprint</string>
     <string name="x3dhpq_remove_device">Remove</string>
     <string name="x3dhpq_rename_device">Rename</string>
     <string name="x3dhpq_rename_device_title">Rename device</string>
@@ -1234,9 +1234,8 @@
     <string name="x3dhpq_secondary_device_detected_title">Sync with existing device</string>
     <string name="x3dhpq_secondary_device_detected_text">This account already has %1$d device(s). Enter the pairing code shown on your existing device to sync.</string>
     <string name="x3dhpq_pair_show_my_code_button">Show this device\'s code</string>
-    <string name="x3dhpq_pair_confirm_pending_device_button">Confirm a device showing its own code</string>
     <string name="x3dhpq_pending_enrollment_title">Disabled — waiting for sync</string>
-    <string name="x3dhpq_pending_enrollment_text">This device is disabled: it cannot send or receive messages for this account until an authorized device confirms it. This account already has an identity on another device — associate with it from any authorized device to confirm this one, or perform an account reset instead (this loses access to prior messages and groups).</string>
+    <string name="x3dhpq_pending_enrollment_text">This device is disabled: it cannot send or receive messages for this account until an authorized device confirms it. This account already has an identity on another device — join the existing identity from any authorized device to confirm this one, or use Account reset instead (this loses access to prior messages and groups).</string>
     <string name="x3dhpq_generate_new_identity_button">Account reset</string>
     <string name="x3dhpq_generate_new_identity_confirm_title">Reset your account?</string>
     <string name="x3dhpq_generate_new_identity_confirm">This is permanent and cannot be undone:\n\n• Your current identity (key) is permanently lost — this device mints a brand-new one, unrelated to the old key.\n• Every contact will have to manually re-verify your new identity before they will trust and accept messages from you again.\n• You will lose ALL message history from ALL groups you belong to — you are removed from every one of them until someone re-invites you.\n\nMost people should choose Cancel.</string>
@@ -1248,10 +1247,10 @@
     <string name="x3dhpq_blocked_identities_title">Contacts needing re-trust</string>
     <string name="x3dhpq_blocked_identities_help">This contact\'s identity key changed (their account may have reset it). Compare their new fingerprint out-of-band before trusting it — messages to them are paused until you do.</string>
     <string name="x3dhpq_retrust_button">Re-trust</string>
-    <string name="x3dhpq_associate_existing_identity_button">Associate with existing identity</string>
+    <string name="x3dhpq_associate_existing_identity_button">Join an existing identity</string>
     <string name="x3dhpq_confirm_waiting_device_button">Confirm a waiting device</string>
     <string name="x3dhpq_identity_revoked_title">This device was disabled — removed from the account</string>
-    <string name="x3dhpq_identity_revoked_text">Another authorized device revoked this device\'s access; it is now disabled and cannot send or receive messages for this account. Associate again with the account\'s existing identity from any authorized device, or perform an account reset instead (this loses access to prior messages and groups).</string>
+    <string name="x3dhpq_identity_revoked_text">Another authorized device revoked this device\'s access; it is now disabled and cannot send or receive messages for this account. Join the existing identity again from any authorized device, or use Account reset instead (this loses access to prior messages and groups).</string>
     <string name="x3dhpq_device_waiting_for_sync">This device isn\'t paired yet — it can\'t send encrypted messages for this account until an existing device confirms it</string>
     <string name="x3dhpq_pair_this_device_button">Pair this device</string>
     <string name="x3dhpq_join_request_title">A new device wants to join your account</string>
@@ -1265,7 +1264,7 @@
     <string name="x3dhpq_device_added_at">Added %1$s</string>
     <string name="x3dhpq_from_device">from %1$s</string>
     <string name="x3dhpq_device_fingerprint_unavailable">Fingerprint unavailable (certificate could not be parsed)</string>
-    <string name="x3dhpq_remove_device_confirm">Remove device %1$s?\n\nThis republishes your device list without it, records a signed removal in your account\'s audit chain, and tears down its sessions and pre-keys. Any messages sent to it afterwards will not be delivered to it.</string>
+    <string name="x3dhpq_remove_device_confirm">Remove device %1$s?\n\nThis updates your account\'s trusted devices to exclude it and tears down its sessions and pre-keys. Any messages sent to it afterwards will not be delivered to it.</string>
     <string name="x3dhpq_remove_this_device_confirm">Remove THIS device (%1$s) from the account?\n\nThis device will immediately lose the ability to send or receive x3dhpq messages for this account. You will need to pair it again to rejoin.</string>
     <string name="x3dhpq_manage_devices_button">Manage x3dhpq devices</string>
     <string name="x3dhpq_manage_devices_desc">Device list, pairing and identity</string>

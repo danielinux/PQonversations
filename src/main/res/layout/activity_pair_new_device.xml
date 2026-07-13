@@ -55,6 +55,6 @@
         android:id="@+id/confirm_pending_device_button"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/x3dhpq_pair_confirm_pending_device_button" />
+        android:text="@string/x3dhpq_confirm_waiting_device_button" />
 
 </LinearLayout>
