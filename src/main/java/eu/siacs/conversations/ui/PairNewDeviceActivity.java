@@ -276,7 +276,7 @@ public class PairNewDeviceActivity extends XmppActivity {
             // TODO: render QR — BarcodeProvider failed
         }
 
-        // Build FSM options: fresh random uint32 device-id, sharePrimary=false.
+        // Build FSM options with a FALLBACK random uint32 device-id, sharePrimary=false.
         //
         // Trust Manifest Phase 2 (contract §E): AIK_priv NO LONGER travels. A confirmed
         // device is authorized to manage the account by appearing in the account trust
@@ -284,6 +284,13 @@ public class PairNewDeviceActivity extends XmppActivity {
         // need AIK_priv to append. The newcomer's DC is issued under the CONFIRMER's DIK
         // (see PairingSessionService/PairingFsm), and the confirmer appends a DIK-signed
         // ADD (§D2). Forcing sharePrimary=false makes the issuance payload carry has_priv=0.
+        //
+        // Task #70: the DC MUST be issued under the newcomer's OWN device id (the one it
+        // reports in its <pair-hello>), NOT a random one — otherwise the manifest entry
+        // never matches the id the newcomer reports and re-pairing the same device creates
+        // a DUPLICATE entry. The random id below is only a fallback; both confirmer entry
+        // points (pair-hello broadcast / confirm-pending QR) rebuild mOpts via
+        // #optionsForDeviceId with the real pair-hello device id when it is available.
         final long newDeviceId = Integer.toUnsignedLong(rng.nextInt());
         mOpts = new PairingFsm.Options(newDeviceId, false, new byte[0], (byte) 0);
 
@@ -299,6 +306,16 @@ public class PairNewDeviceActivity extends XmppActivity {
         if (getIntent().getBooleanExtra(EXTRA_AUTO_CONFIRM_PENDING, false)) {
             mHandler.post(this::launchPendingDeviceQrScanner);
         }
+    }
+
+    /**
+     * Task #70: build the confirmer FSM options carrying the newcomer's REAL device id (from
+     * its {@code <pair-hello>}), so the DC the confirmer issues — and thus the trust-manifest
+     * ADD — uses the id the newcomer reports. Re-pairing the same device then updates its
+     * snapshot entry instead of adding a second one under a fresh random id.
+     */
+    private PairingFsm.Options optionsForDeviceId(final long deviceId) {
+        return new PairingFsm.Options(deviceId, false, new byte[0], (byte) 0);
     }
 
     /** Registers the broadcast receiver that listens for the new device's full JID. */
@@ -356,6 +373,20 @@ public class PairNewDeviceActivity extends XmppActivity {
                                         LOGTAG + ": invalid base64url sid in pair-hello broadcast;"
                                                 + " falling back to local sid");
                             }
+                        }
+
+                        // Task #70: issue the newcomer's DC under the device id it reported in
+                        // its <pair-hello> (EXTRA_DEVICE_ID), not the fallback random id. 0 =
+                        // absent → keep the random fallback from onCreate.
+                        final int helloDeviceId =
+                                intent.getIntExtra(VerifyDeviceManager.EXTRA_DEVICE_ID, 0);
+                        if (helloDeviceId != 0) {
+                            mOpts = optionsForDeviceId(Integer.toUnsignedLong(helloDeviceId));
+                            Log.d(Config.LOGTAG, LOGTAG + ": issuing newcomer DC under pair-hello"
+                                    + " device id " + Integer.toUnsignedString(helloDeviceId));
+                        } else {
+                            Log.w(Config.LOGTAG, LOGTAG + ": pair-hello carried no device id;"
+                                    + " falling back to a random device id for the issued DC");
                         }
 
                         Log.d(
@@ -476,6 +507,21 @@ public class PairNewDeviceActivity extends XmppActivity {
         }
         mStartedFsm = true;
         mStatusView.setText(R.string.x3dhpq_pair_status_verifying);
+        // Task #70: the QR URI carries full JID + code + sid but NOT a device id. The
+        // pending device's real device id was persisted when its <pair-hello> was queued
+        // (PREF_PENDING_DEVICE_ID). Issue the DC under that id when available; else the
+        // random fallback from onCreate.
+        final int pendingDeviceId =
+                VerifyDeviceManager.getPendingJoinRequestDeviceId(
+                        this, mAccount.getJid().asBareJid().toString());
+        if (pendingDeviceId != 0) {
+            mOpts = optionsForDeviceId(Integer.toUnsignedLong(pendingDeviceId));
+            Log.d(Config.LOGTAG, LOGTAG + ": confirm-pending — issuing newcomer DC under queued"
+                    + " pair-hello device id " + Integer.toUnsignedString(pendingDeviceId));
+        } else {
+            Log.w(Config.LOGTAG, LOGTAG + ": confirm-pending — no queued pair-hello device id;"
+                    + " falling back to a random device id for the issued DC");
+        }
         try {
             mPairingService.startAsExisting(sid, validatedCode, pendingFullJid, mOpts);
             armPairingTimeout();
