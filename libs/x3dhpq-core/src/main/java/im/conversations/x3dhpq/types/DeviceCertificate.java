@@ -100,12 +100,23 @@ public final class DeviceCertificate {
         return buf.array();
     }
 
-    // Display-only fingerprint for device-management UIs (NOT part of any wire format or
-    // signed input). Mirrors AccountIdentityPub#fingerprint: BLAKE2b-160 of marshal(), take
-    // the first 15 bytes, hex-encode uppercase, split every 5 chars into 6 groups, e.g.
-    // "7AD37 1A1A3 67A62 B6533 1BC5A 2204C".
+    // Display-only device fingerprint for device-management UIs (NOT part of any wire format
+    // or signed input). Computed over the device's STABLE signing-key material only — the DIK
+    // Ed25519 + ML-DSA-65 public keys, wrapped in the same 3-byte AccountIdentityPub header
+    // (uint16(1)|uint8(1)) the AIK fingerprint uses — NOT over marshal(). Hashing marshal()
+    // would fold in createdAt and the issuer signatures, both of which change every time the
+    // DC is re-issued under the snapshot Trust Manifest, making the fingerprint unstable and
+    // diverge from Dino. This form is BYTE-IDENTICAL to Dino's account_fingerprint(dik_ed,
+    // dik_mldsa) (plugins/x3dhpq/src/util.vala) so the same device shows the same fingerprint
+    // in both clients. BLAKE2b-160 of that input, first 15 bytes, uppercase hex, 6 groups of 5.
     public String fingerprint(Blake2b160 hasher) {
-        byte[] digest = hasher.hash(marshal());
+        byte[] input = new byte[3 + dikPubEd25519.length + dikPubMLDSA.length];
+        input[0] = 0x00;
+        input[1] = 0x01;
+        input[2] = 0x01;
+        System.arraycopy(dikPubEd25519, 0, input, 3, dikPubEd25519.length);
+        System.arraycopy(dikPubMLDSA, 0, input, 3 + dikPubEd25519.length, dikPubMLDSA.length);
+        byte[] digest = hasher.hash(input);
         StringBuilder hex = new StringBuilder(40);
         for (byte b : digest) {
             hex.append(String.format("%02X", b & 0xff));
