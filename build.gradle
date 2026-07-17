@@ -217,11 +217,36 @@ android {
         }
     }
 
+    signingConfigs {
+        // Stable, committed debug keystore so EVERY CI build shares one signing
+        // certificate. Without this a fresh CI runner mints a random debug key
+        // per run, so a newly built APK can't update the previously-installed one
+        // (INSTALL_FAILED_UPDATE_INCOMPATIBLE / "App not installed"). A debug
+        // keystore is non-secret by design, so committing it is safe.
+        debug {
+            storeFile file("debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
     buildTypes {
         release {
             shrinkResources true
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            signingConfig signingConfigs.debug
+            // Distinct package (eu.siacs.conversations.pq) so a sideloaded
+            // PQonversations debug build coexists with an upstream Conversations
+            // install instead of colliding on the eu.siacs.conversations id.
+            applicationIdSuffix ".pq"
+            // Keep @string/applicationId (the self-"open my app settings" intents
+            // in preferences_*.xml) aligned with the suffixed id for the shipped
+            // conversationsFree debug build.
+            resValue "string", "applicationId", "eu.siacs.conversations.pq"
         }
     }
 

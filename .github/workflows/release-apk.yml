@@ -71,8 +71,14 @@ jobs:
           body: |
             PQonversations ${{ github.ref_name }} — automated build for tag `${{ github.ref_name }}` (commit ${{ github.sha }}).
 
-            Variant: `conversationsFree` **debug-signed** — sideload only. To produce a
-            properly release-signed APK, add a keystore plus a `signingConfig`, and switch
-            the build step to `assembleConversationsFreeRelease` (store the keystore and
-            passwords as encrypted repository secrets).
+            Variant: `conversationsFree` **debug** — sideload only. Package id
+            `eu.siacs.conversations.pq`, so it installs ALONGSIDE an upstream
+            Conversations install (no collision). Signed with the repo's committed
+            debug keystore, so every release shares one certificate and updates
+            in place (no uninstall between versions).
+
+            To produce a properly release-signed APK instead, add a release keystore
+            plus its `signingConfig` and switch the build step to
+            `assembleConversationsFreeRelease` (store the keystore and passwords as
+            encrypted repository secrets).
           files: ${{ steps.apk.outputs.file }}
