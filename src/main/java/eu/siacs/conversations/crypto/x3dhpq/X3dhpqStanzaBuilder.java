@@ -11,6 +11,7 @@ import im.conversations.android.xmpp.model.x3dhpq.bundle.DikMldsa;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Ik;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkey;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkeys;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.KemMldsaSig;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opk;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opks;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Spk;
@@ -198,9 +199,18 @@ public final class X3dhpqStanzaBuilder {
             final DatabaseBackend.X3dhpqKemPreKeyRow kemRow =
                     dao.loadX3dhpqKemPreKey(accountUuid, kemId);
             if (kemRow == null) continue;
+            // Structured like <spk>: <key> + hybrid <sig>/<mldsa-sig> (§9.1).
             final Kemkey kemkey = new Kemkey();
             kemkey.setId(kemId);
-            kemkey.setContent(kemRow.publicKey());
+            final SpkKey kemKeyEl = new SpkKey();
+            kemKeyEl.setContent(kemRow.publicKey());
+            kemkey.addExtension(kemKeyEl);
+            final SpkSig kemSigEd = new SpkSig();
+            kemSigEd.setContent(kemRow.sigEd25519());
+            kemkey.addExtension(kemSigEd);
+            final KemMldsaSig kemSigMldsa = new KemMldsaSig();
+            kemSigMldsa.setContent(kemRow.sigMldsa());
+            kemkey.addExtension(kemSigMldsa);
             kemkeys.addKemkey(kemkey);
         }
         bundle.addExtension(kemkeys);

@@ -7,6 +7,7 @@ import im.conversations.android.xmpp.StreamElementWriter;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Bundle;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkey;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkeys;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.KemMldsaSig;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opk;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opks;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Spk;
@@ -194,9 +195,11 @@ public class X3dhpqSessionTest {
         KeyPair spk = X3dhpqCrypto.x25519GenerateKeypair();
         bobDao.putX3dhpqSignedPreKey("test", 1, spk.pub, spk.priv, new byte[64], new byte[3309], 0L);
 
-        // Bob's KEM pre-key.
+        // Bob's KEM pre-key. This test drives PqxdhInitiator/acceptInboundSession
+        // directly (not handleInboundBundle), so KEM-sig verification isn't on the
+        // path; placeholder signatures are sufficient here.
         KemKeyPair bobKem = X3dhpqCrypto.mlkem768GenerateKeypair();
-        bobDao.putX3dhpqKemPreKey("test", 1, bobKem.pub, bobKem.priv);
+        bobDao.putX3dhpqKemPreKey("test", 1, bobKem.pub, bobKem.priv, new byte[64], new byte[3309]);
 
         // Bob's OPK.
         KeyPair opk = X3dhpqCrypto.x25519GenerateKeypair();
@@ -275,7 +278,15 @@ public class X3dhpqSessionTest {
         Kemkeys kemkeys = new Kemkeys();
         Kemkey kemkey = new Kemkey();
         kemkey.setId(1);
-        kemkey.setContent(bobKemKey.pub);
+        SpkKey kemKeyEl = new SpkKey();
+        kemKeyEl.setContent(bobKemKey.pub);
+        kemkey.addExtension(kemKeyEl);
+        SpkSig kemSigEl = new SpkSig();
+        kemSigEl.setContent(new byte[64]);
+        kemkey.addExtension(kemSigEl);
+        KemMldsaSig kemMldsaEl = new KemMldsaSig();
+        kemMldsaEl.setContent(new byte[3309]);
+        kemkey.addExtension(kemMldsaEl);
         kemkeys.addKemkey(kemkey);
         bundle.addExtension(kemkeys);
 

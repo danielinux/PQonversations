@@ -4,6 +4,7 @@ package eu.siacs.conversations.crypto.x3dhpq.protocol;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Bundle;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkey;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkeys;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.KemMldsaSig;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opk;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opks;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Spk;
@@ -61,15 +62,21 @@ public final class BundleParser {
         SpkSig spkSigEl = spkEl.getSig();
         byte[] spkSig = spkSigEl != null ? spkSigEl.asBytes() : null;
 
-        // KEM pre-keys.
+        // KEM pre-keys: <kemkey id><key/><sig/><mldsa-sig/></kemkey> (§9.1). The
+        // <key>/<sig> children reuse SpkKey/SpkSig (same element name+namespace).
         List<BundleData.KemPreKey> kemPreKeys = new ArrayList<>();
         Kemkeys kemkeysEl = bundle.getKemkeys();
         if (kemkeysEl != null) {
             for (Kemkey k : kemkeysEl.getKemkeys()) {
                 Integer kid = k.getId();
-                byte[] kpub = k.asBytes();
+                SpkKey kKeyEl = k.getKey();
+                byte[] kpub = kKeyEl != null ? kKeyEl.asBytes() : null;
+                SpkSig kSigEl = k.getSig();
+                byte[] kSigEd = kSigEl != null ? kSigEl.asBytes() : null;
+                KemMldsaSig kMldsaEl = k.getMldsaSig();
+                byte[] kSigMldsa = kMldsaEl != null ? kMldsaEl.asBytes() : null;
                 if (kid != null && kpub != null && kpub.length > 0) {
-                    kemPreKeys.add(new BundleData.KemPreKey(kid, kpub));
+                    kemPreKeys.add(new BundleData.KemPreKey(kid, kpub, kSigEd, kSigMldsa));
                 }
             }
         }

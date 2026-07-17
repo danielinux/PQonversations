@@ -2021,6 +2021,50 @@ public class X3dhpqService {
             return;
         }
 
+        // Parse the remaining key material so we can authenticate it before it is
+        // ever stored or used. A malformed bundle is rejected here rather than
+        // being persisted and blowing up later at session establishment.
+        final BundleData parsed;
+        try {
+            parsed = BundleParser.fromBundle(bundle);
+        } catch (Exception e) {
+            Log.w(Config.LOGTAG,
+                    "x3dhpq: unparseable bundle from " + peer + "/" + deviceId + ": " + e.getMessage());
+            return;
+        }
+
+        // Verify the SPK signature against the DC's DIK Ed25519 key (spec §9.1).
+        // The SPK is consumed as dh1/dh3 in PQXDH, so an unverified SPK lets an
+        // active tamperer (malicious server / MITM on the PEP fetch) inject a
+        // bogus pre-key. A bundle whose SPK signature fails MUST be rejected.
+        if (parsed.spkSig == null
+                || !X3dhpqCrypto.ed25519Verify(dc.getDikPubEd25519(), parsed.spkPub, parsed.spkSig)) {
+            Log.e(Config.LOGTAG,
+                    "x3dhpq: SPK signature verification FAILED for " + peer + "/" + deviceId
+                    + "; rejecting bundle");
+            return;
+        }
+
+        // Verify the hybrid DIK signature on every KEM pre-key (spec §9.1). The
+        // KEM pre-key is the sole carrier of post-quantum (HNDL) confidentiality,
+        // so an unsigned or forged KEM pre-key is rejected. A legitimate publisher
+        // signs all of them; any failure means tampering, so the whole bundle is
+        // rejected — which also guarantees every stored key is valid, so the
+        // initiator's get(0) selection at session setup is safe without re-checking.
+        final byte[] dikEd = dc.getDikPubEd25519();
+        final byte[] dikMldsa = dc.getDikPubMLDSA();
+        for (final BundleData.KemPreKey kem : parsed.kemPreKeys) {
+            if (kem.sigEd == null
+                    || kem.sigMldsa == null
+                    || !X3dhpqCrypto.ed25519Verify(dikEd, kem.pub, kem.sigEd)
+                    || !X3dhpqCrypto.mldsa65Verify(dikMldsa, kem.pub, kem.sigMldsa)) {
+                Log.e(Config.LOGTAG,
+                        "x3dhpq: KEM pre-key " + kem.id + " signature verification FAILED for "
+                        + peer + "/" + deviceId + "; rejecting bundle");
+                return;
+            }
+        }
+
         // serialise the bundle extension to XML bytes for storage
         final byte[] bundleXml = serialiseBundleToXml(bundle);
 

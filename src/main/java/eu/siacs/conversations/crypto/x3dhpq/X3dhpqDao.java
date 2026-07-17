@@ -63,7 +63,9 @@ public interface X3dhpqDao {
     DatabaseBackend.X3dhpqSignedPreKeyRow loadLatestX3dhpqSignedPreKey(String accountUuid);
 
     // --- kem pre-key ---
-    void putX3dhpqKemPreKey(String accountUuid, int keyId, byte[] pub, byte[] priv);
+    void putX3dhpqKemPreKey(
+            String accountUuid, int keyId, byte[] pub, byte[] priv,
+            byte[] sigEd25519, byte[] sigMldsa);
     List<Integer> listX3dhpqKemPreKeyIds(String accountUuid);
     DatabaseBackend.X3dhpqKemPreKeyRow loadX3dhpqKemPreKey(String accountUuid, int keyId);
 
@@ -91,6 +93,12 @@ public interface X3dhpqDao {
     // --- group session ---
     void putX3dhpqGroupSession(String accountUuid, String roomJid, long epoch, byte[] stateBlob, long updatedAt);
     DatabaseBackend.X3dhpqGroupSessionRow loadX3dhpqGroupSession(String accountUuid, String roomJid);
+
+    // --- group membership journal entries ---
+    void putX3dhpqGroupMembershipEntry(String accountUuid, String roomJid, String entryHash,
+                                       byte[] journalBlob, String itemId, long fetchedAt);
+    List<DatabaseBackend.X3dhpqGroupMembershipRow> listX3dhpqGroupMembershipEntries(
+            String accountUuid, String roomJid);
 
     // --- all remote devices (for AIK fp → JID lookup) ---
     List<DatabaseBackend.X3dhpqRemoteDeviceRow> listAllX3dhpqRemoteDevices(String accountUuid);

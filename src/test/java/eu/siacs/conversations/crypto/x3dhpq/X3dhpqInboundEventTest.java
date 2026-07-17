@@ -6,6 +6,14 @@ import im.conversations.android.xmpp.model.x3dhpq.bundle.AikEd25519;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.AikMldsa;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Bundle;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Dc;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.Ik;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkey;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkeys;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.KemMldsaSig;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.Spk;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.SpkKey;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.SpkSig;
+import im.conversations.x3dhpq.crypto.KemKeyPair;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.Cert;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.Device;
 import im.conversations.android.xmpp.model.x3dhpq.devicelist.DeviceList;
@@ -113,6 +121,16 @@ public class X3dhpqInboundEventTest {
         final DatabaseBackend.X3dhpqRemoteBundleRow row =
                 dao.loadX3dhpqRemoteBundle(ACCOUNT_UUID, PEER.asBareJid().toString(), DEVICE_ID);
         Assert.assertNull("nothing must be stored for bad ML-DSA sig", row);
+    }
+
+    @Test
+    public void badKemSignature_refusesPersist() {
+        final Bundle bundle = buildBundleWithTamperedKemSig(DEVICE_ID, aikEdPair, aikMlPair);
+        service.handleInboundBundle(PEER, DEVICE_ID, bundle);
+
+        final DatabaseBackend.X3dhpqRemoteBundleRow row =
+                dao.loadX3dhpqRemoteBundle(ACCOUNT_UUID, PEER.asBareJid().toString(), DEVICE_ID);
+        Assert.assertNull("nothing must be stored for bad KEM sig", row);
     }
 
     @Test
@@ -254,10 +272,12 @@ public class X3dhpqInboundEventTest {
         return list;
     }
 
-    private static byte[] buildSignedDc(int deviceId, KeyPair aikEd, KeyPair aikMl) {
-        final KeyPair dikEd = X3dhpqCrypto.ed25519GenerateKeypair();
-        final KeyPair dikX = X3dhpqCrypto.x25519GenerateKeypair();
-        final KeyPair dikMl = X3dhpqCrypto.mldsa65GenerateKeypair();
+    // Sign a DC for a caller-supplied DIK so the same DIK can also sign the
+    // bundle's SPK and KEM pre-keys (needed now that handleInboundBundle verifies
+    // those against DeviceCert.DIKPub*).
+    private static byte[] signedDc(
+            int deviceId, KeyPair aikEd, KeyPair aikMl,
+            KeyPair dikEd, KeyPair dikX, KeyPair dikMl) {
         final long now = System.currentTimeMillis() / 1000L;
         final DeviceCertificate unsigned = new DeviceCertificate(
                 1, deviceId, dikEd.pub, dikX.pub, dikMl.pub, now,
@@ -266,14 +286,38 @@ public class X3dhpqInboundEventTest {
         final byte[] input = unsigned.signedPart();
         final byte[] sigEd = X3dhpqCrypto.ed25519Sign(aikEd.priv, input);
         final byte[] sigMl = X3dhpqCrypto.mldsa65Sign(aikMl.priv, input);
-        final DeviceCertificate signed = new DeviceCertificate(
+        return new DeviceCertificate(
                 1, deviceId, dikEd.pub, dikX.pub, dikMl.pub, now,
-                (byte) DeviceCertificate.FLAG_PRIMARY, sigEd, sigMl);
-        return signed.marshal();
+                (byte) DeviceCertificate.FLAG_PRIMARY, sigEd, sigMl).marshal();
     }
 
+    private static byte[] buildSignedDc(int deviceId, KeyPair aikEd, KeyPair aikMl) {
+        return signedDc(
+                deviceId, aikEd, aikMl,
+                X3dhpqCrypto.ed25519GenerateKeypair(),
+                X3dhpqCrypto.x25519GenerateKeypair(),
+                X3dhpqCrypto.mldsa65GenerateKeypair());
+    }
+
+    // A complete, correctly-signed bundle: DC (AIK-signed) binding the DIK, plus
+    // ik, a DIK-signed SPK, and a hybrid-DIK-signed KEM pre-key (spec §9.1).
     private static Bundle buildValidBundle(int deviceId, KeyPair aikEd, KeyPair aikMl) {
-        final byte[] dcBytes = buildSignedDc(deviceId, aikEd, aikMl);
+        return buildBundle(deviceId, aikEd, aikMl, true);
+    }
+
+    // Same as buildValidBundle but the KEM pre-key's Ed25519 signature is made by
+    // a foreign key, so it must fail verification against the DC's DIK.
+    private static Bundle buildBundleWithTamperedKemSig(int deviceId, KeyPair aikEd, KeyPair aikMl) {
+        return buildBundle(deviceId, aikEd, aikMl, false);
+    }
+
+    private static Bundle buildBundle(
+            int deviceId, KeyPair aikEd, KeyPair aikMl, boolean validKemSig) {
+        final KeyPair dikEd = X3dhpqCrypto.ed25519GenerateKeypair();
+        final KeyPair dikX = X3dhpqCrypto.x25519GenerateKeypair();
+        final KeyPair dikMl = X3dhpqCrypto.mldsa65GenerateKeypair();
+        final byte[] dcBytes = signedDc(deviceId, aikEd, aikMl, dikEd, dikX, dikMl);
+
         final Bundle bundle = new Bundle();
         final AikEd25519 aikEdEl = new AikEd25519();
         aikEdEl.setContent(aikEd.pub);
@@ -284,6 +328,42 @@ public class X3dhpqInboundEventTest {
         final Dc dcEl = new Dc();
         dcEl.setContent(dcBytes);
         bundle.addExtension(dcEl);
+
+        final Ik ikEl = new Ik();
+        ikEl.setContent(dikX.pub);
+        bundle.addExtension(ikEl);
+
+        // SPK: DIK Ed25519 signature over the SPK public key.
+        final KeyPair spk = X3dhpqCrypto.x25519GenerateKeypair();
+        final Spk spkEl = new Spk();
+        spkEl.setId(1);
+        final SpkKey spkKeyEl = new SpkKey();
+        spkKeyEl.setContent(spk.pub);
+        spkEl.addExtension(spkKeyEl);
+        final SpkSig spkSigEl = new SpkSig();
+        spkSigEl.setContent(X3dhpqCrypto.ed25519Sign(dikEd.priv, spk.pub));
+        spkEl.addExtension(spkSigEl);
+        bundle.addExtension(spkEl);
+
+        // KEM pre-key: hybrid DIK signature over the KEM public key.
+        final Kemkeys kemkeys = new Kemkeys();
+        final KemKeyPair kem = X3dhpqCrypto.mlkem768GenerateKeypair();
+        final Kemkey kemkey = new Kemkey();
+        kemkey.setId(1);
+        final SpkKey kemKeyEl = new SpkKey();
+        kemKeyEl.setContent(kem.pub);
+        kemkey.addExtension(kemKeyEl);
+        final SpkSig kemSigEd = new SpkSig();
+        final byte[] kemEdSigner =
+                validKemSig ? dikEd.priv : X3dhpqCrypto.ed25519GenerateKeypair().priv;
+        kemSigEd.setContent(X3dhpqCrypto.ed25519Sign(kemEdSigner, kem.pub));
+        kemkey.addExtension(kemSigEd);
+        final KemMldsaSig kemSigMl = new KemMldsaSig();
+        kemSigMl.setContent(X3dhpqCrypto.mldsa65Sign(dikMl.priv, kem.pub));
+        kemkey.addExtension(kemSigMl);
+        kemkeys.addKemkey(kemkey);
+        bundle.addExtension(kemkeys);
+
         return bundle;
     }
 

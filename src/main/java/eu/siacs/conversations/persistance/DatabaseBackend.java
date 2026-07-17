@@ -73,7 +73,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
         implements eu.siacs.conversations.crypto.x3dhpq.X3dhpqDao {
 
     private static final String DATABASE_NAME = "history";
-    private static final int DATABASE_VERSION = 63;
+    private static final int DATABASE_VERSION = 65;
 
     // Column/table names for the legacy OMEMO tables, kept only so historical DB
     // migrations continue to work after the OMEMO code was removed.
@@ -317,6 +317,8 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     + "key_id INTEGER NOT NULL,"
                     + "public_key BLOB NOT NULL,"         // ML-KEM-768 public, 1184 bytes
                     + "private_key BLOB NOT NULL,"        // ML-KEM-768 private encoded
+                    + "sig_ed25519 BLOB NOT NULL,"        // DIK Ed25519 sig over public_key (spec §9.1)
+                    + "sig_mldsa BLOB NOT NULL,"          // DIK ML-DSA-65 sig over public_key (spec §9.1)
                     + "PRIMARY KEY (account_uuid, key_id),"
                     + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
                     + " ON DELETE CASCADE"
@@ -400,10 +402,11 @@ public class DatabaseBackend extends SQLiteOpenHelper
             "CREATE TABLE IF NOT EXISTS x3dhpq_group_membership ("
                     + "account_uuid TEXT NOT NULL,"
                     + "room_jid TEXT NOT NULL,"
-                    + "journal_blob BLOB NOT NULL,"       // latest signed membership journal item
+                    + "entry_hash TEXT NOT NULL,"         // hex(SHA-256(journal_blob))
+                    + "journal_blob BLOB NOT NULL,"       // raw signed v1/v2 membership journal item
                     + "item_id TEXT NOT NULL,"
                     + "fetched_at INTEGER NOT NULL,"
-                    + "PRIMARY KEY (account_uuid, room_jid),"
+                    + "PRIMARY KEY (account_uuid, room_jid, entry_hash),"
                     + "FOREIGN KEY (account_uuid) REFERENCES x3dhpq_account_identity(account_uuid)"
                     + " ON DELETE CASCADE"
                     + ")";
@@ -1443,6 +1446,66 @@ public class DatabaseBackend extends SQLiteOpenHelper
                             + " ADD COLUMN "
                             + Message.X3DHPQ_SOURCE_DEVICE
                             + " INTEGER");
+        }
+        // x3dhpq_group_membership now stores every accepted/authored journal
+        // entry keyed by content hash instead of overwriting one latest row.
+        if (oldVersion < 64 && newVersion >= 64) {
+            db.execSQL("ALTER TABLE x3dhpq_group_membership RENAME TO x3dhpq_group_membership_old");
+            db.execSQL(CREATE_X3DHPQ_GROUP_MEMBERSHIP);
+            final Cursor c =
+                    db.query(
+                            "x3dhpq_group_membership_old",
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            try {
+                while (c.moveToNext()) {
+                    final byte[] journalBlob =
+                            c.getBlob(c.getColumnIndexOrThrow("journal_blob"));
+                    final ContentValues v = new ContentValues();
+                    v.put(
+                            "account_uuid",
+                            c.getString(c.getColumnIndexOrThrow("account_uuid")));
+                    v.put("room_jid", c.getString(c.getColumnIndexOrThrow("room_jid")));
+                    v.put("entry_hash", x3dhpqJournalEntryContentHash(journalBlob));
+                    v.put("journal_blob", journalBlob);
+                    v.put("item_id", c.getString(c.getColumnIndexOrThrow("item_id")));
+                    v.put("fetched_at", c.getLong(c.getColumnIndexOrThrow("fetched_at")));
+                    db.insertWithOnConflict(
+                            "x3dhpq_group_membership",
+                            null,
+                            v,
+                            SQLiteDatabase.CONFLICT_REPLACE);
+                }
+            } finally {
+                c.close();
+            }
+            db.execSQL("DROP TABLE x3dhpq_group_membership_old");
+        }
+        // KEM pre-keys gain hybrid DIK signatures (spec §9.1, v0.9.0). Existing
+        // rows predate the signatures and can't be retroactively signed here
+        // (the DIK private key isn't reachable from onUpgrade), so drop and
+        // recreate: the local key store repopulates signed KEM pre-keys on the
+        // next bootstrap/replenish. Accounts are reset for the beta anyway.
+        if (oldVersion < 65 && newVersion >= 65) {
+            db.execSQL("DROP TABLE IF EXISTS x3dhpq_kem_pre_key");
+            db.execSQL(CREATE_X3DHPQ_KEM_PRE_KEY);
+        }
+    }
+
+    private static String x3dhpqJournalEntryContentHash(final byte[] entryBytes) {
+        try {
+            final byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(entryBytes);
+            final StringBuilder sb = new StringBuilder();
+            for (final byte b : h) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (final java.security.NoSuchAlgorithmException e) {
+            return "len-" + (entryBytes == null ? 0 : entryBytes.length);
         }
     }
 
@@ -3149,7 +3212,8 @@ public class DatabaseBackend extends SQLiteOpenHelper
             long createdAt) {}
 
     public record X3dhpqKemPreKeyRow(
-            String accountUuid, int keyId, byte[] publicKey, byte[] privateKey) {}
+            String accountUuid, int keyId, byte[] publicKey, byte[] privateKey,
+            byte[] sigEd25519, byte[] sigMldsa) {}
 
     public record X3dhpqOneTimePreKeyRow(
             String accountUuid,
@@ -3190,6 +3254,7 @@ public class DatabaseBackend extends SQLiteOpenHelper
     public record X3dhpqGroupMembershipRow(
             String accountUuid,
             String roomJid,
+            String entryHash,
             byte[] journalBlob,
             String itemId,
             long fetchedAt) {}
@@ -3722,13 +3787,16 @@ public class DatabaseBackend extends SQLiteOpenHelper
     // ---- x3dhpq DAO: kem_pre_key ----
 
     public void putX3dhpqKemPreKey(
-            String accountUuid, int keyId, byte[] pub, byte[] priv) {
+            String accountUuid, int keyId, byte[] pub, byte[] priv,
+            byte[] sigEd25519, byte[] sigMldsa) {
         final SQLiteDatabase db = getWritableDatabase();
         final ContentValues v = new ContentValues();
         v.put("account_uuid", accountUuid);
         v.put("key_id", keyId);
         v.put("public_key", pub);
         v.put("private_key", x3dhpqWrap(priv));
+        v.put("sig_ed25519", sigEd25519);
+        v.put("sig_mldsa", sigMldsa);
         db.insertWithOnConflict(
                 "x3dhpq_kem_pre_key", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
@@ -3750,7 +3818,9 @@ public class DatabaseBackend extends SQLiteOpenHelper
                     c.getString(c.getColumnIndexOrThrow("account_uuid")),
                     c.getInt(c.getColumnIndexOrThrow("key_id")),
                     c.getBlob(c.getColumnIndexOrThrow("public_key")),
-                    x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("private_key"))));
+                    x3dhpqUnwrap(c.getBlob(c.getColumnIndexOrThrow("private_key"))),
+                    c.getBlob(c.getColumnIndexOrThrow("sig_ed25519")),
+                    c.getBlob(c.getColumnIndexOrThrow("sig_mldsa")));
         } finally {
             c.close();
         }
@@ -4173,10 +4243,21 @@ public class DatabaseBackend extends SQLiteOpenHelper
             byte[] journalBlob,
             String itemId,
             long fetchedAt) {
+        putX3dhpqGroupMembershipEntry(accountUuid, roomJid, itemId, journalBlob, itemId, fetchedAt);
+    }
+
+    public void putX3dhpqGroupMembershipEntry(
+            String accountUuid,
+            String roomJid,
+            String entryHash,
+            byte[] journalBlob,
+            String itemId,
+            long fetchedAt) {
         final SQLiteDatabase db = getWritableDatabase();
         final ContentValues v = new ContentValues();
         v.put("account_uuid", accountUuid);
         v.put("room_jid", roomJid);
+        v.put("entry_hash", entryHash);
         v.put("journal_blob", journalBlob);
         v.put("item_id", itemId);
         v.put("fetched_at", fetchedAt);
@@ -4201,12 +4282,42 @@ public class DatabaseBackend extends SQLiteOpenHelper
             return new X3dhpqGroupMembershipRow(
                     c.getString(c.getColumnIndexOrThrow("account_uuid")),
                     c.getString(c.getColumnIndexOrThrow("room_jid")),
+                    c.getString(c.getColumnIndexOrThrow("entry_hash")),
                     c.getBlob(c.getColumnIndexOrThrow("journal_blob")),
                     c.getString(c.getColumnIndexOrThrow("item_id")),
                     c.getLong(c.getColumnIndexOrThrow("fetched_at")));
         } finally {
             c.close();
         }
+    }
+
+    public List<X3dhpqGroupMembershipRow> listX3dhpqGroupMembershipEntries(
+            String accountUuid, String roomJid) {
+        final SQLiteDatabase db = getReadableDatabase();
+        final Cursor c =
+                db.query(
+                        "x3dhpq_group_membership",
+                        null,
+                        "account_uuid=? AND room_jid=?",
+                        new String[] {accountUuid, roomJid},
+                        null,
+                        null,
+                        "fetched_at ASC, entry_hash ASC");
+        final List<X3dhpqGroupMembershipRow> result = new ArrayList<>();
+        try {
+            while (c.moveToNext()) {
+                result.add(new X3dhpqGroupMembershipRow(
+                        c.getString(c.getColumnIndexOrThrow("account_uuid")),
+                        c.getString(c.getColumnIndexOrThrow("room_jid")),
+                        c.getString(c.getColumnIndexOrThrow("entry_hash")),
+                        c.getBlob(c.getColumnIndexOrThrow("journal_blob")),
+                        c.getString(c.getColumnIndexOrThrow("item_id")),
+                        c.getLong(c.getColumnIndexOrThrow("fetched_at"))));
+            }
+        } finally {
+            c.close();
+        }
+        return result;
     }
 
     // ---- x3dhpq DAO: pairing_session ----

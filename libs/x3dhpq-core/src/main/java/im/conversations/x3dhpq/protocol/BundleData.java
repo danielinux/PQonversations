@@ -11,15 +11,25 @@ import java.util.List;
 // because it references the Conversations Extension model.
 public final class BundleData {
 
-    // A single KEM pre-key (id + 1184-byte ML-KEM-768 public key).
+    // A single KEM pre-key (id + 1184-byte ML-KEM-768 public key) plus the
+    // hybrid DIK signature over the public key (spec §9.1). sigEd/sigMldsa may be
+    // null when the bundle omitted them; the receiver rejects such a key.
     public static final class KemPreKey {
         public final int id;
         public final byte[] pub; // 1184 bytes
+        public final byte[] sigEd;    // 64  (DIK Ed25519 sig over pub), nullable
+        public final byte[] sigMldsa; // 3309 (DIK ML-DSA-65 sig over pub), nullable
 
         public KemPreKey(int id, byte[] pub) {
+            this(id, pub, null, null);
+        }
+
+        public KemPreKey(int id, byte[] pub, byte[] sigEd, byte[] sigMldsa) {
             if (pub == null || pub.length == 0) throw new IllegalArgumentException("kem pub empty");
             this.id = id;
             this.pub = Arrays.copyOf(pub, pub.length);
+            this.sigEd = sigEd != null ? Arrays.copyOf(sigEd, sigEd.length) : null;
+            this.sigMldsa = sigMldsa != null ? Arrays.copyOf(sigMldsa, sigMldsa.length) : null;
         }
     }
 

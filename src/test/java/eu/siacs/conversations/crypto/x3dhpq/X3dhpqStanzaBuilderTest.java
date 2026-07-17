@@ -91,7 +91,9 @@ public class X3dhpqStanzaBuilderTest {
         // 2 KEM pre-keys
         for (int i = 1; i <= 2; i++) {
             final KemKeyPair kem = X3dhpqCrypto.mlkem768GenerateKeypair();
-            dao.putX3dhpqKemPreKey(UUID, i, kem.pub, kem.priv);
+            final byte[] kemSigEd = X3dhpqCrypto.ed25519Sign(dikEd.priv, kem.pub);
+            final byte[] kemSigMl = X3dhpqCrypto.mldsa65Sign(dikMl.priv, kem.pub);
+            dao.putX3dhpqKemPreKey(UUID, i, kem.pub, kem.priv, kemSigEd, kemSigMl);
         }
 
         // 2 OPKs

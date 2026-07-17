@@ -14,6 +14,7 @@ import im.conversations.android.xmpp.model.x3dhpq.bundle.Kemkeys;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opk;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Opks;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.Spk;
+import im.conversations.android.xmpp.model.x3dhpq.bundle.KemMldsaSig;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.SpkKey;
 import im.conversations.android.xmpp.model.x3dhpq.bundle.SpkSig;
 import java.io.IOException;
@@ -61,7 +62,15 @@ public class BundleSmokeTest {
         final Kemkeys kemkeys = new Kemkeys();
         final Kemkey kemkey = new Kemkey();
         kemkey.setId(1);
-        kemkey.setContent(new byte[]{0x09});
+        final SpkKey kemKey = new SpkKey();
+        kemKey.setContent(new byte[]{0x09});
+        kemkey.addExtension(kemKey);
+        final SpkSig kemSig = new SpkSig();
+        kemSig.setContent(new byte[]{0x0B});
+        kemkey.addExtension(kemSig);
+        final KemMldsaSig kemMldsaSig = new KemMldsaSig();
+        kemMldsaSig.setContent(new byte[]{0x0C});
+        kemkey.addExtension(kemMldsaSig);
         kemkeys.addKemkey(kemkey);
         bundle.addExtension(kemkeys);
 

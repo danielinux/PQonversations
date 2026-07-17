@@ -171,10 +171,16 @@ public final class LocalKeyBootstrap {
         final byte[] spkSigEd = X3dhpqCrypto.ed25519Sign(dikEd.priv, spk.pub);
         final byte[] spkSigMldsa = X3dhpqCrypto.mldsa65Sign(dikMldsa.priv, spk.pub);
 
-        // KEM pre-keys (ids 1..N).
+        // KEM pre-keys (ids 1..N), each hybrid-signed by the DIK over its public
+        // key bytes (spec §9.1): the KEM pre-key is the sole carrier of PQ (HNDL)
+        // confidentiality, so it gets both an Ed25519 and an ML-DSA-65 signature.
         final KemKeyPair[] kemKeys = new KemKeyPair[DEFAULT_KEM_PREKEY_COUNT];
+        final byte[][] kemSigEd = new byte[DEFAULT_KEM_PREKEY_COUNT][];
+        final byte[][] kemSigMldsa = new byte[DEFAULT_KEM_PREKEY_COUNT][];
         for (int i = 0; i < DEFAULT_KEM_PREKEY_COUNT; i++) {
             kemKeys[i] = X3dhpqCrypto.mlkem768GenerateKeypair();
+            kemSigEd[i] = X3dhpqCrypto.ed25519Sign(dikEd.priv, kemKeys[i].pub);
+            kemSigMldsa[i] = X3dhpqCrypto.mldsa65Sign(dikMldsa.priv, kemKeys[i].pub);
         }
 
         // OPKs (ids 1..N).
@@ -192,7 +198,9 @@ public final class LocalKeyBootstrap {
                     DeviceCertificate.FLAG_PRIMARY | FLAG_PENDING_ENROLLMENT);
             db.putX3dhpqSignedPreKey(uuid, spkKeyId, spk.pub, spk.priv, spkSigEd, spkSigMldsa, createdAt);
             for (int i = 0; i < DEFAULT_KEM_PREKEY_COUNT; i++) {
-                db.putX3dhpqKemPreKey(uuid, i + 1, kemKeys[i].pub, kemKeys[i].priv);
+                db.putX3dhpqKemPreKey(
+                        uuid, i + 1, kemKeys[i].pub, kemKeys[i].priv,
+                        kemSigEd[i], kemSigMldsa[i]);
             }
             for (int i = 0; i < DEFAULT_ONE_TIME_PREKEY_COUNT; i++) {
                 db.putX3dhpqOneTimePreKey(uuid, i + 1, opks[i].pub, opks[i].priv);
