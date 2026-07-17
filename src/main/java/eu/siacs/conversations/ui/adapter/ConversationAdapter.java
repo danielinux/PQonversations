@@ -70,6 +70,12 @@ public class ConversationAdapter
             viewHolder.binding.frame.setBackgroundResource(
                     R.drawable.background_selected_item_conversation);
             // viewHolder.binding.frame.setBackgroundColor(MaterialColors.getColor(viewHolder.binding.frame, com.google.android.material.R.attr.colorSurfaceDim));
+        } else if (conversation.getBooleanAttribute("x3dhpq_identity_blocked", false)) {
+            // x3dhpq: this contact's identity key (AIK) changed and has NOT been
+            // re-verified yet (X3dhpqService.ATTRIBUTE_X3DHPQ_IDENTITY_BLOCKED).
+            // Mark the row light-red so the user re-verifies out-of-band before
+            // trusting the new identity; cleared by reTrustIdentity().
+            viewHolder.binding.frame.setBackgroundColor(0x33F44336);
         } else {
             viewHolder.binding.frame.setBackgroundColor(
                     MaterialColors.getColor(

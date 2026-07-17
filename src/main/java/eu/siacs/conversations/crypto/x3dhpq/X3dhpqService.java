@@ -1986,8 +1986,15 @@ public class X3dhpqService {
         if (existing != null && !Arrays.equals(existing.aikPubMarshal(), aipMarshal)) {
             Log.e(Config.LOGTAG,
                     "x3dhpq: AIK MISMATCH for " + peer + "/" + deviceId
-                    + " — possible compromise or rotation; refusing to overwrite."
-                    + " (Wave F surfaces this in UI.)");
+                    + " — possible compromise or rotation; refusing to overwrite.");
+            // §10.6.5: surface the identity change (block flag + security notice +
+            // light-red conversation mark) so the user must re-verify out-of-band
+            // before trusting the new identity, instead of silently dropping it.
+            try {
+                flagIdentityReconstructionEvent(eu.siacs.conversations.xmpp.Jid.of(peer));
+            } catch (final Exception ignored) {
+                // best-effort UX signal; never let it block the reject above
+            }
             return;
         }
 
@@ -2051,12 +2058,18 @@ public class X3dhpqService {
         // signs all of them; any failure means tampering, so the whole bundle is
         // rejected — which also guarantees every stored key is valid, so the
         // initiator's get(0) selection at session setup is safe without re-checking.
+        // Transitional stance: verify KEM signatures when present, reject only a
+        // present-but-invalid (forged) one. A legacy bundle whose KEM pre-keys
+        // carry no signatures is accepted so sessions still establish across
+        // mixed-version deployments. Re-tighten once all peers publish signed
+        // bundles.
         final byte[] dikEd = dc.getDikPubEd25519();
         final byte[] dikMldsa = dc.getDikPubMLDSA();
         for (final BundleData.KemPreKey kem : parsed.kemPreKeys) {
-            if (kem.sigEd == null
-                    || kem.sigMldsa == null
-                    || !X3dhpqCrypto.ed25519Verify(dikEd, kem.pub, kem.sigEd)
+            if (kem.sigEd == null || kem.sigMldsa == null) {
+                continue;
+            }
+            if (!X3dhpqCrypto.ed25519Verify(dikEd, kem.pub, kem.sigEd)
                     || !X3dhpqCrypto.mldsa65Verify(dikMldsa, kem.pub, kem.sigMldsa)) {
                 Log.e(Config.LOGTAG,
                         "x3dhpq: KEM pre-key " + kem.id + " signature verification FAILED for "
