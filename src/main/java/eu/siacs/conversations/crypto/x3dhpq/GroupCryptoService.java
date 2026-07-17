@@ -42,6 +42,14 @@ public class GroupCryptoService {
 
     private static final String TAG = "GroupCryptoService";
     private static final int MAX_QUEUE = 64;
+    // Slide the group send-chain checkpoint forward at most once per this window
+    // (24h) so re-shared history — and the option-1 intra-epoch forward-secrecy
+    // loss — is bounded to ~24h rather than the whole (membership-driven, possibly
+    // unbounded) epoch. See GroupSession.maybeAdvanceCheckpoint.
+    private static final long EPOCH_MAX_AGE_SECONDS = 24L * 3600L;
+    // Per-room cooldown (ms) so a presence/join burst coalesces into a single
+    // sender-chain re-broadcast instead of one fan-out per occupant update.
+    private static final long GROUP_REANNOUNCE_COOLDOWN_MS = 5_000L;
     private static final int MAX_GROUP_SYNC_BYTES = 1024 * 1024;
     private static final int MAX_GROUP_SYNC_ENTRIES = 4096;
     private static final int MAX_GROUP_SYNC_ENTRY_BYTES = 256 * 1024;
@@ -58,6 +66,20 @@ public class GroupCryptoService {
     // {@link #onPeerBundleArrived}.
     private final java.util.Map<String, java.util.Set<String>> pendingMemberPublishes =
             new java.util.HashMap<>();
+
+    // roomBare -> group-chat stanzas whose ciphertext could not be decrypted yet
+    // because we had no recv chain for the sender. MAM/history dedupes by
+    // stable-id and will NOT re-deliver them, so we stash the raw stanza and
+    // re-inject it through the message pipeline once the sender's recv chain is
+    // installed (drained from redeliverDeferredGroupMessages). Bounded per room.
+    private final java.util.Map<String,
+            java.util.Deque<im.conversations.android.xmpp.model.stanza.Message>>
+            deferredGroupMessages = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // roomBare -> last monotonic time (ms) we re-broadcast our sender chain in
+    // response to a presence/join, so a join burst coalesces into one fan-out.
+    private final java.util.Map<String, Long> groupReannounceAt =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public GroupCryptoService(final Account account, final XmppConnectionService svc) {
         this.account = account;
@@ -758,9 +780,10 @@ public class GroupCryptoService {
                 // After app restart, pairwise sender-chain announcements or MAM
                 // catch-up may race the room journal bootstrap. Trigger a fresh
                 // journal catch-up instead of treating the room as permanently
-                // disabled and dropping the message on the floor.
+                // disabled and dropping the message on the floor. Signal deferral
+                // so the caller stashes the stanza for re-injection.
                 subscribeAndCatchUp(roomBare);
-                return null;
+                throw new GroupMessageDeferredException("room session not yet bootstrapped");
             }
 
             final byte[] hdrBytes = envelope.getHdrBytes();
@@ -819,10 +842,13 @@ public class GroupCryptoService {
             final im.conversations.x3dhpq.types.SenderChain sc =
                     state.session.recvChains.get(rk);
             if (sc == null) {
-                // No recv chain: cannot decrypt yet
+                // No recv chain: cannot decrypt yet. Signal deferral so the
+                // caller stashes the stanza and re-injects it once the sender's
+                // sender-chain announcement installs the recv chain.
                 Log.d(Config.LOGTAG, TAG + ": no recv chain for " + senderAikFp
                         + " epoch=" + hdr.epoch + "; decryption deferred");
-                return null;
+                throw new GroupMessageDeferredException(
+                        "no recv chain for " + senderAikFp + " epoch=" + hdr.epoch);
             }
 
             // Obtain message key at the required index.
@@ -856,6 +882,15 @@ public class GroupCryptoService {
 
         synchronized (state) {
             if (state.session == null) return;
+            // Bound the re-shareable history / forward-secrecy window: slide the
+            // send-chain checkpoint forward to the current position once
+            // EPOCH_MAX_AGE has elapsed since it was last set. The announcement
+            // exports the checkpoint (not the live position), so returning members
+            // can only decrypt back to ≤ EPOCH_MAX_AGE ago. Persist if it moved.
+            final long nowSeconds = System.currentTimeMillis() / 1000L;
+            if (state.session.maybeAdvanceCheckpoint(nowSeconds, EPOCH_MAX_AGE_SECONDS)) {
+                persistGroupSession(roomStr, state);
+            }
             final SenderChainAnnouncement ann = state.session.announceSenderChain();
             // Bundle the membership journal with the announcement (group-sync), so
             // members receive the journal over the pairwise rekey fan-out that
@@ -952,6 +987,7 @@ public class GroupCryptoService {
         final String roomStr = roomBare.toString();
         final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
 
+        boolean accepted = false;
         synchronized (state) {
             if (state.session == null) {
                 // After restart the room state may not exist yet even though a
@@ -980,10 +1016,17 @@ public class GroupCryptoService {
 
             try {
                 state.session.acceptSenderChain(ann);
+                accepted = true;
                 triggerMamCatchupAfterChain(roomBare, state);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, TAG + ": acceptSenderChain failed: " + e.getMessage());
             }
+        }
+        // A recv chain was just installed: re-inject any group stanzas that
+        // failed earlier with "no recv chain" so they now decrypt and deliver.
+        // Done outside the state lock (re-injection re-enters the pipeline).
+        if (accepted) {
+            redeliverDeferredGroupMessages(roomStr);
         }
     }
 
@@ -1691,12 +1734,12 @@ public class GroupCryptoService {
     private void flushAnnouncementQueue(String roomStr) {
         final RoomState state = rooms.get(roomStr);
         if (state == null) return;
+        boolean acceptedAny = false;
         synchronized (state) {
             if (state.session == null) return;
             final List<RoomState.QueuedAnnouncement> queue =
                     new ArrayList<>(state.announcementQueue);
             state.announcementQueue.clear();
-            boolean acceptedAny = false;
             for (RoomState.QueuedAnnouncement qa : queue) {
                 try {
                     state.session.acceptSenderChain(qa.ann);
@@ -1708,6 +1751,11 @@ public class GroupCryptoService {
             if (acceptedAny) {
                 triggerMamCatchupAfterChain(Jid.of(roomStr), state);
             }
+        }
+        // Recv chains just installed → re-inject deferred group stanzas (outside
+        // the state lock, since re-injection re-enters the message pipeline).
+        if (acceptedAny) {
+            redeliverDeferredGroupMessages(roomStr);
         }
     }
 
@@ -1723,6 +1771,94 @@ public class GroupCryptoService {
             return;
         }
         mam.catchupMUC(conversation);
+    }
+
+    // -------------------------------------------------------------------------
+    // Deferred group-message re-decryption
+    // -------------------------------------------------------------------------
+
+    /**
+     * Stash a group-chat stanza whose ciphertext could not be decrypted yet
+     * because we had no recv chain for the sender (a
+     * {@link GroupMessageDeferredException} was raised). MAM/history dedupes by
+     * stable-id and will not re-deliver it, so we keep the raw stanza and
+     * re-inject it through the message pipeline once the sender's sender-chain
+     * announcement lands (see {@link #redeliverDeferredGroupMessages}). Bounded
+     * to {@link #MAX_QUEUE} per room (oldest dropped on overflow).
+     */
+    public void stashDeferredGroupMessage(
+            final Jid roomJid, final im.conversations.android.xmpp.model.stanza.Message packet) {
+        if (roomJid == null || packet == null) return;
+        final String roomStr = roomJid.asBareJid().toString();
+        final java.util.Deque<im.conversations.android.xmpp.model.stanza.Message> q =
+                deferredGroupMessages.computeIfAbsent(
+                        roomStr, k -> new java.util.ArrayDeque<>());
+        synchronized (q) {
+            while (q.size() >= MAX_QUEUE) {
+                q.pollFirst();
+            }
+            q.addLast(packet);
+        }
+    }
+
+    /**
+     * Drain the room's stash of previously-undecryptable group stanzas and
+     * re-inject each through the message pipeline. Called right after a
+     * sender-chain announcement is accepted (a recv chain was installed), so
+     * messages that failed earlier with "no recv chain" now decrypt and are
+     * delivered. Re-injection re-runs the normal group-decrypt path; a stanza
+     * still lacking its recv chain (e.g. from a different sender) simply defers
+     * again and is re-stashed — no synchronous loop, since we drain into a local
+     * list first. Must be called OUTSIDE any {@code synchronized(state)} block.
+     */
+    private void redeliverDeferredGroupMessages(final String roomStr) {
+        final java.util.Deque<im.conversations.android.xmpp.model.stanza.Message> q =
+                deferredGroupMessages.get(roomStr);
+        if (q == null) return;
+        final List<im.conversations.android.xmpp.model.stanza.Message> drained;
+        synchronized (q) {
+            if (q.isEmpty()) return;
+            drained = new ArrayList<>(q);
+            q.clear();
+        }
+        final eu.siacs.conversations.xmpp.XmppConnection conn =
+                account == null ? null : account.getXmppConnection();
+        if (conn == null) return;
+        for (final im.conversations.android.xmpp.model.stanza.Message packet : drained) {
+            try {
+                conn.injectMessagePacket(packet);
+            } catch (final Throwable t) {
+                Log.w(Config.LOGTAG, TAG + ": deferred group re-inject failed: " + t.getMessage());
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Presence/join-driven re-announce
+    // -------------------------------------------------------------------------
+
+    /**
+     * Re-broadcast our sender chain (checkpoint) to a room, rate-limited per room,
+     * so a returning member promptly gets our current checkpoint (and can then
+     * decrypt recent history via MAM) instead of waiting for our next message.
+     * No-op for rooms we hold no group session for (not our secret channels).
+     * Called when another member's presence appears in the room and on our own
+     * (re)join.
+     */
+    public void maybeReannounceGroup(final Jid roomJid) {
+        if (roomJid == null) return;
+        final String roomStr = roomJid.asBareJid().toString();
+        final RoomState state = rooms.get(roomStr);
+        if (state == null || state.session == null) {
+            return;
+        }
+        final long now = android.os.SystemClock.elapsedRealtime();
+        final Long last = groupReannounceAt.get(roomStr);
+        if (last != null && now - last < GROUP_REANNOUNCE_COOLDOWN_MS) {
+            return;
+        }
+        groupReannounceAt.put(roomStr, now);
+        announceSenderChain(roomJid.asBareJid());
     }
 
     private Iq buildFetchAllItemsIq(Jid to, String node) {
@@ -1921,6 +2057,20 @@ public class GroupCryptoService {
      */
     public static final class DeviceDisabledException extends GroupNotEnabledException {
         public DeviceDisabledException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Thrown by {@link #decryptGroupMessage} when the ciphertext cannot be
+     * decrypted yet because the sender's recv chain has not been installed (no
+     * announcement received) or the room session is still bootstrapping. The
+     * caller should stash the raw stanza (see
+     * {@link #stashDeferredGroupMessage}) so it can be re-injected once the chain
+     * arrives — MAM/history dedupes by stable-id and will not re-deliver it.
+     */
+    public static final class GroupMessageDeferredException extends Exception {
+        public GroupMessageDeferredException(String message) {
             super(message);
         }
     }

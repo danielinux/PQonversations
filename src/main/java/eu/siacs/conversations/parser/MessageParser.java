@@ -296,7 +296,8 @@ public class MessageParser extends AbstractParser
             final im.conversations.android.xmpp.model.x3dhpq.envelope.EnvelopeGroup groupEnv,
             final Jid from,
             final Conversation conversation,
-            final int status) {
+            final int status,
+            final im.conversations.android.xmpp.model.stanza.Message packet) {
         if (groupEnv == null || from == null || conversation == null) return null;
         final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
                 conversation.getAccount() != null
@@ -309,6 +310,14 @@ public class MessageParser extends AbstractParser
         final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupDecryptResult result;
         try {
             result = gcs.decryptGroupMessage(conversation.getAddress().asBareJid(), groupEnv);
+        } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService
+                        .GroupMessageDeferredException e) {
+            // No recv chain yet (or session still bootstrapping): stash the raw
+            // stanza so GroupCryptoService can re-inject it once the sender's
+            // sender-chain announcement installs the recv chain. MAM dedupes by
+            // stable-id and would never re-deliver it otherwise.
+            gcs.stashDeferredGroupMessage(conversation.getAddress().asBareJid(), packet);
+            return null;
         } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
             Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
                     + ": x3dhpq group not enabled for " + conversation.getAddress()
@@ -858,7 +867,7 @@ public class MessageParser extends AbstractParser
             } else if (x3dhpqGroupEnvelope != null && isTypeGroupChat) {
                 // §13 group-encrypted message: decrypt via GroupCryptoService.
                 try {
-                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status);
+                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status, packet);
                 } catch (final Throwable t) {
                     Log.e(Config.LOGTAG, account.getJid().asBareJid()
                             + ": x3dhpq group parser threw: " + t.getMessage(), t);

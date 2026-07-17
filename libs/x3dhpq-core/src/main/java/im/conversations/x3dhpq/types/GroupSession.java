@@ -25,6 +25,18 @@ public final class GroupSession {
     // Maps AIK fingerprint → epoch at which the member was removed (for §13.9).
     public final Map<String, Integer> removedAiks = new HashMap<>();
 
+    // Rolling checkpoint of our send chain that announceSenderChain() exports
+    // INSTEAD of the live (latest) ratchet position. A member that lacks a recv
+    // chain (new device, was offline) can therefore only decrypt back to the
+    // checkpoint, not to the epoch start. maybeAdvanceCheckpoint() slides it
+    // forward at most once per max-age window (24h, set by the caller), so the
+    // window of past messages exposed by re-sharing — the option-1 forward-
+    // secrecy cost — is bounded to ~24h instead of the whole (possibly unbounded)
+    // epoch. sendCkptKey is the chainKey snapshot AT sendCkptIndex.
+    private byte[] sendCkptKey = new byte[0];
+    private int sendCkptIndex = 0;
+    private long sendCkptTime = 0L;   // unix seconds; 0 = not yet initialised
+
     // Blake2b160 hasher injected once for fingerprint operations.
     private final Blake2b160 hasher;
 
@@ -46,6 +58,9 @@ public final class GroupSession {
         SenderChain sc = new SenderChain(0, ck);
         GroupSession gs = new GroupSession(roomJID, myAik, myDeviceId, hasher, 0, sc);
         gs.members.addAll(members);
+        gs.sendCkptKey   = Arrays.copyOf(sc.chainKey, 32);
+        gs.sendCkptIndex = 0;
+        gs.sendCkptTime  = 0L;
         return gs;
     }
 
@@ -67,16 +82,50 @@ public final class GroupSession {
         removedAiks.put(aikFp, epoch);
     }
 
-    // Build a SenderChainAnnouncement for the current sendChain.
+    // Slide the announce checkpoint forward to the CURRENT send position once the
+    // max-age window has elapsed. {@code now} is unix seconds; {@code maxAgeSeconds}
+    // bounds the re-shareable history / forward-secrecy window (e.g. 24h). The
+    // first call in an epoch just stamps the start time (checkpoint stays at
+    // index 0 so a member joining early in the epoch still gets it whole).
+    // Returns true iff the checkpoint actually moved (so the caller can persist).
+    public boolean maybeAdvanceCheckpoint(long now, long maxAgeSeconds) {
+        if (sendChain == null) return false;
+        if (sendCkptTime == 0L) {
+            sendCkptTime = now;
+            return false;
+        }
+        if (now - sendCkptTime >= maxAgeSeconds) {
+            sendCkptKey   = Arrays.copyOf(sendChain.chainKey, 32);
+            sendCkptIndex = sendChain.nextIndex;
+            sendCkptTime  = now;
+            return true;
+        }
+        return false;
+    }
+
+    // Build a SenderChainAnnouncement for our send chain. Exports the rolling
+    // CHECKPOINT (bounded history) rather than the live position, so a member
+    // lacking a recv chain can decrypt back only to the checkpoint (≤ max-age
+    // old), not the whole epoch. Falls back to the live position for a session
+    // that has no stored checkpoint key (defensive; create()/rotateEpoch() always
+    // stamp one).
     public SenderChainAnnouncement announceSenderChain() {
-        byte[] ck = Arrays.copyOf(sendChain.chainKey, 32);
+        final byte[] ck;
+        final long nextIndex;
+        if (sendCkptKey != null && sendCkptKey.length == 32) {
+            ck = Arrays.copyOf(sendCkptKey, 32);
+            nextIndex = sendCkptIndex & 0xFFFFFFFFL;
+        } else {
+            ck = Arrays.copyOf(sendChain.chainKey, 32);
+            nextIndex = sendChain.nextIndex & 0xFFFFFFFFL;
+        }
         return new SenderChainAnnouncement(
                 myAik,
                 myDeviceId & 0xFFFFFFFFL,
                 roomJID,
                 epoch & 0xFFFFFFFFL,
                 ck,
-                sendChain.nextIndex & 0xFFFFFFFFL);
+                nextIndex);
     }
 
     // Accept a SenderChainAnnouncement from a peer.
@@ -103,13 +152,27 @@ public final class GroupSession {
         SenderChain sc = new SenderChain((int) ann.epoch, ann.chainKey);
         sc.nextIndex = (int) ann.nextIndex;
         RecvKey key = new RecvKey(fp, (int) ann.senderDeviceId, (int) ann.epoch);
-        recvChains.put(key, sc);
+        // Install ONCE per (sender, device, epoch). Announcements now carry a
+        // forward-MOVING checkpoint; overwriting a recv chain we already ratcheted
+        // forward with a LATER checkpoint would skip us past (and permanently lose)
+        // messages between our position and the new checkpoint. A member that
+        // already holds a chain for this epoch simply ratchets it forward / catches
+        // up via MAM instead of re-installing.
+        if (!recvChains.containsKey(key)) {
+            recvChains.put(key, sc);
+        }
     }
 
     // Rotate epoch: increment, generate a new random sendChain for the new epoch.
     private void rotateEpoch() {
         epoch++;
         sendChain = new SenderChain(epoch, freshChainKey());
+        // Fresh epoch → the checkpoint restarts at the new chain's index 0, so
+        // early members of the new epoch still get it whole; it then slides
+        // forward again via maybeAdvanceCheckpoint.
+        sendCkptKey   = Arrays.copyOf(sendChain.chainKey, 32);
+        sendCkptIndex = 0;
+        sendCkptTime  = 0L;
     }
 
     private static byte[] freshChainKey() {

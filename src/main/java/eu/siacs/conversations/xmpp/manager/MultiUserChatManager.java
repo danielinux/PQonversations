@@ -470,10 +470,25 @@ public class MultiUserChatManager extends AbstractManager {
             service.persistSelfNick(user, modified);
             invokeRenameListener(mucOptions, true);
             service.getAvatarService().clear(mucOptions);
+            // Our own (re)join: re-broadcast our sender-chain checkpoint so existing
+            // members refresh our recv chain and can decrypt our recent history via
+            // MAM. Rate-limited per room; no-op for non-x3dhpq rooms.
+            final var gcsSelf = service.getGroupCryptoService(account);
+            if (gcsSelf != null) {
+                gcsSelf.maybeReannounceGroup(from.asBareJid());
+            }
         } else {
             final var previousMembers = mucOptions.getMembers();
             mucOptions.updateUser(user, null);
             fetchDeviceIdsIfNeeded(previousMembers, user);
+            // Another member's presence appeared/refreshed: re-broadcast our
+            // sender-chain checkpoint so a RETURNING member promptly gets it (and
+            // can then decrypt recent history via MAM) instead of waiting for our
+            // next message. Rate-limited per room; no-op for non-x3dhpq rooms.
+            final var gcsPeer = service.getGroupCryptoService(account);
+            if (gcsPeer != null) {
+                gcsPeer.maybeReannounceGroup(from.asBareJid());
+            }
         }
         if (codes.contains(MucUser.STATUS_CODE_ROOM_CREATED)
                 && mucOptions.autoPushConfiguration()) {

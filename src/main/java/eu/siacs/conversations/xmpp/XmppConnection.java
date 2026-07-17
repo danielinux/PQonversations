@@ -1461,6 +1461,19 @@ public class XmppConnection implements Runnable {
         this.messageListener.accept(packet);
     }
 
+    /**
+     * Re-inject a message stanza back through the normal message parser. Used by
+     * {@link eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService} to re-deliver
+     * a group message whose decryption was deferred (no recv chain yet) once the
+     * sender's sender-chain announcement has installed the recv chain — MAM would
+     * dedupe it and never re-deliver it.
+     */
+    public void injectMessagePacket(
+            final im.conversations.android.xmpp.model.stanza.Message packet) {
+        if (packet == null) return;
+        this.messageListener.accept(packet);
+    }
+
     private void processPresence(final Tag.Start currentTag) throws IOException {
         final var packet = processPacket(currentTag, Presence.class);
         if (packet.isInvalid()) {
