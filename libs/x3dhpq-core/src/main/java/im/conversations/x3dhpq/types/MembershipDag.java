@@ -37,6 +37,22 @@ public final class MembershipDag {
         public long epoch = 0;
     }
 
+    public static final class RecomputeResult {
+        public final State state;
+        public final Set<String> missingParents = new HashSet<>();
+        public final Set<String> unknownSigners = new HashSet<>();
+        public final Set<String> invalidSigners = new HashSet<>();
+        public int unauthorizedEntries = 0;
+
+        private RecomputeResult(State state) {
+            this.state = state;
+        }
+
+        public boolean hasPendingEntries() {
+            return !missingParents.isEmpty() || !unknownSigners.isEmpty();
+        }
+    }
+
     // entry_hash_hex -> entry
     private final Map<String, JournalEntryV2> store = new LinkedHashMap<>();
 
@@ -60,7 +76,7 @@ public final class MembershipDag {
         return true;
     }
 
-    private List<JournalEntryV2> canonicalOrder() {
+    private List<JournalEntryV2> canonicalOrder(Set<String> missingParentsOut) {
         // includable fixpoint: an entry is includable iff all its ancestors are present.
         final Set<String> includable = new HashSet<>();
         boolean changed = true;
@@ -74,6 +90,14 @@ public final class MembershipDag {
                     if (!store.containsKey(ph) || !includable.contains(ph)) { all = false; break; }
                 }
                 if (all) { includable.add(en.getKey()); changed = true; }
+            }
+        }
+        if (missingParentsOut != null) {
+            for (final JournalEntryV2 e : store.values()) {
+                for (final byte[] p : e.getParents()) {
+                    final String ph = JournalEntryV2.hex(p);
+                    if (!store.containsKey(ph)) missingParentsOut.add(ph);
+                }
             }
         }
         final Map<String, Integer> indeg = new HashMap<>();
@@ -118,15 +142,26 @@ public final class MembershipDag {
     }
 
     public State recompute(final AikResolver resolver) {
+        return recomputeDetailed(resolver).state;
+    }
+
+    public RecomputeResult recomputeDetailed(final AikResolver resolver) {
         final State st = new State();
-        final List<JournalEntryV2> order = canonicalOrder();
+        final RecomputeResult result = new RecomputeResult(st);
+        final List<JournalEntryV2> order = canonicalOrder(result.missingParents);
         final Map<String, String> removalNode = new HashMap<>();
         for (int i = 0; i < order.size(); i++) {
             final JournalEntryV2 e = order.get(i);
             final String signerHex = JournalEntryV2.hex(e.getSignerFp());
             final AccountIdentityPub signer = resolver.resolve(signerHex);
-            if (signer == null) continue;
-            if (!e.verify(signer)) continue;
+            if (signer == null) {
+                result.unknownSigners.add(signerHex);
+                continue;
+            }
+            if (!e.verify(signer)) {
+                result.invalidSigners.add(signerHex);
+                continue;
+            }
 
             if (i == 0) {
                 st.ownerFp = signerHex;
@@ -140,7 +175,10 @@ public final class MembershipDag {
                 continue;
             }
             st.epoch = i;
-            if (!st.admins.contains(signerHex)) continue; // signer must be owner-or-admin
+            if (!st.admins.contains(signerHex)) {
+                result.unauthorizedEntries++;
+                continue;
+            }
 
             final byte[] subject = JournalEntryV2.parseSubjectFp(e.getPayload());
             final String subjHex = subject != null ? JournalEntryV2.hex(subject) : "";
@@ -177,7 +215,7 @@ public final class MembershipDag {
                     break;
             }
         }
-        return st;
+        return result;
     }
 
     /** Import a genesis Snapshot's asserted state. Owner already established by

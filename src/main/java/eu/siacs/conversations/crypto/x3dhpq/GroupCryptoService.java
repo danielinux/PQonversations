@@ -42,6 +42,9 @@ public class GroupCryptoService {
 
     private static final String TAG = "GroupCryptoService";
     private static final int MAX_QUEUE = 64;
+    private static final int MAX_GROUP_SYNC_BYTES = 1024 * 1024;
+    private static final int MAX_GROUP_SYNC_ENTRIES = 4096;
+    private static final int MAX_GROUP_SYNC_ENTRY_BYTES = 256 * 1024;
 
     private final Account account;
     private final XmppConnectionService mXmppConnectionService;
@@ -89,6 +92,7 @@ public class GroupCryptoService {
         // our sender chain to, so re-announcing doesn't fan out a message
         // storm on every send.
         final java.util.Set<String> announcedTo = new java.util.HashSet<>();
+        boolean replayingPersistentJournal = false;
 
         private static final class QueuedAnnouncement {
             final Jid senderJid;
@@ -119,6 +123,9 @@ public class GroupCryptoService {
         if (account == null || mXmppConnectionService == null) return;
         final String roomStr = roomJid.asBareJid().toString();
         final RoomState state = rooms.computeIfAbsent(roomStr, k -> new RoomState());
+        if (replayPersistentJournal(roomJid.asBareJid(), state)) {
+            announceSenderChain(roomJid.asBareJid());
+        }
         triggerMamCatchupAfterChain(roomJid.asBareJid(), state);
     }
 
@@ -159,6 +166,61 @@ public class GroupCryptoService {
         }
     }
 
+    private static String journalEntryContentHash(final byte[] entryBytes) {
+        try {
+            final byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(entryBytes);
+            final StringBuilder sb = new StringBuilder();
+            for (final byte b : h) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (final java.security.NoSuchAlgorithmException e) {
+            return "len-" + entryBytes.length;
+        }
+    }
+
+    private boolean replayPersistentJournal(final Jid roomJidBare, final RoomState state) {
+        if (db == null || account == null) return false;
+        final String roomStr = roomJidBare.toString();
+        final List<DatabaseBackend.X3dhpqGroupMembershipRow> rows =
+                db.listX3dhpqGroupMembershipEntries(account.getUuid(), roomStr);
+        if (rows == null || rows.isEmpty()) return false;
+        boolean replayed = false;
+        synchronized (state) {
+            state.replayingPersistentJournal = true;
+        }
+        try {
+            for (final DatabaseBackend.X3dhpqGroupMembershipRow row : rows) {
+                final byte[] bytes = row.journalBlob();
+                if (bytes == null || bytes.length == 0) continue;
+                processMembershipEntryBytes(roomJidBare, journalEntryDedupId(bytes), bytes);
+                replayed = true;
+            }
+        } finally {
+            synchronized (state) {
+                state.replayingPersistentJournal = false;
+                state.announcedTo.clear();
+            }
+        }
+        if (replayed) {
+            flushAnnouncementQueue(roomStr);
+            Log.d(Config.LOGTAG, TAG + ": replayed " + rows.size()
+                    + " persisted journal entr(ies) for " + roomStr);
+        }
+        return replayed;
+    }
+
+    private void persistJournalEntry(
+            final Jid roomJidBare,
+            final byte[] entryBytes,
+            final String itemId,
+            final RoomState state) {
+        if (db == null || account == null || roomJidBare == null || entryBytes == null) return;
+        if (state != null && state.replayingPersistentJournal) return;
+        final String hash = journalEntryContentHash(entryBytes);
+        db.putX3dhpqGroupMembershipEntry(
+                account.getUuid(), roomJidBare.toString(), hash, entryBytes,
+                itemId != null ? itemId : hash, System.currentTimeMillis() / 1000L);
+    }
+
     // ---- group-sync: bundle the journal with the sender-chain announcement ----
     // Layout (big-endian): uint16 version(=1) | uint32 annLen | ann |
     //                      uint32 n | { uint32 entryLen | entry } * n
@@ -189,24 +251,29 @@ public class GroupCryptoService {
     // Returns {annBytes, entry0, entry1, ...} (ann at index 0), or null if malformed.
     private static byte[][] parseGroupSync(final byte[] b) {
         try {
+            if (b == null || b.length < 10 || b.length > MAX_GROUP_SYNC_BYTES) return null;
             final java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(b).order(java.nio.ByteOrder.BIG_ENDIAN);
             final int ver = buf.getShort() & 0xFFFF;
             if (ver != 1) return null;
+            if (buf.remaining() < 4) return null;
             final int annLen = buf.getInt();
-            if (annLen < 0 || annLen > buf.remaining()) return null;
+            if (annLen <= 0 || annLen > MAX_GROUP_SYNC_ENTRY_BYTES || annLen > buf.remaining()) return null;
             final byte[] ann = new byte[annLen];
             buf.get(ann);
+            if (buf.remaining() < 4) return null;
             final int n = buf.getInt();
-            if (n < 0 || n > 1_000_000) return null;
+            if (n < 0 || n > MAX_GROUP_SYNC_ENTRIES) return null;
             final java.util.List<byte[]> out = new java.util.ArrayList<>();
             out.add(ann);
             for (int i = 0; i < n; i++) {
+                if (buf.remaining() < 4) return null;
                 final int len = buf.getInt();
-                if (len < 0 || len > buf.remaining()) return null;
+                if (len <= 0 || len > MAX_GROUP_SYNC_ENTRY_BYTES || len > buf.remaining()) return null;
                 final byte[] e = new byte[len];
                 buf.get(e);
                 out.add(e);
             }
+            if (buf.hasRemaining()) return null;
             return out.toArray(new byte[0][]);
         } catch (final RuntimeException e) {
             return null;
@@ -255,6 +322,7 @@ public class GroupCryptoService {
                     final boolean fresh = state.dag.ingest(entryBytes);
                     state.v2Active = true;
                     if (itemId != null) state.appliedMembershipItemIds.add(itemId);
+                    persistJournalEntry(roomJidBare, entryBytes, itemId, state);
                     if (fresh) {
                         recomputeDagAndRebuild(roomStr, state);
                     }
@@ -274,6 +342,7 @@ public class GroupCryptoService {
                     if (itemId != null) {
                         state.appliedMembershipItemIds.add(itemId);
                     }
+                    persistJournalEntry(roomJidBare, entryBytes, itemId, state);
                     rebuildGroupSession(roomStr, state);
                     // The room now has a verified membership journal → durably mark
                     // the conversation as an x3dhpq secret group so encryption
@@ -419,6 +488,7 @@ public class GroupCryptoService {
         }
 
         persistGroupSession(roomStr, state);
+        state.announcedTo.clear();
     }
 
     // -------------------------------------------------------------------------
@@ -447,8 +517,23 @@ public class GroupCryptoService {
 
     /** Recompute the folded DAG state and (re)build the live group session from it. */
     private void recomputeDagAndRebuild(final String roomStr, final RoomState state) {
-        final MembershipDag.State ds = state.dag.recompute(dagResolver(state));
+        final MembershipDag.RecomputeResult rr = state.dag.recomputeDetailed(dagResolver(state));
+        final MembershipDag.State ds = rr.state;
         state.dagState = ds;
+        if (!rr.missingParents.isEmpty()) {
+            Log.w(Config.LOGTAG, TAG + ": v2 journal pending " + rr.missingParents.size()
+                    + " missing parent(s) for " + roomStr + "; requesting MAM catch-up");
+        }
+        if (!rr.unknownSigners.isEmpty()) {
+            Log.w(Config.LOGTAG, TAG + ": v2 journal pending " + rr.unknownSigners.size()
+                    + " unknown signer(s) for " + roomStr);
+            requestLikelyMissingBundles(state);
+        }
+        if (!rr.invalidSigners.isEmpty() || rr.unauthorizedEntries > 0) {
+            Log.w(Config.LOGTAG, TAG + ": v2 journal ignored invalid/unauthorized entr(ies) for "
+                    + roomStr + " invalidSigners=" + rr.invalidSigners.size()
+                    + " unauthorized=" + rr.unauthorizedEntries);
+        }
         // The fold only includes the causally-stable prefix (entries whose
         // ancestors are all present); entries with missing parents stay excluded
         // until they resolve. So driving the session — and therefore epoch/
@@ -456,6 +541,23 @@ public class GroupCryptoService {
         // "causally-stable prefix" epoch caveat: rotation never binds to an entry
         // whose parents are still outstanding.
         rebuildGroupSessionFromDag(roomStr, state, ds);
+        if (rr.hasPendingEntries()) {
+            triggerMamCatchupAfterChain(Jid.of(roomStr), state);
+        }
+    }
+
+    private void requestLikelyMissingBundles(final RoomState state) {
+        if (account == null || account.getX3dhpqService() == null || state == null
+                || state.session == null) {
+            return;
+        }
+        for (final GroupMember member : new ArrayList<>(state.session.members)) {
+            if (member == null || member.aik == null) continue;
+            final Jid jid = findJidByAikFp(member.aik.fingerprint(X3dhpqCrypto.BLAKE2B_160));
+            if (jid != null) {
+                account.getX3dhpqService().requestPeerDeviceList(jid.asBareJid());
+            }
+        }
     }
 
     /**
@@ -519,6 +621,7 @@ public class GroupCryptoService {
         }
 
         persistGroupSession(roomStr, state);
+        state.announcedTo.clear();
     }
 
     private void persistGroupSession(String roomStr, RoomState state) {
@@ -954,11 +1057,7 @@ public class GroupCryptoService {
         if (peerAik == null) {
             Log.w(Config.LOGTAG, TAG + ": publishAddMember deferred — no cached AIK for "
                     + peerJid + "; fetching bundle and queuing for retry");
-            synchronized (pendingMemberPublishes) {
-                pendingMemberPublishes
-                        .computeIfAbsent(roomStr, k -> new java.util.HashSet<>())
-                        .add(peerJid.asBareJid().toString());
-            }
+            queuePendingMemberPublish(roomStr, peerJid);
             account.getX3dhpqService().requestPeerDeviceList(peerJid.asBareJid());
             return;
         }
@@ -978,6 +1077,15 @@ public class GroupCryptoService {
                 final byte[] prevHash = previousHashOrZero(state);
                 publishOneAddMember(roomBare, ownerKey, seq, prevHash, peerFpRaw, peerAik);
             }
+        }
+    }
+
+    private void queuePendingMemberPublish(final String roomStr, final Jid memberJid) {
+        if (roomStr == null || memberJid == null) return;
+        synchronized (pendingMemberPublishes) {
+            pendingMemberPublishes
+                    .computeIfAbsent(roomStr, k -> new java.util.HashSet<>())
+                    .add(memberJid.asBareJid().toString());
         }
     }
 
@@ -1090,6 +1198,22 @@ public class GroupCryptoService {
         authorV2(roomJid, memberJid, JournalEntryV2.ACTION_ADD_MEMBER, false);
     }
 
+    /**
+     * Route member addition through whichever journal engine is live for the
+     * room. Used by invites and deferred bundle retries so migrated rooms keep
+     * authoring v2 AddMember entries instead of appending legacy v1 state.
+     */
+    public void addMemberUnified(final Jid roomJid, final Jid memberJid) {
+        final Jid roomBare = roomJid.asBareJid();
+        final RoomState st = rooms.computeIfAbsent(roomBare.toString(), k -> new RoomState());
+        replayPersistentJournal(roomBare, st);
+        if (st != null && st.v2Active) {
+            addMemberV2(roomJid, memberJid);
+        } else {
+            publishAddMember(roomJid, memberJid);
+        }
+    }
+
     /** Remove (kick, ban=false) or ban (ban=true) a member via the v2 engine. */
     public void publishRemoveMemberV2(final Jid roomJid, final Jid memberJid, final boolean ban) {
         authorV2(roomJid, memberJid, JournalEntryV2.ACTION_REMOVE_MEMBER, ban);
@@ -1124,7 +1248,11 @@ public class GroupCryptoService {
         }
         final AccountIdentityPub subjectAik = resolvePeerAikCached(subjectJid);
         if (subjectAik == null) {
-            Log.w(Config.LOGTAG, TAG + ": authorV2 skipped — no cached AIK for " + subjectJid);
+            Log.w(Config.LOGTAG, TAG + ": authorV2 deferred — no cached AIK for " + subjectJid);
+            if (action == JournalEntryV2.ACTION_ADD_MEMBER) {
+                queuePendingMemberPublish(roomStr, subjectJid);
+                account.getX3dhpqService().requestPeerDeviceList(subjectJid.asBareJid());
+            }
             return;
         }
         final byte[] subjectFpRaw = blakeFpBytes(subjectAik);
@@ -1232,6 +1360,7 @@ public class GroupCryptoService {
         state.dag.ingest(bytes);
         state.v2Active = true;
         state.appliedMembershipItemIds.add(journalEntryDedupId(bytes));
+        persistJournalEntry(roomBare, bytes, journalEntryDedupId(bytes), state);
         broadcastJournalEntry(roomBare, bytes);
     }
 
@@ -1395,6 +1524,8 @@ public class GroupCryptoService {
         try {
             if (st != null) {
                 st.journal.append(entryBytes, aikLookup);
+                st.appliedMembershipItemIds.add(journalEntryDedupId(entryBytes));
+                persistJournalEntry(roomBare, entryBytes, journalEntryDedupId(entryBytes), st);
                 rebuildGroupSession(roomBare.toString(), st);
             }
         } catch (Exception e) {
@@ -1457,6 +1588,8 @@ public class GroupCryptoService {
         try {
             if (st != null) {
                 st.journal.append(entryBytes, aikLookup);
+                st.appliedMembershipItemIds.add(journalEntryDedupId(entryBytes));
+                persistJournalEntry(roomBare, entryBytes, journalEntryDedupId(entryBytes), st);
                 rebuildGroupSession(roomBare.toString(), st);
             }
         } catch (Exception e) {
@@ -1511,7 +1644,7 @@ public class GroupCryptoService {
         }
         for (String roomStr : roomsToRetry) {
             try {
-                publishAddMember(Jid.of(roomStr), peerBareJid);
+                addMemberUnified(Jid.of(roomStr), peerBareJid);
             } catch (Exception e) {
                 Log.w(Config.LOGTAG, TAG + ": onPeerBundleArrived retry failed for "
                         + roomStr + ": " + e.getMessage());

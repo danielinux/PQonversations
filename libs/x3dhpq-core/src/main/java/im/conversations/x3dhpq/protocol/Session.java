@@ -300,7 +300,7 @@ public final class Session {
             kemSendPub = Arrays.copyOf(header.kemPubForReply, header.kemPubForReply.length);
         }
 
-        String dhStr = new String(header.dhPub);
+        String dhStr = dhStr(header.dhPub);
 
         // Check skipped-key cache first (handles out-of-order delivery).
         SkippedKey sk = new SkippedKey(dhStr, (int) header.n);
@@ -603,7 +603,7 @@ public final class Session {
 
     // Helper to make a null-safe dhStr.
     private static String dhStr(byte[] dhPub) {
-        return dhPub != null ? new String(dhPub) : "";
+        return dhPub != null ? new String(dhPub, StandardCharsets.ISO_8859_1) : "";
     }
 
     // -------------------------------------------------------------------------

@@ -138,8 +138,53 @@ class MembershipDagTest {
         final JournalEntryV2 add = sign(notAdmin, 1, heads(g.computeHash()), JournalEntryV2.ACTION_ADD_MEMBER, mp(m.fp), 1001);
         final MembershipDag dag = new MembershipDag();
         dag.ingest(g.marshal()); dag.ingest(add.marshal());
-        final MembershipDag.State st = dag.recompute(resolver());
+        final MembershipDag.RecomputeResult rr = dag.recomputeDetailed(resolver());
+        final MembershipDag.State st = rr.state;
         assertFalse(st.members.contains(m.fpHex), "add by non-admin must be rejected");
+        assertEquals(1, rr.unauthorizedEntries, "unauthorized add should be surfaced");
+    }
+
+    @Test
+    void missingParentStaysPending() {
+        final Id owner = makeId(), m = makeId();
+        final byte[] missing = new byte[32];
+        java.util.Arrays.fill(missing, (byte) 0xA5);
+        final JournalEntryV2 add = sign(owner, 1, heads(missing), JournalEntryV2.ACTION_ADD_MEMBER, mp(m.fp), 1001);
+        final MembershipDag dag = new MembershipDag();
+        dag.ingest(add.marshal());
+        final MembershipDag.RecomputeResult rr = dag.recomputeDetailed(resolver());
+        assertTrue(rr.missingParents.contains(JournalEntryV2.hex(missing)));
+        assertFalse(rr.state.members.contains(m.fpHex), "entry with missing parent must not fold");
+    }
+
+    @Test
+    void unknownSignerStaysPending() {
+        final Id owner = makeId(), unknown = makeId(), m = makeId();
+        registry.remove(unknown.fpHex);
+        final JournalEntryV2 g = sign(owner, 0, heads(null), JournalEntryV2.ACTION_ADD_ADMIN, mp(owner.fp), 1000);
+        final JournalEntryV2 add = sign(unknown, 1, heads(g.computeHash()), JournalEntryV2.ACTION_ADD_MEMBER, mp(m.fp), 1001);
+        final MembershipDag dag = new MembershipDag();
+        dag.ingest(g.marshal());
+        dag.ingest(add.marshal());
+        final MembershipDag.RecomputeResult rr = dag.recomputeDetailed(resolver());
+        assertTrue(rr.unknownSigners.contains(unknown.fpHex));
+        assertFalse(rr.state.members.contains(m.fpHex), "unknown signer must not authorize state");
+    }
+
+    @Test
+    void removeMemberBanPreventsReadd() {
+        final Id owner = makeId(), a = makeId(), m = makeId();
+        final JournalEntryV2 g = sign(owner, 0, heads(null), JournalEntryV2.ACTION_ADD_ADMIN, mp(owner.fp), 1000);
+        final JournalEntryV2 prom = sign(owner, 1, heads(g.computeHash()), JournalEntryV2.ACTION_ADD_ADMIN, mp(a.fp), 1001);
+        final JournalEntryV2 add = sign(a, 2, heads(prom.computeHash()), JournalEntryV2.ACTION_ADD_MEMBER, mp(m.fp), 1002);
+        final JournalEntryV2 ban = sign(a, 3, heads(add.computeHash()), JournalEntryV2.ACTION_REMOVE_MEMBER,
+                JournalEntryV2.buildRemovePayload(m.fp, 0, true), 1003);
+        final JournalEntryV2 readd = sign(owner, 4, heads(ban.computeHash()), JournalEntryV2.ACTION_ADD_MEMBER, mp(m.fp), 1004);
+        final MembershipDag dag = new MembershipDag();
+        for (final JournalEntryV2 e : new JournalEntryV2[]{g, prom, add, ban, readd}) dag.ingest(e.marshal());
+        final MembershipDag.State st = dag.recompute(resolver());
+        assertTrue(st.banned.contains(m.fpHex));
+        assertFalse(st.members.contains(m.fpHex), "banned member must not be re-added");
     }
 
     @Test

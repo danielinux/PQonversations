@@ -364,6 +364,45 @@ class SessionRatchetTest {
     }
 
     @Test
+    void marshalUnmarshal_skippedKeyCacheUsesByteStableDhKey() throws SessionException {
+        boolean exercisedNonDefaultCharsetStableDhPub = false;
+
+        for (int attempt = 0; attempt < 100; attempt++) {
+            Session[] pair = makePair(rootKey, chainKey, ad);
+            Session a = pair[0];
+            Session b = pair[1];
+
+            Session.EncryptResult enc0 = a.encrypt("m0".getBytes(StandardCharsets.UTF_8));
+            Session.EncryptResult enc1 = a.encrypt("m1".getBytes(StandardCharsets.UTF_8));
+            Session.EncryptResult enc2 = a.encrypt("m2".getBytes(StandardCharsets.UTF_8));
+
+            if (Arrays.equals(
+                    new String(enc0.header.dhPub).getBytes(StandardCharsets.ISO_8859_1),
+                    enc0.header.dhPub)) {
+                continue;
+            }
+            exercisedNonDefaultCharsetStableDhPub = true;
+
+            b.decrypt(enc2.header, enc2.ciphertext); // caches skipped keys for m0/m1
+            Session restored = Session.unmarshal(b.marshal());
+
+            Assertions.assertArrayEquals(
+                    "m0".getBytes(StandardCharsets.UTF_8),
+                    restored.decrypt(enc0.header, enc0.ciphertext),
+                    "skipped keys must survive persistence for arbitrary DH public-key bytes");
+            Assertions.assertArrayEquals(
+                    "m1".getBytes(StandardCharsets.UTF_8),
+                    restored.decrypt(enc1.header, enc1.ciphertext),
+                    "all cached skipped keys must remain addressable after restore");
+            return;
+        }
+
+        Assertions.assertTrue(
+                exercisedNonDefaultCharsetStableDhPub,
+                "test setup must exercise a DH public key that is not default-charset stable");
+    }
+
+    @Test
     void marshalUnmarshal_continueSending() throws SessionException {
         // Alice sends, Bob decrypts, Alice marshals/unmarshals, continues sending.
         Session.EncryptResult enc0 = alice.encrypt("pre-marshal".getBytes(StandardCharsets.UTF_8));

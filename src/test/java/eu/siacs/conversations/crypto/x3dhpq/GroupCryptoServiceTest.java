@@ -15,6 +15,9 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.ArrayList;
@@ -182,5 +185,62 @@ public class GroupCryptoServiceTest {
         Assert.assertEquals(2L,   ann2.epoch);
         Assert.assertEquals(5L,   ann2.nextIndex);
         Assert.assertArrayEquals(ck, ann2.chainKey);
+    }
+
+    @Test
+    public void parseGroupSync_rejectsMalformedBounds() throws Exception {
+        Assert.assertNull(parseGroupSync(new byte[] {0, 1, 0}));
+
+        byte[] zeroAnnouncement = ByteBuffer.allocate(10)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putShort((short) 1)
+                .putInt(0)
+                .putInt(0)
+                .array();
+        Assert.assertNull(parseGroupSync(zeroAnnouncement));
+
+        byte[] trailing = ByteBuffer.allocate(12)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putShort((short) 1)
+                .putInt(1)
+                .put((byte) 0x42)
+                .putInt(0)
+                .put((byte) 0x7f)
+                .array();
+        Assert.assertNull(parseGroupSync(trailing));
+
+        byte[] truncatedEntry = ByteBuffer.allocate(15)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putShort((short) 1)
+                .putInt(1)
+                .put((byte) 0x42)
+                .putInt(1)
+                .putInt(4)
+                .array();
+        Assert.assertNull(parseGroupSync(truncatedEntry));
+    }
+
+    @Test
+    public void parseGroupSync_acceptsValidFrame() throws Exception {
+        byte[] frame = ByteBuffer.allocate(16)
+                .order(ByteOrder.BIG_ENDIAN)
+                .putShort((short) 1)
+                .putInt(1)
+                .put((byte) 0x42)
+                .putInt(1)
+                .putInt(1)
+                .put((byte) 0x24)
+                .array();
+        byte[][] parsed = parseGroupSync(frame);
+        Assert.assertNotNull(parsed);
+        Assert.assertEquals(2, parsed.length);
+        Assert.assertArrayEquals(new byte[] {(byte) 0x42}, parsed[0]);
+        Assert.assertArrayEquals(new byte[] {(byte) 0x24}, parsed[1]);
+    }
+
+    private static byte[][] parseGroupSync(byte[] frame) throws Exception {
+        Method m = GroupCryptoService.class.getDeclaredMethod("parseGroupSync", byte[].class);
+        m.setAccessible(true);
+        return (byte[][]) m.invoke(null, frame);
     }
 }

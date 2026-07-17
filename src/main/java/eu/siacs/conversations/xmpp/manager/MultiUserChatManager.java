@@ -1382,13 +1382,13 @@ public class MultiUserChatManager extends AbstractManager {
                 // codepath, otherwise the mediated invite that follows is never
                 // sent and the invitee can't join.
                 try {
-                    gcs.publishAddMember(
+                    gcs.addMemberUnified(
                             conversation.getAddress().asBareJid(),
                             address.asBareJid());
                 } catch (Throwable t) {
                     Log.e(Config.LOGTAG,
                             conversation.getAccount().getJid().asBareJid()
-                                    + ": publishAddMember threw — invite proceeds without journal bootstrap",
+                                    + ": addMemberUnified threw — invite proceeds without journal bootstrap",
                             t);
                 }
             }
