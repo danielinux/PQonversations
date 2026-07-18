@@ -121,8 +121,8 @@ public class ConversationsActivity extends QrCodeProcessingActivity
     public static final int REQUEST_OPEN_MESSAGE = 0x9876;
     public static final int REQUEST_PLAY_PAUSE = 0x5432;
 
-    // x3dhpq: per-account guard so the disabled-account -> pair-screen navigation
-    // (navigateToPairScreenIfAccountPending) is non-nagging — shown at most once per
+    // x3dhpq: per-account guard so the disabled-account pairing prompt
+    // (promptPairIfAccountPending) is non-nagging — shown at most once per
     // pending "session"/state.
     private static final String PREF_X3DHPQ_PENDING_PROMPT_SHOWN_PREFIX =
             "x3dhpq_pending_prompt_shown_";
@@ -158,6 +158,11 @@ public class ConversationsActivity extends QrCodeProcessingActivity
         for (@IdRes int id : FRAGMENT_ID_NOTIFICATION_ORDER) {
             refreshFragment(id);
         }
+        // x3dhpq: onAccountUpdate() routes here on every account status change. A cold start
+        // reaches onBackendConnected() while the account is still connecting, so the pending
+        // prompt there no-ops; re-evaluate once the FIRST successful connection completes so a
+        // disabled/pending-enrollment device gets its pairing prompt without digging into menus.
+        promptPairIfAccountPending();
     }
 
     @Override
@@ -203,7 +208,7 @@ public class ConversationsActivity extends QrCodeProcessingActivity
             if (openBatteryOptimizationDialogIfNeeded()) {
                 return;
             }
-            if (navigateToPairScreenIfAccountPending()) {
+            if (promptPairIfAccountPending()) {
                 return;
             }
             requestNotificationPermissionIfNeeded();
@@ -213,20 +218,39 @@ public class ConversationsActivity extends QrCodeProcessingActivity
     /**
      * x3dhpq: on reaching the main conversation-list UI post-login, if any logged-in account
      * is still §10.6.1 pending-enrollment (disabled — not yet authorized by an existing
-     * device), navigate straight to the associate/"pair this device" screen instead of
-     * leaving the user to discover it in settings. Guarded so it fires at most once per
-     * pending "session" (a per-account preference flag, cleared once the account is no
-     * longer pending so a LATER pending state — e.g. after a subsequent account reset —
-     * is prompted again); never fires for an authorized account. A normal (non-modal)
-     * Activity, so the user can always back out.
+     * device), surface a startup prompt offering to pair this device, instead of leaving the
+     * user to discover the action buried in the disabled-account options menu. Presented as a
+     * non-modal dialog (matching {@link #openBatteryOptimizationDialogIfNeeded}) whose only
+     * action STARTS pairing — it is strictly non-destructive: it never generates or destroys
+     * identity, it just deep-links into the device-management screen where the user decides.
      *
-     * @return true if navigation was triggered (caller should not stack further dialogs).
+     * <p>Guarded so it fires at most once per pending "session" (a per-account preference flag,
+     * cleared once the account is no longer pending so a LATER pending state — e.g. after a
+     * subsequent account reset — is prompted again); never fires for an authorized account.
+     *
+     * <p>Evaluated both from {@link #showDialogsIfMainIsOverview()} at backend-connect and from
+     * {@link #refreshUiReal()} on every account update: on a cold start the account is usually
+     * still connecting when onBackendConnected runs ({@code isOnlineAndConnected()} false), so
+     * the connect-time check no-ops; the account-update re-check is what actually lands the
+     * prompt once the FIRST successful connection completes.
+     *
+     * @return true if a prompt was shown (caller should not stack further dialogs).
      */
-    private boolean navigateToPairScreenIfAccountPending() {
+    private boolean promptPairIfAccountPending() {
+        if (xmppConnectionService == null) {
+            return false;
+        }
+        // Only prompt while the conversation list is on screen — never pop a dialog over an
+        // open conversation.
+        final Fragment mainFragment =
+                getSupportFragmentManager().findFragmentById(R.id.main_fragment);
+        if (!(mainFragment instanceof ConversationsOverviewFragment)) {
+            return false;
+        }
         final SharedPreferences prefs = getPreferences();
         final SharedPreferences.Editor editor = prefs.edit();
         boolean changed = false;
-        boolean navigated = false;
+        Account pendingAccount = null;
         for (final Account account : xmppConnectionService.getAccounts()) {
             final String prefKey = PREF_X3DHPQ_PENDING_PROMPT_SHOWN_PREFIX + account.getUuid();
             final eu.siacs.conversations.crypto.x3dhpq.X3dhpqService x3dhpqService =
@@ -249,20 +273,34 @@ public class ConversationsActivity extends QrCodeProcessingActivity
                 // Already prompted once for this pending session — non-nagging.
                 continue;
             }
-            if (!navigated) {
+            if (pendingAccount == null) {
                 editor.putBoolean(prefKey, true);
                 changed = true;
-                // Land on the device-management screen (which shows the "Disabled — waiting
-                // for sync" state and offers the pairing choices) rather than jumping the
-                // user straight into the Pair dialog — let them see the state and decide.
-                startActivity(X3dhpqSelfDevicesActivity.makeIntent(this, account.getUuid()));
-                navigated = true;
+                pendingAccount = account;
             }
         }
         if (changed) {
             editor.apply();
         }
-        return navigated;
+        if (pendingAccount == null) {
+            return false;
+        }
+        final String accountUuid = pendingAccount.getUuid();
+        final MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
+        builder.setTitle(R.string.x3dhpq_pending_enrollment_title);
+        builder.setMessage(R.string.x3dhpq_pending_enrollment_text);
+        builder.setPositiveButton(
+                R.string.x3dhpq_pair_this_device_button,
+                (dialog, which) ->
+                        // Land on the device-management screen (which shows the "Disabled —
+                        // waiting for sync" state and offers the pairing choices) rather than
+                        // jumping the user straight into the Pair dialog — let them decide.
+                        startActivity(X3dhpqSelfDevicesActivity.makeIntent(this, accountUuid)));
+        builder.setNegativeButton(R.string.cancel, null);
+        final AlertDialog dialog = builder.create();
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.show();
+        return true;
     }
 
     private String getBatteryOptimizationPreferenceKey() {

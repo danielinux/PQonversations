@@ -825,7 +825,12 @@ public class GroupCryptoService {
             // A message from a SIBLING device (own AIK, different device id) must
             // fall through and be decrypted so it can be shown as our own
             // outgoing copy received from that other device.
-            if (fromOwnAccount && hdr.senderDeviceId == myDeviceId) {
+            // Compare UNSIGNED: hdr.senderDeviceId is an unsigned 32-bit id widened to long
+            // (built with & 0xFFFFFFFFL), while myDeviceId is a raw int that is negative for
+            // any id >= 2^31. Comparing them directly misses ~half of all device ids (e.g.
+            // 2551948240 vs -1743019056), so this device's own reflection would slip through
+            // and double-show / render empty. Mask to unsigned before comparing.
+            if (fromOwnAccount && hdr.senderDeviceId == (myDeviceId & 0xFFFFFFFFL)) {
                 return null;
             }
 

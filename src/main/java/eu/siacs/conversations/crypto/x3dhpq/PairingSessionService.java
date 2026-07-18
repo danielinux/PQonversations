@@ -147,11 +147,16 @@ public final class PairingSessionService {
             final PairingFsm.Options opts)
             throws Exception {
         final AccountIdentityKey aik = loadAik();
-        // Trust Manifest Phase 2 (contract §E.2): issue the newcomer's DC under the
-        // confirmer's OWN DIK (delegation), not the AIK. The account manifest fold
-        // authorizes the delegated DC via the confirmer's DIK-signed ADD entry (§D2).
-        final DeviceIdentityKey issuerDik = loadDik();
-        final PairingFsm.Existing fsm = new PairingFsm.Existing(aik, issuerDik, code, sid, opts);
+        // Issue the newcomer's OWN DeviceCertificate signed under the account AIK (NOT a
+        // DIK delegation). The newcomer stores this DC and advertises the account AIK
+        // alongside it in every outbound PQXDH/group prekey; the receiver (incl. Dino)
+        // verifies DC.verify(advertisedAik). A DIK-delegated DC does NOT verify against
+        // the AIK there and is rejected with wolfSSL rc=-229 (Ed25519 SIG_VERIFY_E),
+        // stranding a freshly-paired secondary in every group. loadAik() above already
+        // requires AIK_priv, so only a primary can confirm — the DIK-delegation path is
+        // never reachable here. The account manifest is unaffected: buildSnapshotManifest
+        // re-issues every member DC under the publisher's DIK independently of this DC.
+        final PairingFsm.Existing fsm = new PairingFsm.Existing(aik, code, sid, opts);
 
         final ByteBuffer key = ByteBuffer.wrap(sid.clone());
         synchronized (lock) {

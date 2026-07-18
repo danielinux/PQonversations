@@ -94,6 +94,17 @@ public class X3dhpqService {
     // db may be null in the test-only no-arg constructor; null-checked before use
     private final X3dhpqDao db;
 
+    // "<bareJid>/<deviceId>" of recipient devices whose published bundle carries a DC that
+    // does NOT verify against the current account AIK (a dead/forked device that was never
+    // re-paired, e.g. left over after an account reset). Such a device is not a legitimate
+    // recipient — encrypting to it is impossible and it must NOT block delivery to everyone
+    // else. Populated when a fetched bundle fails DC verification, cleared when a later fetch
+    // for the same device verifies (it was re-paired). Fan-out skips these instead of
+    // deferring the whole message. Best-effort in-memory hint; the durable fix is revoking
+    // the device from the account manifest.
+    private final java.util.Set<String> dcInvalidDevices =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     // Registered listeners; last set wins (used for GROUP/RECOVERY dispatch).
     private DeviceListListener deviceListListener;
     private BundleListener bundleListener;
@@ -2017,8 +2028,15 @@ public class X3dhpqService {
             Log.e(Config.LOGTAG,
                     "x3dhpq: DC verification FAILED for " + peer + "/" + deviceId
                     + " (ed=" + edOK + " mldsa=" + mlOK + ")");
+            // Remember this device as un-encryptable so fan-out skips it instead of
+            // deferring every message forever (a stale/forked device that was never
+            // re-paired). Revoking it from the manifest is the durable cleanup.
+            dcInvalidDevices.add(peer + "/" + deviceId);
             return;
         }
+        // DC verified — if this device was previously marked invalid (e.g. it has since
+        // been re-paired with an AIK-signed DC), clear the marker so it receives again.
+        dcInvalidDevices.remove(peer + "/" + deviceId);
 
         // verify deviceId in DC matches the bundle's item id
         if ((int) dc.getDeviceId() != deviceId) {
@@ -2112,6 +2130,26 @@ public class X3dhpqService {
     }
 
     /**
+     * True iff {@code dcMarshal} is a well-formed DeviceCertificate whose Ed25519 issuer
+     * signature verifies under {@code aikEd25519Pub}. Used as a pre-send guard so we never
+     * marshal a certificate into a prekey that the receiver would reject (wolfSSL rc=-229)
+     * because it was signed by a different key than the advertised AIK.
+     */
+    private static boolean dcVerifiesUnderAik(final byte[] dcMarshal, final byte[] aikEd25519Pub) {
+        if (dcMarshal == null || dcMarshal.length == 0
+                || aikEd25519Pub == null || aikEd25519Pub.length == 0) {
+            return false;
+        }
+        try {
+            final DeviceCertificate dc = DeviceCertificate.unmarshal(dcMarshal);
+            return X3dhpqCrypto.ed25519Verify(
+                    aikEd25519Pub, dc.signedPart(), dc.getSigEd25519());
+        } catch (final Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * Attempts to establish an outbound (initiator) PQXDH session with a peer device.
      * Returns empty if the peer bundle is not yet in the database (a fetch is kicked off);
      * caller should retry when the bundle arrives.
@@ -2158,6 +2196,19 @@ public class X3dhpqService {
                 ? AccountIdentityPub.unmarshal(aikRow.aikPub()).getPubEd25519() : new byte[32];
         final byte[] aikMlPub = aikRow != null
                 ? AccountIdentityPub.unmarshal(aikRow.aikPub()).getPubMLDSA() : new byte[1952];
+
+        // Local guard: the DC we are about to marshal into the prekey MUST verify against
+        // the AIK we advertise alongside it — the receiver (incl. Dino) rejects a mismatch
+        // with wolfSSL rc=-229 and can never build a recv chain, so its group/1:1 messages
+        // from us defer forever. Catch that class of bug at the source (e.g. a DIK-delegated
+        // DC left over from a half-adopted pairing) rather than only on the remote.
+        if (!dcVerifiesUnderAik(localRow.dc(), aikEdPub)) {
+            Log.e(Config.LOGTAG, LOGPREFIX
+                    + ": outbound prekey DC does not verify against advertised AIK — refusing"
+                    + " to send to " + peer + "/" + peerDeviceId
+                    + " (re-pair this device to obtain an AIK-signed certificate)");
+            return Optional.empty();
+        }
 
         // Run initiator.
         final PqxdhResult result = PqxdhInitiator.initiate(
@@ -2996,6 +3047,15 @@ public class X3dhpqService {
             return null;
         }
 
+        // Same guard as establishOutboundSession: never advertise a DC that fails to
+        // verify against the AIK we ship with it (rc=-229 on the receiver otherwise).
+        if (!dcVerifiesUnderAik(localRow.dc(), aikPub.getPubEd25519())) {
+            Log.e(Config.LOGTAG, LOGPREFIX
+                    + ": devtracker seal — outbound prekey DC does not verify against advertised"
+                    + " AIK for own device " + deviceId + " — refusing to send (re-pair)");
+            return null;
+        }
+
         final PqxdhResult result = PqxdhInitiator.initiate(
                 dik.getPrivX25519(), dik.getPubX25519(), dik.getPubEd25519(),
                 localRow.dc(), aikPub.getPubEd25519(), aikPub.getPubMLDSA(),
@@ -3559,7 +3619,10 @@ public class X3dhpqService {
         requestPeerDeviceList(peerBareJid);
     }
 
-    private void publishOwnBundle() {
+    // Public so the pairing-complete handler can publish a freshly-paired
+    // secondary's bundle immediately (see PairToExistingActivity). Per-device and
+    // idempotent (PEP item id = deviceId), so it never affects other devices.
+    public void publishOwnBundle() {
         // load the (single) local device row to obtain the active deviceId
         final List<DatabaseBackend.X3dhpqLocalDeviceRow> rows =
                 db.listX3dhpqLocalDevices(account.getUuid());
@@ -4111,6 +4174,16 @@ public class X3dhpqService {
         for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd : devices) {
             final int devId = rd.deviceId();
             if (devId == skipDeviceId) {
+                continue;
+            }
+            // Skip a device whose bundle DC permanently fails AIK verification (dead/forked,
+            // never re-paired). It can never be encrypted to; treating it as a transient
+            // "bundle missing" would fail-close the whole message and strand every recipient.
+            // A not-yet-fetched bundle is different and still defers (below).
+            if (dcInvalidDevices.contains(target + "/" + devId)) {
+                Log.w(Config.LOGTAG,
+                        "x3dhpq: skipping recipient " + target + "/" + devId
+                                + " — DC does not verify against account AIK (revoke this device)");
                 continue;
             }
             final DatabaseBackend.X3dhpqSessionRow sessionRow =

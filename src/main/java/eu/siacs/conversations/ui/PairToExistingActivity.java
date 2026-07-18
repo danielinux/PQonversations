@@ -74,10 +74,23 @@ public class PairToExistingActivity extends XmppActivity {
                             () -> {
                                 if (result != null) {
                                     installPairingResult(result);
-                                    // Trust Manifest Phase 2 (§D3): fetch + verify + fold the
-                                    // account manifest so this newcomer sees itself + siblings
-                                    // once the confirmer's ADD lands.
                                     if (mAccount != null && mAccount.getX3dhpqService() != null) {
+                                        // Publish OUR bundle immediately now that we're a
+                                        // confirmed member, so peers and siblings can
+                                        // negotiate keys with this device. Without this the
+                                        // freshly-paired secondary stays unreachable: the one
+                                        // publishLocalState() of this session ran at connect
+                                        // while still pending (early-return, no publish), and
+                                        // pairing completes on the same live connection
+                                        // without re-invoking it — so the bundle was never
+                                        // published until a manual reconnect. We publish only
+                                        // the (per-device) bundle here, NOT the shared
+                                        // devicelist: the confirming primary owns the
+                                        // devicelist/manifest and adds this device to it.
+                                        mAccount.getX3dhpqService().publishOwnBundle();
+                                        // Trust Manifest Phase 2 (§D3): fetch + verify + fold the
+                                        // account manifest so this newcomer sees itself + siblings
+                                        // once the confirmer's ADD lands.
                                         mAccount.getX3dhpqService().fetchAndAdoptManifest();
                                     }
                                 }
