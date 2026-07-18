@@ -447,14 +447,14 @@ public class PairToExistingActivity extends XmppActivity {
             x3dhpqService.publishPairHello(sid);
         }
 
-        mStatusView.setText(R.string.x3dhpq_pair_status_waiting);
+        mStatusView.setText(R.string.x3dhpq_pair_status_waiting_confirm);
     }
 
     // ---- Core initiation ----
 
     private boolean startPairingAsNew(
             final byte[] sid, final String code, final Jid peerJid) {
-        mStatusView.setText(R.string.x3dhpq_pair_status_waiting);
+        mStatusView.setText(R.string.x3dhpq_pair_status_waiting_confirm);
         mScanQrButton.setEnabled(false);
         mPairButton.setEnabled(false);
 

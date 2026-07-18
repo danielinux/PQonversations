@@ -6,34 +6,89 @@
     android:padding="16dp"
     android:gravity="center_horizontal">
 
-    <TextView
-        android:layout_width="wrap_content"
+    <!-- Method A ("primary presents the code"): show our own code + QR for the
+         newcomer to type/scan. Hidden while confirming a waiting device. -->
+    <LinearLayout
+        android:id="@+id/show_code_container"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/x3dhpq_pair_show_code_help"
-        android:textStyle="bold"
-        android:paddingBottom="8dp" />
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
 
-    <TextView
-        android:id="@+id/pairing_code"
-        android:layout_width="wrap_content"
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_pair_show_code_help"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/pairing_code"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="24sp"
+            android:fontFamily="monospace"
+            android:textIsSelectable="true"
+            android:paddingBottom="16dp" />
+
+        <ImageView
+            android:id="@+id/pairing_qr"
+            android:layout_width="240dp"
+            android:layout_height="240dp"
+            android:contentDescription="@string/x3dhpq_pair_new_device_title"
+            android:paddingBottom="16dp" />
+
+    </LinearLayout>
+
+    <!-- Method B ("new device presents the code"): the primary reads the code off
+         the joining device and TYPES it here. Hidden by default; shown by the
+         "Confirm a waiting device" entry points. Mirrors dino's confirm_mode. -->
+    <LinearLayout
+        android:id="@+id/confirm_entry_container"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="24sp"
-        android:fontFamily="monospace"
-        android:textIsSelectable="true"
-        android:paddingBottom="16dp" />
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:visibility="gone">
 
-    <ImageView
-        android:id="@+id/pairing_qr"
-        android:layout_width="240dp"
-        android:layout_height="240dp"
-        android:contentDescription="@string/x3dhpq_pair_new_device_title"
-        android:paddingBottom="16dp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_confirm_waiting_device_hint"
+            android:paddingBottom="8dp" />
+
+        <EditText
+            android:id="@+id/confirm_code_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:digits="0123456789-"
+            android:maxLength="14"
+            android:fontFamily="monospace"
+            android:hint="@string/x3dhpq_pairing_code_hint"
+            android:paddingBottom="8dp" />
+
+        <Button
+            android:id="@+id/confirm_code_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/confirm" />
+
+        <Button
+            android:id="@+id/scan_qr_instead_button"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_scan_qr_instead_button" />
+
+    </LinearLayout>
 
     <TextView
         android:id="@+id/pairing_status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/x3dhpq_pair_status_waiting"
+        android:paddingTop="8dp"
         android:paddingBottom="16dp" />
 
     <Button
@@ -42,19 +97,28 @@
         android:layout_height="wrap_content"
         android:text="@string/cancel" />
 
-    <View
+    <!-- On the Method-A (show-our-code) screen, offer switching to the Method-B
+         confirm-a-waiting-device manual entry. Hidden once we are in confirm mode. -->
+    <LinearLayout
+        android:id="@+id/switch_to_confirm_container"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="?android:attr/listDivider"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp" />
-
-    <!-- §10.6.2 "new-device-presents" direction: scan the QR shown by a pending
-         device instead of waiting for it to scan/consume ours. -->
-    <Button
-        android:id="@+id/confirm_pending_device_button"
-        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/x3dhpq_confirm_waiting_device_button" />
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?android:attr/listDivider"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp" />
+
+        <Button
+            android:id="@+id/confirm_pending_device_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/x3dhpq_confirm_waiting_device_button" />
+
+    </LinearLayout>
 
 </LinearLayout>

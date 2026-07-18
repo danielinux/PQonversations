@@ -9,8 +9,12 @@ import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
 import com.google.zxing.WriterException;
@@ -54,6 +58,21 @@ public class PairNewDeviceActivity extends XmppActivity {
     private TextView mStatusView;
     private Button mCancelButton;
     private Button mConfirmPendingDeviceButton;
+    // §10.6.2 Method-B ("new device presents the code") confirm-entry views.
+    private View mShowCodeContainer;
+    private View mConfirmEntryContainer;
+    private View mSwitchToConfirmContainer;
+    private EditText mConfirmCodeInput;
+    private Button mConfirmCodeButton;
+    private Button mScanQrInsteadButton;
+
+    /**
+     * True once this screen is confirming a waiting device via manual code entry (Method B):
+     * the primary reads the numeric code off the joining device and types it here. In this mode
+     * we must NOT auto-drive the FSM with our own generated code when a {@code <pair-hello>}
+     * broadcast arrives (that is Method A) — we wait for the user to enter the newcomer's code.
+     */
+    private boolean mConfirmMode = false;
 
     // State set in onBackendConnected
     private String mAccountUuid;
@@ -201,11 +220,23 @@ public class PairNewDeviceActivity extends XmppActivity {
         mStatusView = findViewById(R.id.pairing_status);
         mCancelButton = findViewById(R.id.pair_cancel_button);
         mConfirmPendingDeviceButton = findViewById(R.id.confirm_pending_device_button);
+        mShowCodeContainer = findViewById(R.id.show_code_container);
+        mConfirmEntryContainer = findViewById(R.id.confirm_entry_container);
+        mSwitchToConfirmContainer = findViewById(R.id.switch_to_confirm_container);
+        mConfirmCodeInput = findViewById(R.id.confirm_code_input);
+        mConfirmCodeButton = findViewById(R.id.confirm_code_button);
+        mScanQrInsteadButton = findViewById(R.id.scan_qr_instead_button);
 
         mStatusView.setText(R.string.x3dhpq_pair_status_waiting);
 
         mCancelButton.setOnClickListener(v -> finish());
-        mConfirmPendingDeviceButton.setOnClickListener(v -> launchPendingDeviceQrScanner());
+        // Both Method-B entry points DEFAULT to manual code entry (not the camera):
+        // tapping "Confirm a waiting device" here switches this screen into the
+        // confirm-entry mode; the QR scanner is a secondary option inside it.
+        mConfirmPendingDeviceButton.setOnClickListener(v -> enterConfirmMode());
+        mConfirmCodeButton.setOnClickListener(v -> onConfirmCodeClicked());
+        mScanQrInsteadButton.setOnClickListener(v -> launchPendingDeviceQrScanner());
+        mConfirmCodeInput.addTextChangedListener(new PairingCodeWatcher());
     }
 
     /**
@@ -301,10 +332,52 @@ public class PairNewDeviceActivity extends XmppActivity {
         // Register broadcast receiver for verify-device headline from the new device.
         registerPairReceiver();
 
-        // §10.6.2 "Confirm a waiting device" shortcut: skip straight to scanning the
-        // pending device's own code/QR instead of waiting on this screen showing ours.
+        // §10.6.2 "Confirm a waiting device" shortcut: open the manual code-entry
+        // screen (Method B) so the primary can type the code the joining device is
+        // showing. The camera QR scan is offered as a secondary option inside it.
         if (getIntent().getBooleanExtra(EXTRA_AUTO_CONFIRM_PENDING, false)) {
-            mHandler.post(this::launchPendingDeviceQrScanner);
+            mHandler.post(this::enterConfirmMode);
+        }
+    }
+
+    /**
+     * §10.6.2 Method B: switch this screen from "show our own code" to the
+     * "Confirm a waiting device" manual code-entry view. The primary reads the
+     * numeric code off the joining device and types it into {@link #mConfirmCodeInput};
+     * on Confirm we drive the existing-side FSM at the persisted pending join request
+     * (full JID + sid + device id from the newcomer's {@code <pair-hello>}).
+     */
+    private void enterConfirmMode() {
+        mConfirmMode = true;
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle(R.string.x3dhpq_confirm_waiting_device_button);
+        }
+        mShowCodeContainer.setVisibility(View.GONE);
+        mSwitchToConfirmContainer.setVisibility(View.GONE);
+        mConfirmEntryContainer.setVisibility(View.VISIBLE);
+        refreshConfirmPendingState();
+    }
+
+    /**
+     * Enable the Confirm button + code field only once a {@code <pair-hello>} from a joining
+     * device has arrived (a pending join request is persisted). Until then there is nothing to
+     * confirm, so we disable the field and show clear "waiting" guidance instead of failing.
+     */
+    private void refreshConfirmPendingState() {
+        if (mAccount == null || !mConfirmMode) {
+            return;
+        }
+        final String pendingFullJid =
+                VerifyDeviceManager.getPendingJoinRequestFullJid(
+                        this, mAccount.getJid().asBareJid().toString());
+        final boolean havePending = pendingFullJid != null && !pendingFullJid.isEmpty();
+        mConfirmCodeInput.setEnabled(havePending);
+        mConfirmCodeButton.setEnabled(havePending);
+        if (!havePending) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_waiting_for_request);
+        } else if (!mStartedFsm) {
+            // Ready for the user to type the code shown on the joining device.
+            mStatusView.setText("");
         }
     }
 
@@ -340,6 +413,17 @@ public class PairNewDeviceActivity extends XmppActivity {
                                         ? mAccount.getJid().asBareJid().toString()
                                         : null;
                         if (myBareJid != null && !myBareJid.equals(accountJid)) {
+                            return;
+                        }
+
+                        // §10.6.2 Method B: in manual confirm-entry mode the code is TYPED by
+                        // the user off the joining device — it does not travel in the
+                        // <pair-hello>. So we must NOT auto-drive the FSM with our own generated
+                        // code (that is Method A). A live pair-hello here simply means a device is
+                        // now waiting: persist has already happened in VerifyDeviceManager, so just
+                        // enable the code field and let the user confirm.
+                        if (mConfirmMode) {
+                            mHandler.post(PairNewDeviceActivity.this::refreshConfirmPendingState);
                             return;
                         }
 
@@ -536,9 +620,154 @@ public class PairNewDeviceActivity extends XmppActivity {
         }
     }
 
+    /**
+     * §10.6.2 Method B confirm: the user has read the numeric code off the joining device and
+     * typed it here. Validate it, then drive the existing-side FSM at the persisted pending join
+     * request — full JID + sid + device id all come from the newcomer's {@code <pair-hello>}
+     * (persisted by {@link VerifyDeviceManager}). This mirrors {@link #confirmPendingDeviceFromUri}
+     * exactly; only the source of code+sid+jid differs (typed code + persisted request instead of
+     * a scanned QR URI).
+     */
+    private void onConfirmCodeClicked() {
+        if (mAccount == null || mPairingService == null) {
+            return;
+        }
+        if (mStartedFsm) {
+            return; // a pairing is already in flight from this screen
+        }
+
+        final String accountBareJid = mAccount.getJid().asBareJid().toString();
+
+        final String pendingFullJidStr =
+                VerifyDeviceManager.getPendingJoinRequestFullJid(this, accountBareJid);
+        if (pendingFullJidStr == null || pendingFullJidStr.isEmpty()) {
+            // No <pair-hello> has arrived yet — nothing to confirm.
+            mStatusView.setText(R.string.x3dhpq_pair_status_waiting_for_request);
+            return;
+        }
+
+        // Validate the typed code (Luhn check included).
+        final String enteredCode;
+        try {
+            enteredCode = PairingCode.parse(mConfirmCodeInput.getText().toString());
+        } catch (final IllegalArgumentException e) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_code_retry);
+            return;
+        }
+
+        // The sid the newcomer chose (base64url, no padding) — CPace must run with the
+        // SAME sid on both sides.
+        final String sidB64 =
+                VerifyDeviceManager.getPendingJoinRequestSid(this, accountBareJid);
+        if (sidB64 == null || sidB64.isEmpty()) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_waiting_for_request);
+            return;
+        }
+        final byte[] sid;
+        try {
+            sid = Base64.getUrlDecoder().decode(sidB64);
+        } catch (final IllegalArgumentException e) {
+            Log.w(Config.LOGTAG, LOGTAG + ": persisted pending sid is not valid base64url", e);
+            mStatusView.setText(R.string.x3dhpq_pair_status_waiting_for_request);
+            return;
+        }
+
+        final Jid pendingFullJid;
+        try {
+            pendingFullJid = Jid.of(pendingFullJidStr);
+        } catch (final IllegalArgumentException e) {
+            Log.w(Config.LOGTAG, LOGTAG + ": persisted pending full JID is invalid: "
+                    + pendingFullJidStr, e);
+            mStatusView.setText(R.string.x3dhpq_pair_status_waiting_for_request);
+            return;
+        }
+        if (!mAccount.getJid().asBareJid().equals(pendingFullJid.asBareJid())) {
+            mStatusView.setText(R.string.x3dhpq_pair_status_wrong_account);
+            return;
+        }
+
+        // Task #70: issue the newcomer's DC under the device id it reported in its
+        // <pair-hello> (persisted), so the manifest entry matches and re-pairing updates
+        // the same entry instead of adding a duplicate. 0 = absent → keep the random fallback.
+        final int pendingDeviceId =
+                VerifyDeviceManager.getPendingJoinRequestDeviceId(this, accountBareJid);
+        if (pendingDeviceId != 0) {
+            mOpts = optionsForDeviceId(Integer.toUnsignedLong(pendingDeviceId));
+            Log.d(Config.LOGTAG, LOGTAG + ": confirm-code — issuing newcomer DC under queued"
+                    + " pair-hello device id " + Integer.toUnsignedString(pendingDeviceId));
+        } else {
+            Log.w(Config.LOGTAG, LOGTAG + ": confirm-code — no queued pair-hello device id;"
+                    + " falling back to a random device id for the issued DC");
+        }
+
+        mStartedFsm = true;
+        mConfirmCodeInput.setEnabled(false);
+        mConfirmCodeButton.setEnabled(false);
+        mStatusView.setText(R.string.x3dhpq_pair_status_verifying);
+        try {
+            mPairingService.startAsExisting(sid, enteredCode, pendingFullJid, mOpts);
+            armPairingTimeout();
+        } catch (final Exception e) {
+            Log.e(Config.LOGTAG, LOGTAG + ": startAsExisting (confirm code) failed", e);
+            mStartedFsm = false;
+            mConfirmCodeInput.setEnabled(true);
+            mConfirmCodeButton.setEnabled(true);
+            final String reason = e.getMessage();
+            mStatusView.setText(
+                    getString(
+                            R.string.x3dhpq_pair_status_failed,
+                            reason != null ? reason : "FSM init failed"));
+        }
+    }
+
     @Override
     protected void refreshUiReal() {
         // Nothing to refresh on reconnect — state is fully in-memory.
+    }
+
+    /**
+     * Formats digits typed into the confirm code field as "DDD-DDD-DDD-C" while preserving the
+     * cursor. Strips all non-digit characters before re-formatting so the user can paste or delete
+     * freely (mirrors {@code PairToExistingActivity.PairingCodeWatcher}).
+     */
+    private static final class PairingCodeWatcher implements TextWatcher {
+
+        private boolean mSelfChange = false;
+
+        @Override
+        public void beforeTextChanged(
+                final CharSequence s, final int start, final int count, final int after) {}
+
+        @Override
+        public void onTextChanged(
+                final CharSequence s, final int start, final int before, final int count) {}
+
+        @Override
+        public void afterTextChanged(final Editable s) {
+            if (mSelfChange) {
+                return;
+            }
+            final StringBuilder digits = new StringBuilder();
+            for (int i = 0; i < s.length() && digits.length() < 10; i++) {
+                final char c = s.charAt(i);
+                if (c >= '0' && c <= '9') {
+                    digits.append(c);
+                }
+            }
+            final StringBuilder formatted = new StringBuilder();
+            for (int i = 0; i < digits.length(); i++) {
+                if (i == 3 || i == 6 || i == 9) {
+                    formatted.append('-');
+                }
+                formatted.append(digits.charAt(i));
+            }
+            final String result = formatted.toString();
+            if (!result.equals(s.toString())) {
+                mSelfChange = true;
+                s.replace(0, s.length(), result);
+                mSelfChange = false;
+            }
+        }
     }
 
     @Override

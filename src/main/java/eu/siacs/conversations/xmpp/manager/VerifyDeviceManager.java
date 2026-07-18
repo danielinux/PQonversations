@@ -149,6 +149,19 @@ public class VerifyDeviceManager extends AbstractManager {
         return prefs.getInt(PREF_PENDING_DEVICE_ID_PREFIX + accountBareJid, 0);
     }
 
+    /**
+     * §10.6.2 Method-B confirm accessor: the base64url (no-padding) session id carried in the
+     * queued device's {@code <pair-hello>} for {@code accountBareJid}, or {@code null} if none is
+     * stored. Needed so the primary's manual code-entry confirm flow drives CPace with the SAME
+     * sid the newcomer chose (mirrors {@link #getPendingJoinRequestFullJid} /
+     * {@link #getPendingJoinRequestDeviceId}).
+     */
+    public static String getPendingJoinRequestSid(
+            final Context context, final String accountBareJid) {
+        final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getString(PREF_PENDING_SID_PREFIX + accountBareJid, null);
+    }
+
     /** Clears the queued-enrollment-request banner state; call once a human acts on it. */
     public static void clearPendingJoinRequest(final Context context, final String accountBareJid) {
         final SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
