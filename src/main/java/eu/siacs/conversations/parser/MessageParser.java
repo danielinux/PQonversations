@@ -298,7 +298,8 @@ public class MessageParser extends AbstractParser
             final Conversation conversation,
             final int status,
             final im.conversations.android.xmpp.model.stanza.Message packet,
-            final Long timestamp) {
+            final Long timestamp,
+            final String serverMsgId) {
         if (groupEnv == null || from == null || conversation == null) return null;
         final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
                 conversation.getAccount() != null
@@ -332,7 +333,20 @@ public class MessageParser extends AbstractParser
                         new im.conversations.android.xmpp.model.delay.Delay(
                                 java.time.Instant.ofEpochMilli(timestamp)));
             }
-            gcs.stashDeferredGroupMessage(conversation.getAddress().asBareJid(), packet);
+            // Same reasoning for the server message id: it comes from the MAM <result>
+            // id (or the room's <stanza-id>) on the outer stanza, which is dropped when
+            // we stash the bare inner packet. On re-injection StanzaIdManager re-derives
+            // it from a <stanza-id by='room'> on the packet — so re-attach one carrying
+            // the original id, unless the archived copy already has one for this room
+            // (StanzaId.get() returns null on duplicate `by`, so never add a second).
+            final Jid roomBare = conversation.getAddress().asBareJid();
+            if (serverMsgId != null && !hasStanzaIdBy(packet, roomBare)) {
+                final im.conversations.android.xmpp.model.unique.StanzaId sid =
+                        new im.conversations.android.xmpp.model.unique.StanzaId(serverMsgId);
+                sid.setBy(roomBare);
+                packet.addExtension(sid);
+            }
+            gcs.stashDeferredGroupMessage(roomBare, packet);
             return null;
         } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
             Log.d(Config.LOGTAG, conversation.getAccount().getJid().asBareJid()
@@ -364,6 +378,18 @@ public class MessageParser extends AbstractParser
             message.setX3dhpqSourceDevice(result.senderDeviceId);
         }
         return message;
+    }
+
+    /** True if {@code packet} already carries a {@code <stanza-id>} attributed to {@code by}. */
+    private static boolean hasStanzaIdBy(
+            final im.conversations.android.xmpp.model.stanza.Message packet, final Jid by) {
+        for (final var sid :
+                packet.getExtensions(im.conversations.android.xmpp.model.unique.StanzaId.class)) {
+            if (by.equals(Jid.Invalid.getNullForInvalid(sid.getBy()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -883,7 +909,7 @@ public class MessageParser extends AbstractParser
             } else if (x3dhpqGroupEnvelope != null && isTypeGroupChat) {
                 // §13 group-encrypted message: decrypt via GroupCryptoService.
                 try {
-                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status, packet, timestamp);
+                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status, packet, timestamp, serverMsgId);
                 } catch (final Throwable t) {
                     Log.e(Config.LOGTAG, account.getJid().asBareJid()
                             + ": x3dhpq group parser threw: " + t.getMessage(), t);
