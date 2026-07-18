@@ -45,6 +45,12 @@
         </menu>
     </item>
     <item
+        android:id="@+id/action_x3dhpq_verify_contact"
+        android:icon="@drawable/ic_verified_user_24dp"
+        android:orderInCategory="25"
+        android:title="@string/x3dhpq_verify_contact"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_attach_file"
         android:icon="@drawable/ic_attach_file_24dp"
         android:orderInCategory="30"

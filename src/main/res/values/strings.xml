@@ -1272,4 +1272,12 @@
     <string name="x3dhpq_remove_this_device_confirm">Remove THIS device (%1$s) from the account?\n\nThis device will immediately lose the ability to send or receive x3dhpq messages for this account. You will need to pair it again to rejoin.</string>
     <string name="x3dhpq_manage_devices_button">Manage x3dhpq devices</string>
     <string name="x3dhpq_manage_devices_desc">Device list, pairing and identity</string>
+    <string name="x3dhpq_verify_contact">Verify contact</string>
+    <string name="x3dhpq_verify_contact_identity_title">Verify contact identity?</string>
+    <string name="x3dhpq_accept_changed_identity_title">Accept changed identity?</string>
+    <string name="x3dhpq_verify">Verify</string>
+    <string name="x3dhpq_accept">Accept</string>
+    <string name="x3dhpq_verify_oob_compare">Compare this fingerprint out-of-band (in person, a call, or QR) with your contact before accepting. A changed key can also be an impersonation by a malicious server.</string>
+    <string name="x3dhpq_verify_no_fingerprint">No identity fingerprint is pinned for this contact yet. Accepting will fetch their current identity — compare it out-of-band once it arrives.</string>
+    <string name="x3dhpq_identity_unverified">Unverified — not yet confirmed out-of-band.</string>
 </resources>

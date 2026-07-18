@@ -593,10 +593,13 @@ public class ConversationFragment extends XmppFragment
                     final MenuItem menuOngoingCall = menu.findItem(R.id.action_ongoing_call);
                     final MenuItem menuVideoCall = menu.findItem(R.id.action_video_call);
                     final MenuItem menuTogglePinned = menu.findItem(R.id.action_toggle_pinned);
+                    final MenuItem menuVerifyContact =
+                            menu.findItem(R.id.action_x3dhpq_verify_contact);
                     final var c = ConversationFragment.this.conversation;
                     if (c == null) {
                         return;
                     }
+                    configureVerifyContactMenu(c, menuVerifyContact);
                     if (c.getMode() == Conversation.MODE_MULTI) {
                         menuContactDetails.setVisible(false);
                         menuInviteContact.setVisible(c.getMucOptions().canInvite());
@@ -717,6 +720,9 @@ public class ConversationFragment extends XmppFragment
                             break;
                         case R.id.action_toggle_pinned:
                             togglePinned();
+                            break;
+                        case R.id.action_x3dhpq_verify_contact:
+                            showX3dhpqVerifyContactDialog(conversation);
                             break;
                         default:
                             break;
@@ -3139,6 +3145,90 @@ public class ConversationFragment extends XmppFragment
             return -1L;
         }
         return httpUploadService.getMaxFileSize();
+    }
+
+    /**
+     * §10.6.5: shows the out-of-band "Verify contact" action for 1:1 x3dhpq conversations.
+     * Visible only when the account has an x3dhpq service and the peer is x3dhpq-relevant
+     * (has a pinned AIK OR is currently identity-blocked). When blocked (the red
+     * "needs re-trust" state) it is promoted to a prominent action-bar button so the fix
+     * is one tap; otherwise it stays an overflow item. Groups are out of scope (membership
+     * is tracked by AIK differently), matching the "keep it to 1:1" constraint.
+     */
+    private void configureVerifyContactMenu(
+            final Conversation c, final MenuItem menuVerifyContact) {
+        if (menuVerifyContact == null) {
+            return;
+        }
+        boolean visible = false;
+        boolean blocked = false;
+        if (c.getMode() == Conversation.MODE_SINGLE && !c.withSelf()) {
+            final var svc = c.getAccount().getX3dhpqService();
+            if (svc != null && c.getContact() != null) {
+                final Jid peer = c.getContact().getAddress().asBareJid();
+                blocked = svc.isIdentityBlocked(c);
+                visible = blocked || svc.getPeerAikFingerprint(peer) != null;
+            }
+        }
+        menuVerifyContact.setVisible(visible);
+        // Prominent one-tap fix while the contact is in the red / blocked state.
+        menuVerifyContact.setShowAsAction(
+                blocked
+                        ? MenuItem.SHOW_AS_ACTION_ALWAYS
+                        : MenuItem.SHOW_AS_ACTION_NEVER);
+    }
+
+    /**
+     * §10.6.5: out-of-band re-trust / verify flow. Confirms with the user (showing the peer's
+     * current x3dhpq AIK fingerprint for OOB comparison) and, on accept, calls
+     * {@link eu.siacs.conversations.crypto.x3dhpq.X3dhpqService#reTrustIdentity} which clears the
+     * identity block, resets the stale TOFU pin and requests a fresh devicelist so encryption
+     * re-latches to x3dhpq (the red state clears and messages stop going out in plaintext).
+     */
+    private void showX3dhpqVerifyContactDialog(final Conversation conversation) {
+        if (conversation.getMode() != Conversation.MODE_SINGLE
+                || conversation.getContact() == null) {
+            return;
+        }
+        final var account = conversation.getAccount();
+        final var svc = account.getX3dhpqService();
+        if (svc == null) {
+            return;
+        }
+        final Jid peer = conversation.getContact().getAddress().asBareJid();
+        final boolean blocked = svc.isIdentityBlocked(conversation);
+        final String fingerprint = svc.getPeerAikFingerprint(peer);
+
+        final StringBuilder message = new StringBuilder();
+        message.append(getString(R.string.x3dhpq_verify_oob_compare));
+        message.append("\n\n");
+        if (fingerprint != null) {
+            message.append(getString(R.string.x3dhpq_aik_fp_label));
+            message.append('\n');
+            message.append(fingerprint);
+        } else {
+            message.append(getString(R.string.x3dhpq_verify_no_fingerprint));
+        }
+
+        final MaterialAlertDialogBuilder builder =
+                new MaterialAlertDialogBuilder(requireActivity());
+        builder.setTitle(
+                blocked
+                        ? R.string.x3dhpq_accept_changed_identity_title
+                        : R.string.x3dhpq_verify_contact_identity_title);
+        builder.setMessage(message.toString());
+        builder.setPositiveButton(
+                blocked ? R.string.x3dhpq_accept : R.string.x3dhpq_verify,
+                (dialog, which) -> {
+                    svc.reTrustIdentity(peer);
+                    refresh();
+                    final XmppConnectionService service = getXmppConnectionService();
+                    if (service != null) {
+                        service.updateConversationUi();
+                    }
+                });
+        builder.setNegativeButton(R.string.cancel, null);
+        builder.create().show();
     }
 
     /**

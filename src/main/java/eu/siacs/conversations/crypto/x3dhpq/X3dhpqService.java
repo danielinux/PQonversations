@@ -1199,6 +1199,22 @@ public class X3dhpqService {
         return entries;
     }
 
+    /**
+     * Returns the human-readable fingerprint of the peer's currently pinned (TOFU) AIK for
+     * out-of-band comparison, formatted identically to how the app renders x3dhpq AIK
+     * fingerprints elsewhere (six space-separated groups of five uppercase hex chars, see
+     * {@link AccountIdentityPub#fingerprint}). Returns {@code null} if no AIK is pinned yet
+     * for this peer (e.g. right after an explicit re-trust, before the fresh devicelist /
+     * bundle has arrived). Used by the "Verify contact" UI so the user can confirm the
+     * contact's identity out-of-band before accepting it.
+     */
+    public String getPeerAikFingerprint(final Jid peerBareJid) {
+        if (account == null || peerBareJid == null) return null;
+        final AccountIdentityPub aik =
+                resolvePinnedPeerAik(account.getUuid(), peerBareJid.asBareJid().toString());
+        return aik == null ? null : aik.fingerprint(X3dhpqCrypto.BLAKE2B_160);
+    }
+
     /** Resolves the pinned (TOFU) peer AIK from any cached bundle, or null if none. */
     private AccountIdentityPub resolvePinnedPeerAik(final String accountUuid, final String peer) {
         for (final DatabaseBackend.X3dhpqRemoteDeviceRow rd :
