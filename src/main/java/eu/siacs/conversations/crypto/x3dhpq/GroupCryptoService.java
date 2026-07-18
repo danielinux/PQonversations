@@ -1836,6 +1836,23 @@ public class GroupCryptoService {
                 Log.w(Config.LOGTAG, TAG + ": deferred group re-inject failed: " + t.getMessage());
             }
         }
+        // Re-injected history is appended via Conversation#add (it re-enters the
+        // pipeline with query==null), so despite each message now carrying its true
+        // timestamp it lands at the BOTTOM of the loaded list — below live messages.
+        // Re-sort the room's loaded messages by time and refresh so the on-screen
+        // order matches the restored timestamps.
+        if (account != null && mXmppConnectionService != null) {
+            try {
+                final eu.siacs.conversations.entities.Conversation conv =
+                        mXmppConnectionService.find(account, Jid.of(roomStr));
+                if (conv != null) {
+                    conv.sort();
+                }
+            } catch (final Exception ignored) {
+                // best-effort ordering; never let it break re-delivery
+            }
+            mXmppConnectionService.updateConversationUi();
+        }
     }
 
     // -------------------------------------------------------------------------

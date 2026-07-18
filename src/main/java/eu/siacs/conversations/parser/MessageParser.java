@@ -297,7 +297,8 @@ public class MessageParser extends AbstractParser
             final Jid from,
             final Conversation conversation,
             final int status,
-            final im.conversations.android.xmpp.model.stanza.Message packet) {
+            final im.conversations.android.xmpp.model.stanza.Message packet,
+            final Long timestamp) {
         if (groupEnv == null || from == null || conversation == null) return null;
         final eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService gcs =
                 conversation.getAccount() != null
@@ -316,6 +317,21 @@ public class MessageParser extends AbstractParser
             // stanza so GroupCryptoService can re-inject it once the sender's
             // sender-chain announcement installs the recv chain. MAM dedupes by
             // stable-id and would never re-deliver it otherwise.
+            //
+            // Preserve the original timestamp across the defer/re-inject cycle: the
+            // stashed `packet` is the bare inner MAM message — the forwarded <delay>
+            // stamp and the MAM <result> wrapper live on the OUTER stanza, which is
+            // dropped here. On re-injection the pipeline re-derives the time from the
+            // packet alone; without a <delay> it would stamp the message "now", so a
+            // day-old history message sorts after live ones. Attach an XEP-0203 <delay>
+            // carrying the real time (idempotent — skip if the packet already has one,
+            // e.g. it deferred once before).
+            if (timestamp != null
+                    && !packet.hasChild("delay", eu.siacs.conversations.xml.Namespace.DELAY)) {
+                packet.addExtension(
+                        new im.conversations.android.xmpp.model.delay.Delay(
+                                java.time.Instant.ofEpochMilli(timestamp)));
+            }
             gcs.stashDeferredGroupMessage(conversation.getAddress().asBareJid(), packet);
             return null;
         } catch (eu.siacs.conversations.crypto.x3dhpq.GroupCryptoService.GroupNotEnabledException e) {
@@ -867,7 +883,7 @@ public class MessageParser extends AbstractParser
             } else if (x3dhpqGroupEnvelope != null && isTypeGroupChat) {
                 // §13 group-encrypted message: decrypt via GroupCryptoService.
                 try {
-                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status, packet);
+                    message = parseX3dhpqGroupChat(x3dhpqGroupEnvelope, from, conversation, status, packet, timestamp);
                 } catch (final Throwable t) {
                     Log.e(Config.LOGTAG, account.getJid().asBareJid()
                             + ": x3dhpq group parser threw: " + t.getMessage(), t);
